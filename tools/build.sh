@@ -17,9 +17,9 @@ pushd . > /dev/null
 SOURCE_DIR="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 SOURCE_DIR="$SOURCE_DIR/../"
 cd "$SOURCE_DIR"
-mkdir -p build
-cd build
-cmake .. && make
+mkdir -p build/bin
+cd build/bin
+cmake ../.. && make
 
 options=$(getopt -l "help,run,doc,test" -o "hrdt" -a -- "$@")
 
