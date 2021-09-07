@@ -4,7 +4,7 @@
  * Copyright information goes here
  */
 
-#include <project/Public.hpp>
+#include <eugene/Public.hpp>
 
 #include "Private.hpp"
 

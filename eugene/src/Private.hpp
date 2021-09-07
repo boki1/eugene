@@ -3,10 +3,10 @@
  * Copyright information goes here
  */
 
-#ifndef COM_SAXBOPHONE_PROJECT_PRIVATE_HPP
-#define COM_SAXBOPHONE_PROJECT_PRIVATE_HPP
+#ifndef EUGENE_PRIVATE_HPP
+#define EUGENE_PRIVATE_HPP
 
-#include <project/Public.hpp>
+#include <eugene/Public.hpp>
 
 namespace eugene::eugene_internal {
 

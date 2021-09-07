@@ -1,3 +1,4 @@
+include(Expected)
 include(GNUInstallDirs)
 
 add_library(eugene STATIC)
@@ -32,11 +33,15 @@ set_property(
     TARGET eugene
     APPEND PROPERTY COMPATIBLE_INTERFACE_STRING "${Project_MAJOR_VERSION}.${Project_MINOR_VERSION}"
 )
+
+add_dependencies(eugene ExpectedLite)
+
 # inherit common project compiler options
 target_link_libraries(
     eugene
         PRIVATE
             $<BUILD_INTERFACE:project-compiler-options>
+			expected-lite
 )
 
 # install if we're not being built as a sub-project
