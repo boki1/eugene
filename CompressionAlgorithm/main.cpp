@@ -1,9 +1,15 @@
 #include <iostream>
 #include <dirent.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <vector>
+#include <filesystem>
+#include <map>
 
 
-
-/// Compression algorithm is based on <a href="https://en.wikipedia.org/wiki/Huffman_coding#Basic_technique">huffman coding</a>
+/// Compression algorithm is based on
+/// <a href="https://en.wikipedia.org/wiki/Huffman_coding#Basic_technique">huffman coding</a>
 /// and is separated in 2 parts:
 /// <br> <br>
 /// <h2>Part 1</h2>
@@ -48,150 +54,200 @@
 
 
 
+namespace fs = std::filesystem;
 
+
+/// \brief This structure will be used to create the translation tree
+struct huff_tree {
+        huff_tree *left, *right; //!< left and right nodes of the tree
+        unsigned char character; //!< associated character in the tree node
+        long int number; //<! occurrences of the respective character
+        std::string bit; //<! bit that represents
+        
+        huff_tree() = default;
+        
+        huff_tree(huff_tree *left, huff_tree *right, long int number, unsigned char character)
+        {
+                this->left = left;
+                this->right = right;
+                this->number = number;
+                this->character = character;
+        }
+        
+/// \brief comparison function by huff_tree::number for two huff_tree's structures in ascending order
+///
+/// \param first is first instantiation of huff_tree structure
+/// \param second is second instantiation of huff_tree structure
+/// \return the smaller of the two
+        static bool huffTreeCompare(const huff_tree &first, const huff_tree &second)
+        {
+                return first.number < second.number;
+        }
+};
 
 /// \brief Check if the path is to a folder or to a file
 /// and return boolean
 ///
-/// \param path char sequence representing the path to a folder of file
+/// \param path - char sequence representing the path to a folder of file
 /// \return true if path is to a folder or false if is to a regular file
-bool isFolder(const char *);
-
-/// Get file size in long integer representation
-///
-/// \param path char sequence representing the path to a folder of file
-/// \return file size
-long int fileSize(const char *);
+bool isFolder(const std::string &path);
 
 /// Count usage frequency of bytes inside the file and store the information
 /// in long integer massive (bytesFreq) and parallel
 ///
-/// \param path char sequence representing the path to a folder of file
-/// \param bytesFreq long integer massive for bytes frequency storage
-/// \param total_size size of the content in inputted path
-/// \param total_bits count the compressed file size
-void countFileBytesFreq(std::string path, long int *bytesFreq, long int &total_size, long int &total_bits);
+/// \param path - char sequence representing the path to a folder of file
+/// \param bytesFreq - long integer massive for bytes frequency storage
+/// \param total_size - size of the content in inputted path
+/// \param total_bits - count the compressed file size
+void countFileBytesFreq(const std::string &path, std::map<char, int> &occurrence_symbol, long int &total_size,
+                        long int &total_bits);
 
 /// This function counts usage frequency of bytes inside a folder
 ///
-/// \param path char sequence representing the path to a folder of file
-/// \param bytesFreq long integer massive that counts number of times
+/// \param path - char sequence representing the path to a folder of file
+/// \param bytesFreq - long integer massive that counts number of times
 /// that all of the unique bytes is used on the files/file names/folder names
-/// \param total_size size of the content in inputted path
-/// \param total_bits count the compressed file size
-void countFolderBytesFreq(std::string path, long int *bytesFreq, long int &total_size, long int &total_bits);
+/// \param total_size - size of the content in inputted path
+/// \param total_bits - count the compressed file size
+void countFolderBytesFreq(const std::string &path, std::map<char, int> &occurrence_symbol, long int &total_size,
+                          long int &total_bits);
 
-
-int main(int argc, const char *argv[]) {
-    long int bytesFreq[256]; //!< bytes frequency storage
-    std::fill(bytesFreq, bytesFreq + 256, 0);
-
-    std::string compressedFile;
-    FILE *original_fp;
-
-///    Check the input
-    for (int i = 1; i < argc; i++) {
-        if (isFolder(argv[i])) {
-            original_fp = fopen(argv[i], "rb");
-            if (!original_fp) {
-                std::cout << argv[i] << " file does not exist" <<
-                          std::endl << "Process has been terminated" << std::endl;
-                return 0;
-            }
-            fclose(original_fp);
+/// \brief checks if test condition is false or true
+///
+/// \param test - false or true. If true -> print the error, else continue
+/// \param message - message that represents the error
+/// \param ... - arguments for error printing
+void check(bool test, const char *message, ...)
+{
+        if (test) {
+                va_list args;
+                va_start(args, message);
+                vfprintf(stderr, message, args);
+                va_end(args);
+                fprintf(stderr, "\n");
+                exit(EXIT_FAILURE);
         }
-    }
-
-    compressedFile = argv[1];
-    compressedFile += ".huff";
-
-    long int total_size = 0; //!< size of the content in inputted path
-    long int total_bits = 16 + 9 * (argc - 1); //!< count the compressed file size
-    for (int argvIdx = 1; argvIdx < argc; argvIdx++) {
-///        Count usage frequency of unique bytes on the file name (or folder name)
-        for (const char *c = argv[argvIdx]; *c; c++)
-            bytesFreq[(unsigned char) (*c)]++;
-
-        if (isFolder(argv[argvIdx]))
-            countFolderBytesFreq(argv[argvIdx], bytesFreq, total_size, total_bits);
-        else
-            countFileBytesFreq(argv[argvIdx], bytesFreq, total_size, total_bits);
-    }
-    for (int i = 0; i < 256; ++i)
-        if (bytesFreq[i] != 0)
-            std::cout << i << ": " << bytesFreq[i] << std::endl;
-
-///    Count symbols inside 
-    int symbols = 0;
-    for (long int *i = bytesFreq; i < bytesFreq + 256; i++)
-        if (*i)
-            symbols++;
-    std::cout << "Letters in file: " << symbols << std::endl;
 }
 
-bool isFolder(const char *path) {
-    DIR *temp = opendir(path);
-    if (temp) {
-        closedir(temp);
-        return true;
-    }
-    return false;
+int main(int argc, const char *argv[])
+{
+        std::map<char, int> occurrence_symbol;
+        
+        std::string compressedFile;
+        FILE *original_fp;
+        
+        for (int i = 1; i < argc; i++) {
+                if (!isFolder(argv[i])) {
+                        original_fp = fopen(argv[i], "rb");
+                        if (!original_fp) {
+                                std::cout << argv[i] << " file does not exist" <<
+                                          std::endl << "Process has been terminated" << std::endl;
+                                return 0;
+                        }
+                        fclose(original_fp);
+                }
+        }
+        
+        compressedFile = argv[1];
+        compressedFile += ".huff";
+        
+        long int total_size = 0;
+        long int total_bits = 16 + 9 * (argc - 1);
+        for (int argvIdx = 1; argvIdx < argc; argvIdx++) {
+                for (const char *c = argv[argvIdx]; *c; c++)
+                        occurrence_symbol[*c]++;
+                
+                if (isFolder(argv[argvIdx]))
+                        countFolderBytesFreq(argv[argvIdx], occurrence_symbol, total_size, total_bits);
+                else
+                        countFileBytesFreq(argv[argvIdx], occurrence_symbol, total_size, total_bits);
+        }
+        for (const auto &[key, value]: occurrence_symbol)
+                std::cout << "Character: " << key << "  value: " << value << std::endl;
+        
+        
+        unsigned long symbols = occurrence_symbol.size();
+        std::cout << "Letters in file: " << symbols << std::endl;
+        std::cout << "file size: " << total_size << std::endl;
+        std::cout << "total bits: " << total_bits << std::endl;
+        
+        
+        std::vector<huff_tree> array;
+        array.reserve(occurrence_symbol.size());
+        for (const auto &[key, value]: occurrence_symbol)
+                array.emplace_back(nullptr, nullptr, value, key);
+        
+        
+        std::sort(array.begin(), array.end(), huff_tree::huffTreeCompare);
+        for (const auto &item: array) {
+                std::cout << "Huff num: " << item.number << "   huff char: " << item.character << std::endl;
+        }
 }
 
-long int fileSize(const char *path) {
-    long int size;
-    FILE *fp = fopen(path, "rb");
-    fseek(fp, 0, SEEK_END);
-    size = ftell(fp);
-    fclose(fp);
-    return size;
+bool isFolder(const std::string &path)
+{
+        DIR *temp = opendir(path.c_str());
+        if (temp) {
+                closedir(temp);
+                return true;
+        }
+        return false;
 }
 
-void countFileBytesFreq(std::string path, long int *bytesFreq,
+void countFileBytesFreq(const std::string &path, std::map<char, int> &occurrence_symbol,
                         long int &total_size,
-                        long int &total_bits) {
-    long int size = fileSize(&path[0]);
-    FILE *original_fp;
-    total_size += size;
-    total_bits += 64;
-
-    original_fp = fopen(&path[0], "rb");
-
-    unsigned char freq;
-    fread(&freq, 1, 1, original_fp);
-    for (long int i = 0; i < size; i++) {
-        bytesFreq[freq]++;
-        fread(&freq, 1, 1, original_fp);
-    }
-    fclose(original_fp);
+                        long int &total_bits)
+{
+        
+        int fd = open(path.c_str(), O_RDONLY);
+        check(fd < 0, "open %stat_buff failed: %stat_buff", path.c_str(), strerror(errno));
+        
+        struct stat stat_buff{ };
+        int status = fstat(fd, &stat_buff);
+        check(status < 0, "stat %stat_buff failed: %stat_buff", path.c_str(), strerror(errno));
+        
+        const char *mapped = static_cast<const char *>(mmap(nullptr, stat_buff.st_size, PROT_READ, MAP_PRIVATE, fd, 0));
+        check(mapped == MAP_FAILED, "mmap %stat_buff failed: %stat_buff", path.c_str(), strerror(errno));
+        
+        total_size += stat_buff.st_size;
+        total_bits += 64;
+        
+        
+        for (long int i = 0; i < stat_buff.st_size; i++)
+                if (occurrence_symbol.contains(mapped[i]))
+                        occurrence_symbol.at(mapped[i])++;
+                else
+                        occurrence_symbol.insert_or_assign(mapped[i], 1);
+        
+        int err = munmap((void *) mapped, stat_buff.st_size);
+        if (err != 0) {
+                printf("UnMapping Failed\n");
+                exit(EXIT_FAILURE);
+        }
 }
 
-void countFolderBytesFreq(std::string path, long int *bytesFreq,
-                          long int &total_size, long int &total_bits) {
-    path += '/';
-    DIR *dir = opendir(&path[0]), *next_dir;
-    std::string next_path;
-    total_size += 4096;
-    total_bits += 16; // for file_count
-    struct dirent *current;
-    while ((current = readdir(dir))) {
-        if (current->d_name[0] == '.') {
-            if (current->d_name[1] == 0)continue;
-            if (current->d_name[1] == '.' && current->d_name[2] == 0)continue;
+void countFolderBytesFreq(const std::string &path, std::map<char, int> &occurrence_symbol,
+                          long int &total_size, long int &total_bits)
+{
+        total_size += 4096;
+        total_bits += 16;
+        
+        
+        for (const auto &entry: fs::recursive_directory_iterator(path)) {
+                std::string next_path = entry.path();
+                std::string folder_name = &next_path.substr(next_path.find_last_of('/'))[1];
+                if (folder_name[0] == '.')
+                        continue;
+                
+                total_bits += 9;
+                for (const char *c = folder_name.c_str(); *c; c++)
+                        occurrence_symbol[*c]++;
+                
+                std::cout << next_path << std::endl;
+                if (entry.is_directory()) {
+                        total_size += 4096;
+                        total_bits += 16;
+                } else
+                        countFileBytesFreq(next_path, occurrence_symbol, total_size, total_bits);
         }
-        total_bits += 9;
-
-        for (char *c = current->d_name; *c; c++)
-            bytesFreq[(unsigned char) (*c)]++;
-
-        next_path = path + current->d_name;
-
-        next_dir = opendir(&next_path[0]);
-        if (next_dir) {
-            closedir(next_dir);
-            countFolderBytesFreq(next_path, bytesFreq, total_size, total_bits);
-        } else
-            countFileBytesFreq(next_path, bytesFreq, total_size, total_bits);
-    }
-    closedir(dir);
 }
