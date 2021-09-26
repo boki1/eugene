@@ -6,7 +6,9 @@
 #include <vector>
 #include <filesystem>
 #include <map>
-
+#include <unistd.h>
+#include <cstdio>
+#include <cstdlib>
 
 /// Compression algorithm is based on
 /// <a href="https://en.wikipedia.org/wiki/Huffman_coding#Basic_technique">huffman coding</a>
@@ -23,7 +25,7 @@
 /// <br>
 /// <h2>Part 2</h2>
 /// <ul>
-///     <li>first (one byte) -> letter_count</li>
+///     <li>first (one byte) -> symbols</li>
 ///     <li>second (bit groups)
 ///         <ul>
 ///             <li>(8 bits) -> current unique byte</li>
@@ -73,11 +75,11 @@ struct huff_tree {
                 this->number = number;
                 this->character = character;
         }
-        
+
 /// \brief comparison function by huff_tree::number for two huff_tree's structures in ascending order
 ///
-/// \param first is first instantiation of huff_tree structure
-/// \param second is second instantiation of huff_tree structure
+/// \param first is first instance of huff_tree structure
+/// \param second is second instance of huff_tree structure
 /// \return the smaller of the two
         static bool huffTreeCompare(const huff_tree &first, const huff_tree &second)
         {
@@ -92,34 +94,63 @@ struct huff_tree {
 /// \return true if path is to a folder or false if is to a regular file
 bool isFolder(const std::string &path);
 
-/// Count usage frequency of bytes inside the file and store the information
+/// \brief First flushes(msync) and then unmaps the memory-mapped file
+///
+/// \param mapped - mapped memory
+/// \param size - size of mapped memory
+/// \param fd - file descriptor for closing
+/// \param path - path to the file that was mapped
+void unMap(void *mapped, size_t size, int fd, const std::string &path);
+
+/// \brief Count usage frequency of bytes inside the file and store the information
 /// in long integer massive (bytesFreq) and parallel
 ///
 /// \param path - char sequence representing the path to a folder of file
-/// \param bytesFreq - long integer massive for bytes frequency storage
+/// \param occurrence_symbol - key-value pair in which keys are symbols and values are their
+/// number of occurrences
 /// \param total_size - size of the content in inputted path
 /// \param total_bits - count the compressed file size
 void countFileBytesFreq(const std::string &path, std::map<char, int> &occurrence_symbol, long int &total_size,
                         long int &total_bits);
 
-/// This function counts usage frequency of bytes inside a folder
+/// \brief This function counts usage frequency of bytes inside a folder
 ///
 /// \param path - char sequence representing the path to a folder of file
-/// \param bytesFreq - long integer massive that counts number of times
-/// that all of the unique bytes is used on the files/file names/folder names
+/// \param occurrence_symbol - key-value pair in which keys are symbols and values are their
+///// number of occurrences
 /// \param total_size - size of the content in inputted path
 /// \param total_bits - count the compressed file size
 void countFolderBytesFreq(const std::string &path, std::map<char, int> &occurrence_symbol, long int &total_size,
                           long int &total_bits);
 
+/// \brief First creates the base of translation tree(and then sorting them by ascending frequencies).
+/// Then creates pointers that traverses through leaf's.
+/// At every cycle, 2 of the least weighted nodes will be chosen to
+/// create a new node that has weight equal to sum of their weights combined.
+/// After we are done with these nodes they will become children of created nodes
+/// and they will be passed so that they wont be used in this process again.
+/// Finally, we are adding the bytes from root to leaf's
+/// and after this is done every leaf will have a transformation string that corresponds to it
+/// It is actually a very neat process. Using 4th and 5th code blocks, we are making sure that
+/// the most used character is using least number of bits.
+/// Specific number of bits we re going to use for that character is determined by weight distribution
+///
+/// \param occurrence_symbol - key-value pair in which keys are symbols and values are their
+/// number of occurrences
+/// \param symbols - count of the file symbols
+/// \return - vector of huff_tree's that represents trie
+std::vector<huff_tree> createTree(const std::map<char, int>& occurrence_symbol, unsigned long symbols);
+
 /// \brief checks if test condition is false or true
 ///
 /// \param test - false or true. If true -> print the error, else continue
 /// \param message - message that represents the error
+/// \param fd - file descriptor for closing
 /// \param ... - arguments for error printing
-void check(bool test, const char *message, ...)
+void check(int fd, bool test, const char *message, ...)
 {
         if (test) {
+                close(fd);
                 va_list args;
                 va_start(args, message);
                 vfprintf(stderr, message, args);
@@ -133,7 +164,7 @@ int main(int argc, const char *argv[])
 {
         std::map<char, int> occurrence_symbol;
         
-        std::string compressedFile;
+        std::string compressed_file;
         FILE *original_fp;
         
         for (int i = 1; i < argc; i++) {
@@ -148,8 +179,8 @@ int main(int argc, const char *argv[])
                 }
         }
         
-        compressedFile = argv[1];
-        compressedFile += ".huff";
+        compressed_file = argv[1];
+        compressed_file += ".huff";
         
         long int total_size = 0;
         long int total_bits = 16 + 9 * (argc - 1);
@@ -172,16 +203,77 @@ int main(int argc, const char *argv[])
         std::cout << "total bits: " << total_bits << std::endl;
         
         
-        std::vector<huff_tree> array;
-        array.reserve(occurrence_symbol.size());
-        for (const auto &[key, value]: occurrence_symbol)
-                array.emplace_back(nullptr, nullptr, value, key);
         
+        std::vector<huff_tree> tree = createTree(occurrence_symbol, symbols);
         
-        std::sort(array.begin(), array.end(), huff_tree::huffTreeCompare);
-        for (const auto &item: array) {
-                std::cout << "Huff num: " << item.number << "   huff char: " << item.character << std::endl;
+        for (const auto &item: tree) {
+                std::cout << "Huff num: " << item.number << "\thuff char: " << item.character
+                          << "\thuff bit: " << item.bit << std::endl;
         }
+}
+
+std::vector<huff_tree> createTree(const std::map<char, int>& occurrence_symbol, unsigned long symbols)
+{
+        std::vector<huff_tree> tree(symbols);
+        huff_tree *e = tree.data();
+        for (const auto &[key, value]: occurrence_symbol) {
+                e->right = nullptr;
+                e->left = nullptr;
+                e->number = value;
+                e->character = key;
+                e++;
+        }
+        std::sort(tree.begin(), tree.end(), huff_tree::huffTreeCompare);
+        
+        huff_tree *min1 = tree.data(), *min2 = tree.data() + 1;
+        huff_tree *curr = tree.data() + symbols;
+        huff_tree *not_leaf = tree.data() + symbols;
+        huff_tree *is_leaf = tree.data() + 2;
+        
+        for (int i = 0; i < symbols - 1; i++) {
+                curr->number = min1->number + min2->number;
+                curr->left = min1;
+                curr->right = min2;
+                min1->bit = "1";
+                min2->bit = "0";
+                curr++;
+                
+                if (is_leaf >= tree.data() + symbols) {
+                        min1 = not_leaf;
+                        not_leaf++;
+                } else {
+                        if (is_leaf->number < not_leaf->number) {
+                                min1 = is_leaf;
+                                is_leaf++;
+                        } else {
+                                min1 = not_leaf;
+                                not_leaf++;
+                        }
+                }
+                
+                if (is_leaf >= tree.data() + symbols) {
+                        min2 = not_leaf;
+                        not_leaf++;
+                } else if (not_leaf >= curr) {
+                        min2 = is_leaf;
+                        is_leaf++;
+                } else {
+                        if (is_leaf->number < not_leaf->number) {
+                                min2 = is_leaf;
+                                is_leaf++;
+                        } else {
+                                min2 = not_leaf;
+                                not_leaf++;
+                        }
+                }
+        }
+        for (huff_tree *p_huff_tree = tree.data() + symbols * 2 - 2; p_huff_tree > tree.data() - 1; p_huff_tree--) {
+                if (p_huff_tree->left)
+                        p_huff_tree->left->bit = p_huff_tree->bit + p_huff_tree->left->bit;
+                if (p_huff_tree->right)
+                        p_huff_tree->right->bit = p_huff_tree->bit + p_huff_tree->right->bit;
+        }
+        return tree;
 }
 
 bool isFolder(const std::string &path)
@@ -194,20 +286,28 @@ bool isFolder(const std::string &path)
         return false;
 }
 
+void unMap(void *mapped, size_t size, int fd, const std::string &path)
+{
+        int err = msync((void *) mapped, size, MS_SYNC);
+        check(fd, err < 0, "Could not sync the file to disk ", path.c_str(), strerror(errno));
+        
+        err = munmap((void *) mapped, size);
+        check(fd, err != 0, "UnMapping Failed ", path.c_str(), strerror(errno));
+}
+
 void countFileBytesFreq(const std::string &path, std::map<char, int> &occurrence_symbol,
                         long int &total_size,
                         long int &total_bits)
 {
-        
         int fd = open(path.c_str(), O_RDONLY);
-        check(fd < 0, "open %stat_buff failed: %stat_buff", path.c_str(), strerror(errno));
+        check(fd, fd < 0, "open %stat_buff failed: %stat_buff ", path.c_str(), strerror(errno));
         
-        struct stat stat_buff{ };
+        struct stat stat_buff = {0};
         int status = fstat(fd, &stat_buff);
-        check(status < 0, "stat %stat_buff failed: %stat_buff", path.c_str(), strerror(errno));
+        check(fd, status < 0, "stat %stat_buff failed: %stat_buff ", path.c_str(), strerror(errno));
         
         const char *mapped = static_cast<const char *>(mmap(nullptr, stat_buff.st_size, PROT_READ, MAP_PRIVATE, fd, 0));
-        check(mapped == MAP_FAILED, "mmap %stat_buff failed: %stat_buff", path.c_str(), strerror(errno));
+        check(fd, mapped == MAP_FAILED, "mmap %stat_buff failed: %stat_buff ", path.c_str(), strerror(errno));
         
         total_size += stat_buff.st_size;
         total_bits += 64;
@@ -219,11 +319,9 @@ void countFileBytesFreq(const std::string &path, std::map<char, int> &occurrence
                 else
                         occurrence_symbol.insert_or_assign(mapped[i], 1);
         
-        int err = munmap((void *) mapped, stat_buff.st_size);
-        if (err != 0) {
-                printf("UnMapping Failed\n");
-                exit(EXIT_FAILURE);
-        }
+        
+        unMap((void *) mapped, stat_buff.st_size, fd, path);
+        close(fd);
 }
 
 void countFolderBytesFreq(const std::string &path, std::map<char, int> &occurrence_symbol,
