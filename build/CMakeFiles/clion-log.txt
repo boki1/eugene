@@ -1,0 +1,5 @@
+/home/boki/.local/share/JetBrains/Toolbox/apps/CLion/ch-0/211.7442.42/bin/cmake/linux/bin/cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ -GNinja /home/boki/demos/bt
+-- Building internal libs: btree;storage
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /home/boki/demos/bt/build
