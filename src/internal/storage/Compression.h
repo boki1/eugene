@@ -63,8 +63,11 @@ class Compress {
 public:
         std::vector<std::string> files;
         
-        
-        Compress(int argc, const char *argv[])
+/// \brief Constructor of the compression class with which you can compress provided files
+///
+/// \param argc - number of files for compress
+/// \param argv - path's to files for compress
+        Compress(const int argc, const char *argv[])
         {
                 files.reserve(argc - 1);
                 for (int i = 1; i < argc; ++i)
@@ -110,6 +113,7 @@ public:
                 return false;
         }
         
+/// \brief The main function of compression class that do all the magic with provided files.
         void compress()
         {
                 for (const auto &item: files) {
