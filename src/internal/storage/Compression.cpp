@@ -2,6 +2,6 @@
 
 int main(const int argc, const char *argv[])
 {
-        Compress compress = Compress(argc, argv);
-        compress.compress();
+        Compressor compress = Compressor(argc, argv);
+        compress();
 }

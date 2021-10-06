@@ -8,6 +8,9 @@
 #include <unistd.h>
 #include <cstdio>
 #include <cstdlib>
+#include <numeric>
+
+#define BYTE 8
 
 namespace fs = std::filesystem;
 
@@ -58,16 +61,14 @@ namespace internal::compression
 /// </ul>
 /// **1** groups from fifth to eighth will be written as much as file count in that folder <br>
 ///    (this is argument_count-1(argc-1) for the main folder) <br>
-/// **2** whenever we see a new folder we will writeFromCh seventh then start writing from fourth to eighth
-class Compress {
+/// **2** whenever we see a new folder we will write_from_ch seventh then start writing from fourth to eighth
+class Compressor {
 public:
-        std::vector<std::string> files;
-        
 /// \brief Constructor of the compression class with which you can compress provided files
 ///
 /// \param argc - number of files for compress
 /// \param argv - path's to files for compress
-        Compress(const int argc, const char *argv[])
+        Compressor(const int argc, const char *argv[])
         {
                 files.reserve(argc - 1);
                 for (int i = 1; i < argc; ++i)
@@ -80,70 +81,44 @@ public:
                         compressed_name = "bundle.huff";
         }
 
-/// \brief checks if test condition is false or true
-///
-/// \param test - false or true. If true -> print the error, else continue
-/// \param message - message that represents the error
-/// \param fd - file descriptor for closing
-/// \param ... - arguments for error printing
-        static void check(int fd, bool test, const char *message, ...)
-        {
-                if (!test) return;
-                close(fd);
-                va_list args;
-                va_start(args, message);
-                vfprintf(stderr, message, args);
-                va_end(args);
-                fprintf(stderr, "\n");
-                exit(EXIT_FAILURE);
-        }
-
-/// \brief Check if the path is to a folder or to a file
-/// and return boolean
-///
-/// \param path - char sequence representing the path to a folder of file
-/// \return true if path is to a folder or false if is to a regular file
-        static bool isFolder(const std::string &path)
-        {
-                DIR *temp = opendir(path.c_str());
-                if (temp) {
-                        closedir(temp);
-                        return true;
-                }
-                return false;
-        }
-        
 /// \brief The main function of compression class that do all the magic with provided files.
-        void compress()
+        void operator()()
         {
-                for (const auto &item: files) {
-                        int fd = open(item.c_str(), O_RDONLY);
-                        check(fd, fd < 0, "open %stat_buff failed: %stat_buff ", item.c_str(), strerror(errno));
-                }
+//                TODO: find all "open/fopen/opendir" functions and check for errors
+//                for (const auto &item: files) {
+//                        int fd = open(item.c_str(), O_RDONLY);
+//                        check(fd, fd < 0, "open %stat_buff failed: %stat_buff ", item.c_str(), strerror(errno));
+//                }
                 
-                file_size = 0;
-                total_bits = 16 + 9 * (files.size() - 1);
+                
+                for (const auto &file: files)
+                        all_size += std::accumulate(
+                                fs::recursive_directory_iterator(file.c_str()), fs::recursive_directory_iterator(), 0,
+                                [ ](auto sz, auto entry) { return is_directory(entry) ? sz : sz + file_size(entry); });
+                
+                total_bits = 16 + 9 * files.size();
                 for (const auto &item: files) {
                         for (const char *c = item.c_str(); *c; c++)
                                 occurrence_symbol[*c]++;
                         
-                        if (isFolder(item))
-                                countFolderBytesFreq(item);
+                        if (fs::is_directory(item))
+                                count_folder_bytes_freq(item);
                         else
-                                countFileBytesFreq(item);
+                                count_file_bytes_freq(item);
                 }
                 
                 symbols = occurrence_symbol.size();
                 
                 
                 tree.resize(symbols * 2 - 1);
-                initializeTree();
+                initialize_tree();
                 
                 compressed_fp = fopen(compressed_name.c_str(), "wb");
                 fwrite(&symbols, 1, 1, compressed_fp);
+                total_bits += BYTE;
                 
                 transform();
-                allFileWrite();
+                all_file_write();
                 
                 
                 fclose(compressed_fp);
@@ -176,6 +151,7 @@ private:
                 }
         };
         
+        std::vector<std::string> files; //!< path to the files for compress
         
         FILE *compressed_fp = nullptr; //!< file pinter to the new created compressed file
         std::map<unsigned char, int> occurrence_symbol; //!< key-value pair
@@ -184,10 +160,10 @@ private:
         std::vector<huff_tree> tree; //!< vector of huff_tree's that represents trie
         
         std::string compressed_name; //!< new name of the compressed file
-        unsigned long file_size = 0; //!< size of the original file or folder
+        unsigned long all_size = 0; //!< size of the original file or folder
         unsigned long total_bits = 0; //!< count the compressed file size
         unsigned long symbols = 0; //!< count of the file or folder symbols
-       
+        
         
         std::string str_arr[256]; //!< transformation string
 //!< is put to str_arr array to make the compression process more time efficient
@@ -207,7 +183,7 @@ private:
 /// It is actually a very neat process. Using 4th and 5th code blocks, we are making sure that
 /// the most used character is using least number of bits.
 /// Specific number of bits we re going to use for that character is determined by weight distribution
-        void initializeTree()
+        void initialize_tree()
         {
                 huff_tree *e = tree.data();
                 for (const auto &[key, value]: occurrence_symbol) {
@@ -273,13 +249,12 @@ private:
 /// in long integer massive (bytesFreq) and parallel
 ///
 /// \param path - char sequence representing the path to a folder of file
-        void countFileBytesFreq(const std::string &path)
+        void count_file_bytes_freq(const std::string &path)
         {
                 unsigned char x;
                 FILE *original_fp = fopen(path.c_str(), "rb");
                 fseek(original_fp, 0, SEEK_END);
                 const long int size = ftell(original_fp);
-                file_size += size;
                 rewind(original_fp);
                 
                 total_bits += 64;
@@ -295,9 +270,8 @@ private:
 /// \brief This function counts usage frequency of bytes inside a folder
 ///
 /// \param path - char sequence representing the path to a folder of file
-        void countFolderBytesFreq(const std::string &path)
+        void count_folder_bytes_freq(const std::string &path)
         {
-                file_size += 4096;
                 total_bits += 16;
                 
                 
@@ -311,11 +285,10 @@ private:
                         for (const char *c = folder_name.c_str(); *c; c++)
                                 occurrence_symbol[*c]++;
                         
-                        if (entry.is_directory()) {
-                                file_size += 4096;
+                        if (entry.is_directory())
                                 total_bits += 16;
-                        } else
-                                countFileBytesFreq(next_path);
+                        else
+                                count_file_bytes_freq(next_path);
                 }
         }
 
@@ -330,13 +303,13 @@ private:
                         len = huff->bit.length();
                         current_character = huff->character;
                         
-                        writeFromCh(current_character);
-                        writeFromCh(len);
+                        write_from_ch(current_character);
+                        write_from_ch(len);
                         total_bits += len + 16;
                         
                         str_pointer = huff->bit.c_str();
                         while (*str_pointer) {
-                                if (current_bit_count == 8) {
+                                if (current_bit_count == BYTE) {
                                         fwrite(&current_byte, 1, 1, compressed_fp);
                                         current_bit_count = 0;
                                 }
@@ -364,35 +337,34 @@ private:
                         
                         total_bits += len * (huff->number);
                 }
-                if (total_bits % 8)
-                        total_bits = (total_bits / 8 + 1) * 8;
+                if (total_bits % BYTE)
+                        total_bits = (total_bits / BYTE + 1) * BYTE;
                 
                 
-                std::cout << "The size of the sum of ORIGINAL files is: " << file_size << " bytes" << std::endl;
-                std::cout << "The size of the COMPRESSED file will be: " << total_bits / 8 << " bytes" << std::endl;
-                std::cout << "Compressed file's size will be [%" << 100 * ((float) total_bits / 8 / (float) file_size) << "] of the original file"
+                std::cout << "The size of the sum of ORIGINAL files is: " << all_size << " bytes" << std::endl;
+                std::cout << "The size of the COMPRESSED file will be: " << total_bits / BYTE << " bytes" << std::endl;
+                std::cout << "Compressed file's size will be [%" << 100 * ((float) total_bits / BYTE / (float) all_size) << "] of the original file"
                           << std::endl;
-                if (total_bits / 8 > file_size)
+                if (total_bits / BYTE > all_size)
                         std::cout << std::endl << "WARNING: COMPRESSED FILE'S SIZE WILL BE HIGHER THAN THE SUM OF ORIGINALS" << std::endl <<
-                        std::endl;
+                                  std::endl;
         }
 
 /// \brief Writes all information in compressed order.
 /// (Manages from third to seventh of part 2)
-        void allFileWrite()
+        void all_file_write()
         {
-                writeFileCount(files.size());
+                write_file_count(files.size());
                 
                 FILE *original_fp;
                 for (const auto &item: files) {
-                        
-                        if (!isFolder(item)) {
+                        if (!fs::is_directory(item)) {
                                 original_fp = fopen(item.c_str(), "rb");
                                 fseek(original_fp, 0, SEEK_END);
                                 long size = ftell(original_fp);
                                 rewind(original_fp);
                                 
-                                if (current_bit_count == 8) {
+                                if (current_bit_count == BYTE) {
                                         fwrite(&current_byte, 1, 1, compressed_fp);
                                         current_bit_count = 0;
                                 }
@@ -400,36 +372,36 @@ private:
                                 current_byte |= 1;
                                 current_bit_count++;
                                 
-                                writeFileSize(size);
-                                writeFileName(item.c_str());
-                                writeTheFileContent(original_fp, size);
+                                write_file_size(size);
+                                write_file_name(item.c_str());
+                                write_the_file_content(original_fp, size);
                                 fclose(original_fp);
                         } else {
-                                if (current_bit_count == 8) {
+                                if (current_bit_count == BYTE) {
                                         fwrite(&current_byte, 1, 1, compressed_fp);
                                         current_bit_count = 0;
                                 }
                                 current_byte <<= 1;
                                 current_bit_count++;
                                 
-                                writeFileName(item.c_str());
+                                write_file_name(item.c_str());
                                 
-                                writeTheFolder(item);
+                                write_the_folder(item);
                         }
                 }
                 
                 
-                if (current_bit_count == 8)
+                if (current_bit_count == BYTE)
                         fwrite(&current_byte, 1, 1, compressed_fp);
                 else {
-                        current_byte <<= 8 - current_bit_count;
+                        current_byte <<= BYTE - current_bit_count;
                         fwrite(&current_byte, 1, 1, compressed_fp);
                 }
         }
 
 /// \brief Open dir path and count regular files in it.
 /// Then write this count in compressed file. (Manages third of part 2)
-        void writeFolderFilesCount(const std::string &path)
+        void write_folder_files_count(const std::string &path)
         {
                 DIR *dir = opendir(path.c_str());
                 struct dirent *current;
@@ -439,16 +411,16 @@ private:
                                 continue;
                         file_count++;
                 }
-                writeFileCount(file_count);
+                write_file_count(file_count);
         }
 
 /// \brief This function manages all other function to make folder compression available.
 /// (Manages from third to seventh of part 2 for a folder)
 ///
 /// \param path - folder name
-        void writeTheFolder(const std::string &path)
+        void write_the_folder(const std::string &path)
         {
-                writeFolderFilesCount(path);
+                write_folder_files_count(path);
                 
                 for (const auto &entry: fs::recursive_directory_iterator(path)) {
                         const std::string next_path = entry.path();
@@ -458,9 +430,7 @@ private:
                         
                         if (!entry.is_directory()) {
                                 FILE *original_fp = fopen(next_path.c_str(), "rb");
-                                unsigned long size = entry.file_size();
-                                
-                                if (current_bit_count == 8) {
+                                if (current_bit_count == BYTE) {
                                         fwrite(&current_byte, 1, 1, compressed_fp);
                                         current_bit_count = 0;
                                 }
@@ -468,21 +438,21 @@ private:
                                 current_byte |= 1;
                                 current_bit_count++;
                                 
-                                writeFileSize(size);
-                                writeFileName(folder_name.c_str());
-                                writeTheFileContent(original_fp, size);
+                                write_file_size(entry.file_size());
+                                write_file_name(folder_name.c_str());
+                                write_the_file_content(original_fp, entry.file_size());
                                 fclose(original_fp);
                         } else {
-                                if (current_bit_count == 8) {
+                                if (current_bit_count == BYTE) {
                                         fwrite(&current_byte, 1, 1, compressed_fp);
                                         current_bit_count = 0;
                                 }
                                 current_byte <<= 1;
                                 current_bit_count++;
                                 
-                                writeFileName(folder_name.c_str());
+                                write_file_name(folder_name.c_str());
                                 
-                                writeFolderFilesCount(next_path);
+                                write_folder_files_count(next_path);
                         }
                 }
         }
@@ -492,7 +462,7 @@ private:
 ///
 /// \param original_fp - file pointer to original file
 /// \param size - size of the original file
-        void writeTheFileContent(FILE *original_fp, unsigned long size)
+        void write_the_file_content(FILE *original_fp, unsigned long size)
         {
                 unsigned char x;
                 const char *str_pointer;
@@ -500,7 +470,7 @@ private:
                 for (long int i = 0; i < size; i++) {
                         str_pointer = str_arr[x].c_str();
                         while (*str_pointer) {
-                                if (current_bit_count == 8) {
+                                if (current_bit_count == BYTE) {
                                         fwrite(&current_byte, 1, 1, compressed_fp);
                                         current_bit_count = 0;
                                 }
@@ -525,14 +495,14 @@ private:
 /// (Manages sixth of part 2)
 ///
 /// \param file_name - name of the file
-        void writeFileName(const char *file_name)
+        void write_file_name(const char *file_name)
         {
-                writeFromCh(strlen(file_name));
+                write_from_ch(strlen(file_name));
                 const char *str_pointer;
                 for (const char *c = file_name; *c; c++) {
                         str_pointer = str_arr[(unsigned char) (*c)].c_str();
                         while (*str_pointer) {
-                                if (current_bit_count == 8) {
+                                if (current_bit_count == BYTE) {
                                         fwrite(&current_byte, 1, 1, compressed_fp);
                                         current_bit_count = 0;
                                 }
@@ -557,10 +527,10 @@ private:
 /// (Manages fifth of part 2)
 ///
 /// \param size - size of the original file
-        void writeFileSize(unsigned long size)
+        void write_file_size(unsigned long size)
         {
-                for (int i = 0; i < 8; i++) {
-                        writeFromCh(size % 256);
+                for (int i = 0; i < BYTE; i++) {
+                        write_from_ch(size % 256);
                         size /= 256;
                 }
         }
@@ -570,12 +540,12 @@ private:
 /// (Manages third of part 2)
 ///
 /// \param file_count - number of files that are provided (argc - 1)
-        void writeFileCount(unsigned long file_count)
+        void write_file_count(unsigned long file_count)
         {
                 unsigned char temp = file_count % 256;
-                writeFromCh(temp);
+                write_from_ch(temp);
                 temp = file_count / 256;
-                writeFromCh(temp);
+                write_from_ch(temp);
         }
 
 /// \brief This function is used for writing the uChar to compressed file.
@@ -583,9 +553,9 @@ private:
 /// and puts the rest to current byte for later use.
 ///
 /// \param ch - character
-        void writeFromCh(unsigned char ch)
+        void write_from_ch(unsigned char ch)
         {
-                current_byte <<= 8 - current_bit_count;
+                current_byte <<= BYTE - current_bit_count;
                 current_byte |= (ch >> current_bit_count);
                 fwrite(&current_byte, 1, 1, compressed_fp);
                 current_byte = ch;
