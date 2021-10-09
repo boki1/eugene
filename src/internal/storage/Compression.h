@@ -1,6 +1,3 @@
-// TODO: process(), write_file_content(...) and write_file_name(...) are DRY
-
-
 #include <iostream>
 #include <dirent.h>
 #include <fcntl.h>
@@ -194,13 +191,12 @@ private:
                 std::sort(m_tree.begin(), m_tree.end() - (long) (m_symbols - 1));
 
 
-//                TODO: add comments
-                huff_tree *min1 = m_tree.data();
-                huff_tree *min2 = m_tree.data() + 1;
+                huff_tree *min1 = m_tree.data(); //!< min1 and min2 represents nodes that has minimum weights
+                huff_tree *min2 = m_tree.data() + 1; //!< min1 and min2 represents nodes that has minimum weights
+                huff_tree *not_leaf = m_tree.data() + m_symbols; //!< not_leaf is the pointer that traverses through nodes that are not leaves
+                huff_tree *is_leaf = m_tree.data() + 2; //!< is_leaf is the pointer that traverses through leaves and
                 huff_tree *curr = m_tree.data() + m_symbols;
-                huff_tree *not_leaf = m_tree.data() + m_symbols;
-                huff_tree *is_leaf = m_tree.data() + 2;
-                
+        
                 for (int i = 0; i < m_symbols - 1; i++) {
                         curr->number = min1->number + min2->number;
                         curr->left = min1;
@@ -244,7 +240,6 @@ private:
                         if (huff->right)
                                 huff->right->bit.insert(huff->right->bit.begin(), huff->bit.begin(), huff->bit.end());
                 }
-                std::cout << "Tree is ready" << std::endl;
         }
 
 /// \brief Count usage frequency of bytes inside the file and store the information
@@ -259,12 +254,10 @@ private:
                 std::string buff(fs::file_size(path), 0);
                 
                 in.read(buff.data(), buff.size());
-                std::cout << "information readed in buff!" << std::endl;
                 
                 
                 for (const auto &item: buff)
                         m_occurrence_symbol[item]++;
-                std::cout << "finished count file bytes frequency" << std::endl;
         }
 
 /// \brief This function counts usage frequency of bytes inside a folder
@@ -276,12 +269,12 @@ private:
                 
                 for (const auto &entry: fs::recursive_directory_iterator(path)) {
                         std::string next_path = entry.path();
-                        std::string folder_name = &next_path.substr(next_path.find_last_of('/'))[1];
-                        if (folder_name[0] == '.')
+                        std::string curr_fdir_name = &next_path.substr(next_path.find_last_of('/'))[1];
+                        if (curr_fdir_name[0] == '.')
                                 continue;
                         
                         m_total_bits += 9;
-                        for (const auto &item: folder_name)
+                        for (const auto &item: curr_fdir_name)
                                 m_occurrence_symbol[item]++;
                         
                         if (entry.is_directory())
@@ -305,21 +298,8 @@ private:
                         write_from_ch(it->character);
                         write_from_ch(it->bit.size());
                         m_total_bits += it->bit.size() + 16;
-                        
-                        for (const auto &item: it->bit) {
-                                if (m_current_bit_count == Byte) {
-                                        fwrite(&m_current_byte, 1, 1, m_compressed_fp);
-                                        m_current_bit_count = 0;
-                                }
-                                if (item) {
-                                        m_current_byte <<= 1;
-                                        m_current_byte |= 1;
-                                        m_current_bit_count++;
-                                } else {
-                                        m_current_byte <<= 1;
-                                        m_current_bit_count++;
-                                }
-                        }
+        
+                        write_bytes(huffbit);
                         m_total_bits += it->bit.size() * (it->number);
                 }
                 if (m_total_bits % Byte)
@@ -359,8 +339,8 @@ private:
                                 m_current_bit_count++;
                                 
                                 write_file_size(size);
-                                write_file_name(item.c_str());
-                                write_the_file_content(item);
+                                write_file_name(item);
+                                write_file_content(item);
                                 fclose(original_fp);
                         } else {
                                 if (m_current_bit_count == Byte) {
@@ -370,7 +350,7 @@ private:
                                 m_current_byte <<= 1;
                                 m_current_bit_count++;
                                 
-                                write_file_name(item.c_str());
+                                write_file_name(item);
                                 
                                 write_folder(item);
                         }
@@ -384,16 +364,15 @@ private:
                 }
         }
 
-//        TODO: implement with std::filesystem
 /// \brief Open dir path and count regular m_files in it.
 /// Then write this count in compressed file. (Manages third of part 2)
         void write_folder_files_count(const std::string &path)
         {
-                DIR *dir = opendir(path.c_str());
-                struct dirent *current;
                 int file_count = 0;
-                while ((current = readdir(dir))) {
-                        if (current->d_name[0] == '.')
+                for (const auto &entry: fs::directory_iterator(path)) {
+                        const std::string next_path = entry.path();
+                        const std::string curr_fdir_name = &next_path.substr(next_path.find_last_of('/'))[1];
+                        if (curr_fdir_name[0] == '.')
                                 continue;
                         file_count++;
                 }
@@ -425,8 +404,8 @@ private:
                                 m_current_bit_count++;
                                 
                                 write_file_size(entry.file_size());
-                                write_file_name(curr_fdir_name.c_str());
-                                write_the_file_content(next_path);
+                                write_file_name(curr_fdir_name);
+                                write_file_content(next_path);
                                 fclose(original_fp);
                         } else {
                                 if (m_current_bit_count == Byte) {
@@ -436,7 +415,7 @@ private:
                                 m_current_byte <<= 1;
                                 m_current_bit_count++;
                                 
-                                write_file_name(curr_fdir_name.c_str());
+                                write_file_name(curr_fdir_name);
                                 
                                 write_folder_files_count(next_path);
                         }
@@ -448,38 +427,36 @@ private:
 ///
 /// \param original_fp - file pointer to original file
 /// \param size - size of the original file
-        void write_the_file_content(const std::string &path)
+        void write_file_content(const std::string &path)
         {
                 std::ifstream in(path, std::ifstream::binary);
                 std::string buff(fs::file_size(path), 0);
                 in.read(buff.data(), buff.size());
                 
-                int global_count = 0;
-                for (const auto &item: buff) {
-                        global_count++;
-                        int count = 0;
-                        for (const auto &item1: m_char_huffbit[item]) {
-                                if (m_current_bit_count == Byte) {
-                                        fwrite(&m_current_byte, 1, 1, m_compressed_fp);
-                                        m_current_bit_count = 0;
-                                }
-                                switch (item1) {
-                                        case '1':m_current_byte <<= 1;
-                                                m_current_byte |= 1;
-                                                m_current_bit_count++;
-                                                count ++;
-                                                break;
-                                        case '0':m_current_byte <<= 1;
-                                                m_current_bit_count++;
-                                                count ++;
-                                                break;
-                                        default:
-                                                std::cerr << global_count << std::endl;
-                                                std::cerr << count << std::endl;
-                                                std::cerr << "An error has occurred in write the file contennt"
-                                                          << std::endl << "Process has been aborted" << std::endl;
-                                                exit(2);
-                                }
+                for (const auto &item: buff)
+                        write_bytes(m_char_huffbit[item]);
+        }
+        
+/// \brief Writes provided string bytes to the new compressed file
+///
+/// \param for_write - string that will be written
+        void write_bytes(const std::string &for_write){
+                for (const auto &item: for_write) {
+                        if (m_current_bit_count == Byte) {
+                                fwrite(&m_current_byte, 1, 1, m_compressed_fp);
+                                m_current_bit_count = 0;
+                        }
+                        switch (item) {
+                                case '1':m_current_byte <<= 1;
+                                        m_current_byte |= 1;
+                                        m_current_bit_count++;
+                                        break;
+                                case '0':m_current_byte <<= 1;
+                                        m_current_bit_count++;
+                                        break;
+                                        
+//                                logger case
+                                default:continue;
                         }
                 }
         }
@@ -488,31 +465,11 @@ private:
 /// (Manages sixth of part 2)
 ///
 /// \param file_name - name of the file
-        void write_file_name(const char *file_name)
+        void write_file_name(const std::string &file_name)
         {
-                write_from_ch(strlen(file_name));
-                const char *str_pointer;
-                for (const char *c = file_name; *c; c++) {
-                        str_pointer = m_char_huffbit[(unsigned char) (*c)].c_str();
-                        while (*str_pointer) {
-                                if (m_current_bit_count == Byte) {
-                                        fwrite(&m_current_byte, 1, 1, m_compressed_fp);
-                                        m_current_bit_count = 0;
-                                }
-                                switch (*str_pointer) {
-                                        case '1':m_current_byte <<= 1;
-                                                m_current_byte |= 1;
-                                                m_current_bit_count++;
-                                                break;
-                                        case '0':m_current_byte <<= 1;
-                                                m_current_bit_count++;
-                                                break;
-                                        default:std::cerr << "An error has occurred" << std::endl << "Process has been aborted";
-                                                exit(2);
-                                }
-                                str_pointer++;
-                        }
-                }
+                write_from_ch(file_name.size());
+                for (const auto &item: file_name)
+                        write_bytes(m_char_huffbit[item]);
         }
 
 /// \brief This function is writing byte count of current input file to compressed file using 8 bytes.
