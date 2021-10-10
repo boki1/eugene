@@ -23,6 +23,11 @@ using optional_ref = std::optional<std::reference_wrapper<T>>;
 template <typename T>
 using optional_cref = std::optional<std::reference_wrapper<const T>>;
 
+template <typename T>
+optional_ref<T> uncref(optional_cref<T> copt) noexcept {
+	return std::nullopt;
+}
+
 namespace internal::btree
 {
 
@@ -87,9 +92,11 @@ namespace internal::btree
 	    {
 		Node &cur = m_root;
 		while (true) {
-			auto [it, skip] = cur.find(key);
-			if (skip)
-				++it;
+			auto [it, found] = cur.find(key);
+			if (found) {
+				assert(it.key() && it.key().value() == key);
+				return it;
+			}
 			if (cur.is_leaf())
 				return cur.insert(key, val, it);
 			if (it == cur.end())
@@ -169,11 +176,15 @@ namespace internal::btree
 		enum class Type { Branch, Leaf };
 
 		struct Header {
-			storage::Position self_;
-			storage::Position prev_;
-			storage::Position next_;
-			storage::Position parent_;
+			storage::Position self_{storage::PositionPoison};
+			storage::Position prev_{storage::PositionPoison};
+			storage::Position next_{storage::PositionPoison};
+			storage::Position parent_{storage::PositionPoison};
 			Type type_;
+
+			explicit Header(Type t) : type_{t} {}
+			explicit Header(std::nullopt_t) {}
+			Header(const Header &) = default;
 		};
 
 		struct MemHeader {
@@ -181,7 +192,10 @@ namespace internal::btree
 			optional_cref<Node> next_{};
 			optional_cref<Node> parent_{};
 			Type type_;
+
 			explicit MemHeader(Type t) : type_{t} {}
+			explicit MemHeader(std::nullopt_t) {}
+			MemHeader(const MemHeader &) = default;
 		};
 
 	private:
@@ -233,7 +247,12 @@ namespace internal::btree
 		}
 
 		[[nodiscard]] bool is_full() const noexcept {
-			return m_numfilled >= NumRecords;
+			assert(m_numfilled <= NumRecords);
+			return m_numfilled == NumRecords;
+		}
+
+		[[nodiscard]] bool is_ok() const noexcept {
+			return m_numfilled < NumRecords;
 		}
 
 		[[nodiscard]] optional_cref<Header> header() const noexcept {
@@ -285,6 +304,45 @@ namespace internal::btree
 
 		}
 
+		[[nodiscard]] std::optional<storage::Position> self() const noexcept {
+			if (m_header)
+				return m_header.value().self_;
+			return std::nullopt;
+		}
+
+		[[nodiscard]] std::optional<storage::Position> parent() const noexcept {
+			if (m_header)
+				return m_header.value().parent_;
+			return std::nullopt;
+		}
+
+		[[nodiscard]] optional_cref<Node> memparent() const noexcept {
+			if (m_mem)
+				return m_mem.value().parent_;
+			return std::nullopt;
+		}
+
+		void set_numfilled(unsigned long numfilled) noexcept {
+			m_numfilled = numfilled;
+		}
+
+		void set_prev(Node * const mprev, std::optional<storage::Position> prev = {}) noexcept {
+			if (m_mem)
+				m_mem.value().prev_.emplace(std::cref(*mprev));
+				// m_mem.value().prev_ = std::make_optional<std::cref(*mprev)>;
+
+			if (m_header && prev)
+				m_header.value().prev_ = prev.value(); 
+		}
+
+		void set_next(Node * const mnext, std::optional<storage::Position> next = {}) noexcept {
+			if (m_mem)
+				m_mem.value().next_.emplace(std::cref(*mnext));
+
+			if (m_header && next)
+				m_header.value().next_ = next.value(); 
+		}
+
 	public: // Constructors
 
 
@@ -325,12 +383,61 @@ namespace internal::btree
 			m_meta = rhs.m_meta;
 			return *this;
 		}
+
+	private: // Helpers
+
+		Iterator make_sibling(LeafMeta &asleaf, unsigned long middle_idx) noexcept
+		{
+			const auto pivot_idx = middle_idx + 1;
+			auto sibling_ptr = std::make_shared<Node>(
+				m_tree, m_mem, m_header
+			);
+			Node &sibling = *sibling_ptr;
+			auto &sleaf = sibling.leaf();
+
+			std::copy(asleaf.keys_.begin() + pivot_idx, asleaf.keys_.end(), sleaf.keys_.begin());
+			std::copy(asleaf.vals_.begin() + pivot_idx, asleaf.vals_.end(), sleaf.vals_.begin());
+
+			sibling.set_prev(this, self());
+			set_next(sibling_ptr.get(), sibling.self());
+
+			sibling.set_numfilled(NumRecords - pivot_idx);
+			set_numfilled(middle_idx);
+		}
+
+		Iterator raise_to_parent(Iterator it) noexcept
+		{
+			assert(it.node());
+			Node &node = it.node().value();
+
+			return it;
+		}
 		
 	public: // API
 
-		Iterator insert(const Key &key, const Val &val, Iterator it={})
+		Iterator insert(const Key &key, const Val &val, Iterator it)
 		{
-			return it;
+			assert(it.key() && it.key().value() != key);
+
+			const auto maybe_idx = it.index();
+			if (!maybe_idx)
+				return Iterator::end();
+			const auto idx = maybe_idx.value();
+
+			auto &as_leaf = leaf();
+			as_leaf.keys_[idx] = key;
+			as_leaf.vals_[idx] = val;
+			++m_numfilled;
+
+			if (is_ok())
+				return it;
+
+			// Rebalance
+
+			const auto middle_idx = (NumRecords + 1) / 2;
+			Iterator pivot = make_sibling(leaf(), middle_idx);
+			Iterator pos = raise_to_parent(pivot);
+			return pos;
 		}
 
 		std::pair<Iterator, bool> find(const Key &target) const noexcept
@@ -348,7 +455,7 @@ namespace internal::btree
 					hi = mid;
 			}
 
-			auto idx = std::distance(beginning, hi);
+			unsigned long idx = std::distance(beginning, hi);
 			auto it = Iterator{*this, idx};
 			return std::make_pair(it, *hi == target);
 		}
@@ -376,10 +483,33 @@ namespace internal::btree
 		{
 		}
 
+		static constexpr Iterator end() noexcept {
+			return Iterator{};
+		}
+
+	public: // Properties
+
 		optional_cref<Val> val() const noexcept
 		{
 			return std::nullopt;
 		}
+
+		optional_cref<Key> key() const noexcept
+		{
+			return std::nullopt;
+		}
+
+		optional_ref<Node> node() const noexcept
+		{
+			return std::nullopt;
+		}
+
+		optional_ref<unsigned long> index() const noexcept
+		{
+			return std::nullopt;
+		}
+
+	public: // Iterator operations
 
 		const Iterator operator++(int)
 		{
@@ -393,8 +523,14 @@ namespace internal::btree
 		{
 		}
 
+		bool operator==(const Iterator &rhs) noexcept
+		{
+			return false;
+		}
+
 	};
 
 }
+
 
 #endif // _EUGENE_BTREE_INCLUDED_
