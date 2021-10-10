@@ -1,3 +1,10 @@
+# IDEA
+.idea
+cmake-build-debug
+build/
+out
+CMakeFiles
+
 # Prerequisites
 *.d
 
@@ -30,3 +37,7 @@
 *.exe
 *.out
 *.app
+
+# Tags
+tags
+scope.out
