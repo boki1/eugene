@@ -9,3 +9,8 @@ TEST_CASE("Btree init", "[btree]") {
 	Btree bpt{};
 }
 
+TEST_CASE("Btree find", "[btree]") {
+	Btree bpt{};
+	auto it = bpt.find(13u);
+}
+
