@@ -1,14 +1,14 @@
 #ifndef _EUGENE_BTREE_INCLUDED_
 #define _EUGENE_BTREE_INCLUDED_
 
-#include <memory>		// std::unique_ptr, std::weak_ptr
+#include <memory>		// std::unique_ptr
 #include <optional>		// std::nullopt_t
 #include <array>		// std::array
 #include <variant>		// std::variant
 #include <algorithm>		// std::min
 #include <utility>		// std::move, std::pair
 #include <cassert>		// assert
-#include <tuple>		// std::ignore
+#include <tuple>		// std::tie
 
 #include <internal/storage/Storage.h>
 
@@ -85,9 +85,6 @@ namespace internal::btree
 	    Iterator begin() const noexcept {}
 	    Iterator end() const noexcept {}
 
-	    Iterator begin() noexcept {}
-	    Iterator end() noexcept {}
-
 	    Iterator insert(const Key& key, const Val& val) noexcept
 	    {
 		Node &cur = m_root;
@@ -107,11 +104,13 @@ namespace internal::btree
 		return end();
 	    }
 
-	    std::optional<Iterator> find(const Key &target) const noexcept
+	    std::optional<Iterator> find(const Key &target) noexcept
 	    {
 		Node &cur = const_cast<Node &>(m_root);
 		while (true) {
-			auto [it, next] = cur.find(target);
+			Iterator it;
+			bool next;
+			std::tie(it, next) = cur.find(target);
 			if (cur.is_leaf()) {
 				if (!next)
 					break;
@@ -297,11 +296,11 @@ namespace internal::btree
 		}
 
 		[[nodiscard]] Iterator begin() noexcept {
-
+			return Iterator { *this, 0, m_tree };
 		}
 
 		[[nodiscard]] Iterator end() noexcept {
-
+			return Iterator { *this, m_numfilled, m_tree };
 		}
 
 		[[nodiscard]] std::optional<storage::Position> self() const noexcept {
@@ -421,7 +420,7 @@ namespace internal::btree
 
 			const auto maybe_idx = it.index();
 			if (!maybe_idx)
-				return Iterator::end();
+				return Iterator::end(m_tree);
 			const auto idx = maybe_idx.value();
 
 			auto &as_leaf = leaf();
@@ -440,7 +439,7 @@ namespace internal::btree
 			return pos;
 		}
 
-		std::pair<Iterator, bool> find(const Key &target) const noexcept
+		std::pair<Iterator, bool> find(const Key &target) noexcept
 		{
 			auto [lo, _] = range();
 			auto hi = lo + m_numfilled;
@@ -456,14 +455,14 @@ namespace internal::btree
 			}
 
 			unsigned long idx = std::distance(beginning, hi);
-			auto it = Iterator{*this, idx};
+			auto it = Iterator{*this, idx, m_tree};
 			return std::make_pair(it, *hi == target);
 		}
 
 	private:
+		std::optional<Header> m_header{ std::nullopt };
+		std::optional<MemHeader> m_mem{ std::nullopt };
 		Bt &m_tree;
-		std::optional<Header> m_header{};
-		std::optional<MemHeader> m_mem{};
 
 		std::variant<LeafMeta, BranchMeta> m_meta;
 		unsigned long m_numfilled { 0 };
@@ -471,63 +470,124 @@ namespace internal::btree
 
 	template <BtreeConfig Config>
 	class Btree<Config>::Iterator final {
-	public:
+	public: // Iterator traits
+		using difference_type = unsigned long;
+		using value_type = Node;
+		using pointer = Node *;
+		using reference = Node &;
+		using iterator_category = std::bidirectional_iterator_tag;
+
+	private:
 		using Val = Config::Val;
 		using Key = Config::Key;
+
 
 	public: // Constructor
 
 		Iterator() = default;
 
-		Iterator(const Node &, unsigned long)
+		Iterator(Node& node, unsigned long index, Btree &tree)
+			: m_node{ std::make_optional(std::ref(node)) },
+			  m_index{ std::make_optional(index) },
+			  m_tree{ std::make_optional(std::ref(tree)) }
 		{
 		}
 
-		static constexpr Iterator end() noexcept {
-			return Iterator{};
+		explicit Iterator(Btree &tree)
+			: m_tree{ std::make_optional(std::ref(tree)) }
+		{
 		}
+
+		static Iterator end(Btree &tree) noexcept {
+			return Iterator{ tree };
+		}
+
+		Iterator& operator=(const Iterator&) = default;
 
 	public: // Properties
 
 		optional_cref<Val> val() const noexcept
 		{
+			if (!m_node)
+				return std::nullopt;
+
+			Node &noderef = m_node.value();
 			return std::nullopt;
 		}
 
 		optional_cref<Key> key() const noexcept
 		{
-			return std::nullopt;
+			if (!m_node || !m_index)
+				return std::nullopt;
+
+			Node &noderef = m_node.value();
+			const auto index_ = m_index.value();
+			auto [begin, end] = noderef.range();
+			if (std::distance(begin, end) <= index_)
+				return std::nullopt;
+			std::advance(begin, index_);
+			return *begin;
 		}
 
 		optional_ref<Node> node() const noexcept
 		{
-			return std::nullopt;
+			return m_node;
 		}
 
-		optional_ref<unsigned long> index() const noexcept
+		std::optional<unsigned long> index() const noexcept
 		{
-			return std::nullopt;
+			return m_index;
 		}
 
 	public: // Iterator operations
 
-		const Iterator operator++(int)
+		reference operator*() const
 		{
+			assert(m_node.has_value());
+			return m_node.value();
 		}
 
-		Iterator &operator++()
+		pointer operator->() const
 		{
+			return &(operator*());
 		}
 
-		Node &operator*()
+		Iterator& operator++()
 		{
+
 		}
 
-		bool operator==(const Iterator &rhs) noexcept
+		Iterator operator++(int)
 		{
-			return false;
+
 		}
 
+		Iterator& operator--()
+		{
+
+		}
+
+		Iterator operator--(int)
+		{
+
+		}
+
+		Iterator operator+(unsigned long)
+		{
+
+		}
+
+		// bool operator<=>(const Iterator &) const noexcept = default;
+		//
+		bool operator==(const Iterator &rhs) const noexcept
+		{
+
+		}
+
+	private:
+		optional_ref<Node> m_node{};
+		std::optional<size_t> m_index{};
+		optional_ref<Btree<Config>> m_tree{};
 	};
 
 }

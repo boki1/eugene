@@ -16,6 +16,6 @@ TEST_CASE("Btree find", "[btree]") {
 
 TEST_CASE("Btree insert", "[btree]") {
 	Btree bpt{};
-	// auto it1 = bpt.insert(13u, 12u);
+	auto it1 = bpt.insert(13u, 12u);
 }
 
