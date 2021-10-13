@@ -9,3 +9,5 @@ add_executable(storage
         Compression.cpp
         Compression.h
         Storage.h)
+
+add_executable(Decompressor Decompressor.cpp Decompressor.h)
