@@ -38,8 +38,8 @@ namespace internal::compression
 /// <ol type = "1">
 ///     <li>Size information</li>
 ///     <li>Counting usage frequency of unique bytes and unique byte count</li>
-///     <li>Creating the base of the translation array</li>
-///     <li>Creating the translation m_tree inside the translation array by weight distribution</li>
+///     <li>Creating the base of the translation map</li>
+///     <li>Creating the translation m_trie_root inside the translation map by weight distribution</li>
 ///     <li>Adding strings from top to bottom to create translated versions of unique bytes</li>
 /// </ol>
 /// <br>
@@ -112,8 +112,8 @@ public:
                 m_symbols = m_occurrence_symbol.size();
                 
                 
-                m_tree.resize(m_symbols * 2 - 1);
-                initialize_tree();
+                m_trie.resize(m_symbols * 2 - 1);
+                initialize_trie();
                 
                 m_compressed_fp = fopen(m_compressed_name.c_str(), "wb");
                 fwrite(&m_symbols, 1, 1, m_compressed_fp);
@@ -129,19 +129,19 @@ public:
         }
 
 private:
-        /// \brief This structure will be used to create the translation m_tree
-        struct huff_tree {
-                huff_tree *left{nullptr}, *right{nullptr}; //!< left and right nodes of the m_tree
-                unsigned char character; //!< associated character in the m_tree node
+        /// \brief This structure will be used to create the trie
+        struct huff_trie {
+                huff_trie *left{nullptr}, *right{nullptr}; //!< left and right nodes of the m_trie_root
+                unsigned char character; //!< associated character in the m_trie_root node
                 long int number; //<! occurrences of the respective character
                 dynamic_bitset bit; //<! bit that represents Huffman code of current character
                 
-                huff_tree() = default;
+                huff_trie() = default;
                 
-                huff_tree(long int num, unsigned char c): character(c), number(num)
+                huff_trie(long int num, unsigned char c): character(c), number(num)
                 { }
                 
-                bool operator<(const huff_tree &second) const
+                bool operator<(const huff_trie &second) const
                 {
                         return this->number < second.number;
                 }
@@ -153,7 +153,7 @@ private:
         std::map<unsigned char, int> m_occurrence_symbol; //!< key-value pair
 //!< in which keys are m_symbols and values are their number of occurrences
         
-        std::vector<huff_tree> m_tree; //!< vector of huff_tree's that represents trie
+        std::vector<huff_trie> m_trie; //!< vector of huff_trie's that represents trie
         
         std::string m_compressed_name; //!< new name of the compressed file
         unsigned long m_all_size = 0; //!< size of the original file or folder
@@ -167,20 +167,20 @@ private:
         int m_current_bit_count = 0; //!< integer value of m_current_bit_count
 
 
-/// \brief First creates the base of translation m_tree(and then sorting them by ascending frequencies).
+/// \brief First creates the base of trie(and then sorting them by ascending frequencies).
 /// Then creates pointers that traverses through leaf's.
 /// At every cycle, 2 of the least weighted nodes will be chosen to
 /// create a new node that has weight equal to sum of their weights combined.
 /// After we are done with these nodes they will become children of created nodes
 /// and they will be passed so that they wont be used in this process again.
-/// Finally, we are adding the bytes from root to leaf's
+/// Finally, we are adding the bytes from m_trie_root to leaf's
 /// and after this is done every leaf will have a transformation string that corresponds to it
 /// It is actually a very neat process. Using 4th and 5th code blocks, we are making sure that
 /// the most used character is using least number of bits.
 /// Specific number of bits we re going to use for that character is determined by weight distribution
-        void initialize_tree()
+        void initialize_trie()
         {
-                huff_tree *e = m_tree.data();
+                huff_trie *e = m_trie.data();
                 for (const auto &[key, value]: m_occurrence_symbol) {
                         e->right = nullptr;
                         e->left = nullptr;
@@ -188,14 +188,14 @@ private:
                         e->character = key;
                         e++;
                 }
-                std::sort(m_tree.begin(), m_tree.end() - (long) (m_symbols - 1));
+                std::sort(m_trie.begin(), m_trie.end() - (long) (m_symbols - 1));
 
 
-                huff_tree *min1 = m_tree.data(); //!< min1 and min2 represents nodes that has minimum weights
-                huff_tree *min2 = m_tree.data() + 1; //!< min1 and min2 represents nodes that has minimum weights
-                huff_tree *not_leaf = m_tree.data() + m_symbols; //!< not_leaf is the pointer that traverses through nodes that are not leaves
-                huff_tree *is_leaf = m_tree.data() + 2; //!< is_leaf is the pointer that traverses through leaves and
-                huff_tree *curr = m_tree.data() + m_symbols;
+                huff_trie *min1 = m_trie.data(); //!< min1 and min2 represents nodes that has minimum weights
+                huff_trie *min2 = m_trie.data() + 1; //!< min1 and min2 represents nodes that has minimum weights
+                huff_trie *not_leaf = m_trie.data() + m_symbols; //!< not_leaf is the pointer that traverses through nodes that are not leaves
+                huff_trie *is_leaf = m_trie.data() + 2; //!< is_leaf is the pointer that traverses through leaves and
+                huff_trie *curr = m_trie.data() + m_symbols;
         
                 for (int i = 0; i < m_symbols - 1; i++) {
                         curr->number = min1->number + min2->number;
@@ -205,7 +205,7 @@ private:
                         min2->bit.push_back(false);
                         curr++;
                         
-                        if (is_leaf >= m_tree.data() + m_symbols) {
+                        if (is_leaf >= m_trie.data() + m_symbols) {
                                 min1 = not_leaf;
                                 not_leaf++;
                         } else {
@@ -218,7 +218,7 @@ private:
                                 }
                         }
                         
-                        if (is_leaf >= m_tree.data() + m_symbols) {
+                        if (is_leaf >= m_trie.data() + m_symbols) {
                                 min2 = not_leaf;
                                 not_leaf++;
                         } else if (not_leaf >= curr) {
@@ -234,7 +234,7 @@ private:
                                 }
                         }
                 }
-                for (huff_tree *huff = m_tree.data() + m_symbols * 2 - 2; huff > m_tree.data() - 1; huff--) {
+                for (huff_trie *huff = m_trie.data() + m_symbols * 2 - 2; huff > m_trie.data() - 1; huff--) {
                         if (huff->left)
                                 huff->left->bit.insert(huff->left->bit.begin(), huff->bit.begin(), huff->bit.end());
                         if (huff->right)
@@ -288,7 +288,7 @@ private:
 /// (Manages second from part 2)
         void process()
         {
-                for (auto it = m_tree.begin(); it < m_tree.begin() + m_symbols; ++it) {
+                for (auto it = m_trie.begin(); it < m_trie.begin() + m_symbols; ++it) {
                         std::vector<char> v_char;
                         std::transform(it->bit.begin(), it->bit.end(), std::back_inserter(v_char),
                                        [ ](const auto &x) { return x ? '1' : '0'; });
