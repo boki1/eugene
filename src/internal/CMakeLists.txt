@@ -13,7 +13,7 @@ add_internal_lib(btree)
 ###############
 
 set(STORAGE_DIR "storage/")
-set(STORAGE_SOURCES Storage.h Compression.h)
+set(STORAGE_SOURCES Storage.h)
 list(TRANSFORM STORAGE_SOURCES PREPEND ${STORAGE_DIR})
 
 add_library(storage "${STORAGE_SOURCES}")

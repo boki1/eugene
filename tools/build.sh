@@ -19,7 +19,7 @@ SOURCE_DIR="$SOURCE_DIR/../"
 cd "$SOURCE_DIR"
 mkdir -p build/bin
 cd build/bin
-cmake ../.. && make
+cmake ../.. -GNinja && ninja
 
 options=$(getopt -l "help,run,doc,test" -o "hrdt" -a -- "$@")
 

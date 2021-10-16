@@ -1,13 +1,6 @@
-cmake_minimum_required(VERSION 3.20)
-project(storage)
+add_executable(compressor Compression.cpp Compression.h)
+target_link_libraries(compressor PRIVATE catch2)
 
-set(CMAKE_CXX_STANDARD 20)
+add_executable(decompressor Decompressor.cpp Decompressor.h)
+target_link_libraries(decompressor PRIVATE catch2)
 
-include_directories(.)
-
-add_executable(storage
-        Compression.cpp
-        Compression.h
-        Storage.h)
-
-add_executable(Decompressor Decompressor.cpp Decompressor.h)

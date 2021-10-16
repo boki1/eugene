@@ -10,6 +10,7 @@
 #include <climits>
 #include <cstring>
 #include <fstream>
+#include <algorithm>
 
 static constexpr size_t Byte = CHAR_BIT;
 static constexpr size_t Folder = 16;
