@@ -1,5 +1,4 @@
-#ifndef _EUGENE_BTREE_INCLUDED_
-#define _EUGENE_BTREE_INCLUDED_
+#pragma once
 
 #include <internal/storage/Storage.h>
 
@@ -17,7 +16,7 @@ template <typename T> consteval bool PowerOf2(T num) {
   return (num & (num - 1)) == 0;
 }
 
-#define unsafe__ /* unsafe function */
+#define unsafe_ /* unsafe function */
 
 template <typename T>
 using optional_ref = std::optional<std::reference_wrapper<T>>;
@@ -49,6 +48,10 @@ struct DefaultBtreeConfig {
   static constexpr bool ApplyCompression = false;
 };
 
+namespace util {
+template <BtreeConfig Config> class BtreeYAMLPrinter;
+}
+
 template <typename Config = DefaultBtreeConfig>
 requires BtreeConfig<Config>
 class Btree final {
@@ -65,10 +68,14 @@ private:
 
 public:
   class Node;
+
   friend Node;
 
   class Iterator;
+
   friend Iterator;
+
+  friend util::BtreeYAMLPrinter<Config>;
 
 public: // Constructors
   Btree() = default;
@@ -92,11 +99,9 @@ public: // API
   Iterator insert(const Key &key, const Val &val) noexcept {
     Node &cur = m_root;
     while (true) {
-      auto [it, found] = cur.find(key);
-      if (found) {
-        assert(it.key() && it.key().value() == key);
-        return it;
-      }
+      auto [it, next] = cur.find(key);
+      if (next)
+        ++it;
       if (cur.is_leaf())
         return cur.insert(key, val, it);
       if (it == cur.end())
@@ -126,7 +131,7 @@ public: // API
     return std::nullopt;
   }
 
-  optional_cref<Val> get(const Key &target) const noexcept {
+  optional_cref<Val> get(const Key &target) noexcept {
     auto maybe_it = find(target);
     if (!maybe_it)
       return std::nullopt;
@@ -139,12 +144,14 @@ public: // API
     return maybe_val;
   }
 
-  optional_cref<Val> operator[](const Key &target) const noexcept {
+  optional_cref<Val> operator[](const Key &target) noexcept {
     return get(target);
   }
 
   void erase(const Key &target) noexcept {
-    assert(("Function is not yet implemented -- Btree::erase", false));
+    (void)target;
+    // Function is not yet implemented
+    assert(false);
   }
 
 public: // Getters
@@ -173,8 +180,11 @@ public:
     Type type_;
 
     explicit Header(Type t) : type_{t} {}
+
     explicit Header(std::nullopt_t) {}
+
     Header(const Header &) = default;
+
     bool operator<=>(const Header &) const noexcept = default;
   };
 
@@ -185,7 +195,9 @@ public:
     Type type_;
 
     explicit MemHeader(Type t) : type_{t} {}
+
     explicit MemHeader(std::nullopt_t) {}
+
     MemHeader(const MemHeader &) = default;
 
     bool operator<=>(const MemHeader &) const noexcept = default;
@@ -232,9 +244,14 @@ public:
     bool operator<=>(const BranchMeta &) const noexcept = default;
   };
 
+public:
+  static consteval auto records_() { return Node::NumRecords; }
+
+  static consteval auto links_() { return Node::NumLinks; }
+
 private:
   // Maps BranchMeta::links_ of type Position to actual in-memory Node *
-  static auto &LinkMap() noexcept {
+  static auto &LinkToPtrMap() noexcept {
     static std::unordered_map<Position, Node *> mapper_{};
     return mapper_;
   }
@@ -259,6 +276,37 @@ public: // Getters
 
   [[nodiscard]] bool is_empty() const noexcept { return !m_numfilled; }
 
+  [[nodiscard]] bool is_rightmost() const noexcept {
+    if (m_mem.has_value()) {
+      const auto &mem = m_mem.value();
+      return !mem.next_.has_value();
+    }
+    // if (const auto &h : m_header.value(); h.has_value()) ;
+    // TODO: Fetch
+    return false;
+  }
+
+  [[nodiscard]] bool is_leftmost() const noexcept {
+    if (m_mem.has_value()) {
+      const auto &mem = m_mem.value();
+      return !mem.prev_.has_value();
+    }
+
+    // if (const auto &h : m_header.value(); h.has_value()) ;
+    // TODO: Fetch
+    return false;
+  }
+
+  [[nodiscard]] bool is_root() const noexcept {
+    if (m_mem.has_value()) {
+      const auto &mem = m_mem.value();
+      return !mem.parent_.has_value();
+    }
+    // if (const auto &h : m_header.value(); h.has_value()) ;
+    // TODO: Fetch
+    return false;
+  }
+
   [[nodiscard]] optional_cref<Header> header() const noexcept {
     if (!m_header.has_value())
       return std::nullopt;
@@ -275,11 +323,11 @@ public: // Getters
 
   [[nodiscard]] BranchMeta &branch() { return std::get<BranchMeta>(m_meta); }
 
-  [[nodiscard]] const LeafMeta &leaf() unsafe__ const {
+  [[nodiscard]] const LeafMeta &leaf() unsafe_ const {
     return std::get<LeafMeta>(m_meta);
   }
 
-  [[nodiscard]] const BranchMeta &branch() unsafe__ const {
+  [[nodiscard]] const BranchMeta &branch() unsafe_ const {
     return std::get<BranchMeta>(m_meta);
   }
 
@@ -297,7 +345,8 @@ public: // Getters
 
   [[nodiscard]] const Key &at(long idx) const noexcept {
     assert(m_numfilled > idx);
-    return raw()[idx];
+    const auto &key_at_idx = raw()[idx];
+    return key_at_idx;
   }
 
   [[nodiscard]] const Key &first() const noexcept { return at(0); }
@@ -307,10 +356,18 @@ public: // Getters
   [[nodiscard]] Iterator begin() noexcept {
     return Iterator{*this, 0, *m_tree};
   }
+        
+        [[nodiscard]] Iterator begin() const noexcept {
+                return Iterator{*this, 0, *m_tree};
+        }
 
   [[nodiscard]] Iterator end() noexcept {
     return Iterator{*this, m_numfilled, *m_tree};
   }
+        
+        [[nodiscard]] Iterator end() const noexcept {
+                return Iterator{*this, m_numfilled, *m_tree};
+        }
 
   [[nodiscard]] std::optional<storage::Position> self() const noexcept {
     if (m_header)
@@ -384,7 +441,7 @@ public:
   bool operator<=>(const Node &rhs) const noexcept = default;
 
 private: // Helpers
-  Iterator make_sibling(LeafMeta &asleaf, long middle_idx) noexcept {
+  Iterator spill_right(LeafMeta &asleaf, long middle_idx) noexcept {
     const auto pivot_idx = middle_idx + 1;
     auto sibling_ptr = std::make_shared<Node>(*m_tree, m_mem, m_header);
     Node &sibling = *sibling_ptr;
@@ -410,9 +467,9 @@ private: // Helpers
   }
 
 public: // API
+  /// @brief This insert routine relies on us knowing where exactly the
+  /// data should reside in it -- i.e `it`.
   Iterator insert(const Key &key, const Val &val, Iterator it) {
-    assert(it.key() && it.key().value() != key);
-
     const auto idx = it.index();
     auto &as_leaf = leaf();
     as_leaf.keys_[idx] = key;
@@ -422,10 +479,11 @@ public: // API
     if (is_ok())
       return it;
 
-    // Rebalance
+    // Not ok. Perform rebalancing policy.
+    // That is - regular B-tree for now.
 
     const auto middle_idx = (NumRecords + 1) / 2;
-    Iterator pivot = make_sibling(leaf(), middle_idx);
+    Iterator pivot = spill_right(leaf(), middle_idx);
     Iterator pos = raise_to_parent(pivot);
     return pos;
   }
@@ -446,7 +504,7 @@ public: // API
 
     long idx = std::distance(beginning, hi);
     auto it = Iterator{*this, idx, *m_tree};
-    return std::make_pair(it, *hi == target);
+    return std::make_pair(it, *hi == target && m_numfilled > 0);
   }
 
 private:
@@ -476,17 +534,55 @@ public: // Constructor
   Iterator(const Iterator &) noexcept = default;
 
   /// Tree::begin iterator
-  explicit Iterator(Btree &tree, bool is_ok = true)
-      : m_node{&tree.m_root}, m_index{0}, m_tree{&tree},
-        m_ok{!(is_ok && tree.m_root.is_empty())} {}
+  explicit Iterator(Btree &tree) : m_node{nullptr}, m_index{0}, m_tree{&tree} {
+    Node &cur = tree.root();
+    while (cur.is_branch()) {
+      const auto &branch_meta = cur.branch();
+
+      assert(cur.numfilled() > 0);
+      const Position last_link = branch_meta.links_[0];
+
+      if (auto ptr = Node::LinkToPtrMap().at(last_link); ptr) {
+        cur = *ptr;
+        continue;
+      }
+
+      // TODO:
+      // Fetch Node from media and put it in memory
+      // As of now this path should be avoided.
+      assert(false);
+    }
+
+    m_node = &cur;
+  }
 
   /// Iterator to a specific location in the tree
   Iterator(Node &node, long index, Btree &tree)
       : m_node{&node}, m_index{index}, m_tree{&tree} {}
 
-  static Iterator begin(Btree &tree) noexcept { return Iterator{tree}; }
+  static Iterator begin(Btree &tree) { return Iterator{tree}; }
 
-  static Iterator end(Btree &tree) noexcept { return Iterator{tree, true}; }
+  static Iterator end(Btree &tree) {
+    Node &cur = tree.root();
+    while (cur.is_branch()) {
+      const auto &branch_meta = cur.branch();
+
+      assert(cur.numfilled() > 0);
+      const Position last_link = branch_meta.links_[cur.numfilled() - 1];
+
+      if (auto ptr = Node::LinkToPtrMap().at(last_link); ptr) {
+        cur = *ptr;
+        continue;
+      }
+
+      // TODO:
+      // Fetch Node from media and put it in memory
+      // As of now this path should be avoided.
+      assert(false);
+    }
+
+    return Iterator{cur, cur.numfilled(), tree};
+  }
 
 public:
   ~Iterator() noexcept = default;
@@ -494,9 +590,21 @@ public:
   Iterator &operator=(const Iterator &) = default;
 
 public: // Properties
-  optional_cref<Val> val() const noexcept { return std::nullopt; }
+  optional_cref<Val> val() const noexcept {
+    assert(m_node->numfilled() > m_index);
+    assert(m_tree && m_node && m_index >= 0);
+    if (m_node->is_branch())
+      return std::nullopt;
+    const auto &leaf_meta = m_node->leaf();
+    return std::make_optional(std::cref(leaf_meta.vals_[m_index]));
+  }
 
-  optional_cref<Key> key() const noexcept { return std::nullopt; }
+  optional_cref<Key> key() const noexcept {
+    assert(m_node->numfilled() > m_index);
+    assert(m_tree && m_node && m_index >= 0);
+
+    return std::make_optional(std::cref(m_node->at(m_index)));
+  }
 
   const Node &node() const noexcept { return *m_node; }
 
@@ -523,52 +631,60 @@ private:
   ///      /   |   \
   ///  |1 2| |4 5| |7 8|
   ///
-  /// For example, if the this points to 3 in the root node, the value following
-  /// it resides in the child node - 4.
+  /// For example, if the this points to 3 in the root node, the value
+  /// following it resides in the child node - 4.
   /// @note As of now this is more like next_mem_()
   std::optional<Iterator> next_() const noexcept {
     // Case 1: Get follower in a child
     const long numfilled = m_node->numfilled();
     if (m_node->is_branch() && m_index < numfilled) {
       const Position link_pos = m_node->branch().links_[m_index + 1];
-      Node &link_node = *Node::LinkMap().at(link_pos);
+      Node &link_node = *Node::LinkToPtrMap().at(link_pos);
       return std::make_optional(Iterator{link_node, 0, *m_tree});
     }
 
     // Case 2: Get follower in the current node
-    if (m_index < numfilled - 1)
+    if (m_index < numfilled - 1 || m_node->is_rightmost())
       return std::make_optional(Iterator{*m_node, m_index + 1, *m_tree});
 
     assert(m_index == numfilled);
 
+    auto first_more_than = [&](const Key &origin_ref) -> optional_cref<Node> {
+      auto parent_opt = parent_of_node(*m_node);
+      while (parent_opt.has_value()) {
+        const Node &parent = parent_opt.value().get();
+        if (origin_ref > parent.last()) {
+          parent_opt = parent_of_node(parent);
+          continue;
+        }
+
+        return parent;
+      }
+      return std::nullopt;
+    };
+
     // Case 3: Get follower in parent (or the parent's parent)
     const auto origin_ref = m_node->at(m_index);
-    auto parent_opt = parent_of_node(*m_node);
-    while (parent_opt.has_value()) {
-      const Node &parent = parent_opt.value().get();
-      if (origin_ref > parent.last()) {
-        parent_opt = parent_of_node(parent);
-        continue;
-      }
+    const auto parent_opt = first_more_than(origin_ref);
+    if (!parent_opt)
+      return std::nullopt;
 
-      for (long idx = 0; idx < parent.numfilled(); ++idx)
-        if (origin_ref < parent.at(idx))
-          return std::make_optional(
-              Iterator{const_cast<Node &>(parent), idx, *m_tree});
+    const Node &parent = parent_opt.value();
 
-      // Should be unreachable
-      assert(false);
-    }
+    for (long idx = 0; idx < parent.numfilled(); ++idx)
+      if (origin_ref < parent.at(idx))
+        return std::make_optional(
+            Iterator{const_cast<Node &>(parent), idx, *m_tree});
 
+    assert(false);
     return std::nullopt;
   }
 
   std::optional<Iterator> prev_() const noexcept {
     // Case 1: Get predecessor in a child
-    const long numfilled = m_node->numfilled();
     if (m_node->is_branch() && m_index > 0) {
       const Position link_pos = m_node->branch().links_[m_index - 1];
-      Node &link_node = *Node::LinkMap().at(link_pos);
+      Node &link_node = *Node::LinkToPtrMap().at(link_pos);
       return std::make_optional(
           Iterator{link_node, link_node.numfilled(), *m_tree});
     }
@@ -584,7 +700,7 @@ private:
     auto parent_opt = parent_of_node(*m_node);
     while (parent_opt.has_value()) {
       const Node &parent = parent_opt.value().get();
-      if (origin_ref < parent.begin()) {
+      if (origin_ref < parent.first()) {
         parent_opt = parent_of_node(parent);
         continue;
       }
@@ -602,14 +718,15 @@ private:
   }
 
 public: // Iterator operations
-  reference operator*() const { return *m_node; }
+  reference operator*() const noexcept { return *m_node; }
 
-  pointer operator->() const { return &(operator*()); }
+  pointer operator->() const noexcept { return &(operator*()); }
 
   Iterator &operator++() {
-    if (m_ok)
-      if (const auto next_opt = next_(); next_opt)
-        *this = next_opt.value();
+    assert(m_node->numfilled() > m_index);
+    assert(m_tree && m_node && m_index >= 0);
+    if (const auto next_opt = next_(); next_opt)
+      *this = next_opt.value();
     return *this;
   }
 
@@ -620,9 +737,10 @@ public: // Iterator operations
   }
 
   Iterator &operator--() {
-    if (m_ok)
-      if (const auto prev_opt = prev_(); prev_opt)
-        *this = prev_opt.value();
+    assert(m_node->numfilled() <= m_index);
+    assert(m_tree && m_node && m_index >= 0);
+    if (const auto prev_opt = prev_(); prev_opt)
+      *this = prev_opt.value();
     return *this;
   }
 
@@ -638,11 +756,8 @@ private:
   Node *m_node;
   long m_index;
   Btree<Config> *m_tree;
-  bool m_ok{false};
 };
 
 static_assert(std::bidirectional_iterator<Btree<DefaultBtreeConfig>::Iterator>);
 
 } // namespace internal::btree
-
-#endif // _EUGENE_BTREE_INCLUDED_
