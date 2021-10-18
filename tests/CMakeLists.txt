@@ -1,7 +1,3 @@
-
-
-
-
 set(TESTS_DEPENDENCIES catch2)
 
 ############################## Main ()
@@ -14,3 +10,4 @@ target_link_libraries(test__main_fun ${TESTS_DEPENDENCIES})
 add_executable(test__itworks TestItWorks.cpp)
 target_link_libraries(test__itworks PUBLIC test__main_fun)
 add_test(NAME ItWorks COMMAND test__itworks)
+

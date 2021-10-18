@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.19)
 project(bt)
 
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/build")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY)
 
 # Gets populated by internal/ subdir
 define_property(GLOBAL PROPERTY EUGENE_INTERNAL_LIBS_GLOBAL_LIST BRIEF_DOCS "internal libs of eugene" FULL_DOCS "internal libs of eugene")
@@ -18,3 +18,5 @@ add_subdirectory(src/internal)
 add_subdirectory(src/eugene)
 
 add_subdirectory(cients)
+
+add_subdirectory(tests)
