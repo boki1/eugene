@@ -74,16 +74,19 @@ public:
 ///
 /// \param argc - number of m_files for compress
 /// \param argv - path's to m_files for compress
-        Compressor(const int argc, const char *argv[])
+        Compressor(const int argc, const char *argv[], const std::string& compressed_name = "")
         {
                 m_files.reserve(argc - 1);
                 for (int i = 1; i < argc; ++i)
                         m_files.emplace_back(argv[i]);
                 
-                if (argc == 2) {
-                        m_compressed_name = m_files[0];
-                        m_compressed_name += ".huff";
-                } else
+//                if (argc == 1)
+//                        TODO: Logger task
+                if (!compressed_name.empty())
+                        m_compressed_name = compressed_name;
+                else if(argc == 2)
+                        m_compressed_name = m_files[0] + ".huff";
+                else
                         m_compressed_name = "bundle.huff";
         }
 
@@ -198,7 +201,7 @@ private:
                 huff_trie *is_leaf = m_trie.data() + 2; //!< is_leaf is the pointer that traverses through leaves and
                 huff_trie *curr = m_trie.data() + m_symbols;
         
-                for (int i = 0; i < m_symbols - 1; i++) {
+                for (unsigned long i = 0; i < m_symbols - 1; i++) {
                         curr->number = min1->number + min2->number;
                         curr->left = min1;
                         curr->right = min2;
@@ -480,7 +483,7 @@ private:
 /// \param size - size of the original file
         void write_file_size(unsigned long size)
         {
-                for (int i = 0; i < Byte; i++) {
+                for (size_t i = 0; i < Byte; i++) {
                         write_from_ch(size % 256);
                         size /= 256;
                 }
