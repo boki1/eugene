@@ -4,6 +4,6 @@
 
 TEST_CASE("Compressor compress", "[compressor]")
 {
-        Compressor compressor{""};
+        compression::Compressor compressor{2, ""};
         REQUIRE(true);
 }

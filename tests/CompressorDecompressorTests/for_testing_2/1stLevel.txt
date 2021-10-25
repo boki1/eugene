@@ -1,1 +1,0 @@
-This is .txt file from first level of folder ordering.

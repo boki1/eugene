@@ -94,7 +94,6 @@ namespace compression
                                 else
                                         m_all_size += fs::file_size(file);
                         }
-                        
                         m_total_bits = Folder + 9 * m_files.size();
                         for (const auto &item: m_files) {
                                 for (const char *c = item.c_str(); *c; c++)
@@ -519,7 +518,8 @@ namespace compression
             /// \param argv - path's to m_files for compress
             Compressor(const int argc, const char *argv[], const std::string &compressed_name = "")
             {
-                    std::vector<std::string> files(argc - 1);
+                    std::vector<std::string> files;
+                    files.reserve(argc - 1);
                     std::string new_compressed_name;
                     for (int i = 1; i < argc; ++i)
                             files.emplace_back(argv[i]);

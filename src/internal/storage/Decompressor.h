@@ -194,14 +194,13 @@ namespace decompression
                 std::string create_new_file()
                 {
                         const int file_name_length = process_byte_number();
-                        std::string new_file;
-                        new_file.reserve(file_name_length + 4);
+                        unsigned char new_file[file_name_length + 4];
                         write_file_name(new_file, file_name_length);
-                        return new_file;
+                        return reinterpret_cast<const char *>(new_file);
                 }
 
-/// \brief Decodes current file's name and writes file name to new_file string
-                void write_file_name(std::string &new_file, int file_name_length)
+/// \brief Decodes current file's name and writes file name to new_file char array
+                void write_file_name(unsigned char *new_file, int file_name_length)
                 {
                         huff_trie *node;
                         new_file[file_name_length] = 0;
@@ -220,7 +219,7 @@ namespace decompression
                                         m_current_byte <<= 1;
                                         m_current_bit_count--;
                                 }
-                                new_file[i] = static_cast<char>(node->character);
+                                new_file[i] = node->character;
                         }
                 }
 
