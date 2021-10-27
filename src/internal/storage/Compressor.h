@@ -16,7 +16,6 @@
 #include <fstream>
 #include <algorithm>
 
-static constexpr size_t Byte = CHAR_BIT;
 static constexpr size_t Folder = 16;
 static constexpr size_t OsBites = 64;
 
@@ -74,10 +73,19 @@ namespace internal::compression
 /// **2** whenever we see a new folder we will write_from_ch seventh then start writing from fourth to eighth
 namespace compression
 {
-    namespace storage::huff_trie
+    namespace storage::detail
     {
         class CompressorInternal {
         public:
+                static std::string return_file_info(const std::string &path)
+                {
+                        std::ifstream in(path, std::ifstream::binary);
+                        std::string buff(fs::file_size(path), 0);
+                
+                        in.read(buff.data(), buff.size());
+                        return buff;
+                }
+                
                 CompressorInternal() = default;
                 
                 CompressorInternal(std::vector<std::string> files, std::string new_compressed_name)
@@ -114,7 +122,7 @@ namespace compression
                         
                         m_compressed_fp = fopen(m_compressed_name.c_str(), "wb");
                         fwrite(&m_symbols, 1, 1, m_compressed_fp);
-                        m_total_bits += Byte;
+                        m_total_bits += CHAR_BIT;
                         
                         process();
                         all_file_write();
@@ -125,7 +133,7 @@ namespace compression
                         std::cout << "Compression is complete" << std::endl;
                 }
                 
-                /// \brief This structure will be used to create the trie
+/// \brief This structure will be used to create the trie
                 struct huff_trie {
                         huff_trie *left{nullptr}, *right{nullptr}; //!< left and right nodes of the m_trie_root
                         unsigned char character; //!< associated character in the m_trie_root node
@@ -147,9 +155,9 @@ namespace compression
                 
                 FILE *m_compressed_fp = nullptr; //!< file pinter to the new created compressed file
                 std::map<unsigned char, int> m_occurrence_symbol; //!< key-value pair
-                //!< in which keys are m_symbols and values are their number of occurrences
+//!< in which keys are m_symbols and values are their number of occurrences
                 
-                std::vector<huff_trie> m_trie; //!< vector of huff_trie's that represents trie
+                std::vector<huff_trie> m_trie; //!< vector of detail's that represents trie
                 
                 std::string m_compressed_name; //!< new name of the compressed file
                 unsigned long m_all_size = 0; //!< size of the original file or folder
@@ -157,22 +165,22 @@ namespace compression
                 unsigned long m_symbols = 0; //!< count of the file or folder m_symbols
                 
                 std::map<unsigned char, std::string> m_char_huffbit; //!< transformation string
-                //!< is put to m_str_arr array to make the compression process more time efficient
+//!< is put to m_str_arr array to make the compression process more time efficient
                 unsigned char m_current_byte = '\0'; //!< unsigned char value
-                //!< that represents the m_current_byte
+//!< that represents the m_current_byte
                 int m_current_bit_count = 0; //!< integer value of m_current_bit_count
                 
-                /// \brief First creates the base of trie(and then sorting them by ascending frequencies).
-                /// Then creates pointers that traverses through leaf's.
-                /// At every cycle, 2 of the least weighted nodes will be chosen to
-                /// create a new node that has weight equal to sum of their weights combined.
-                /// After we are done with these nodes they will become children of created nodes
-                /// and they will be passed so that they wont be used in this process again.
-                /// Finally, we are adding the bytes from m_trie_root to leaf's
-                /// and after this is done every leaf will have a transformation string that corresponds to it
-                /// It is actually a very neat process. Using 4th and 5th code blocks, we are making sure that
-                /// the most used character is using least number of bits.
-                /// Specific number of bits we re going to use for that character is determined by weight distribution
+/// \brief First creates the base of trie(and then sorting them by ascending frequencies).
+/// Then creates pointers that traverses through leaf's.
+/// At every cycle, 2 of the least weighted nodes will be chosen to
+/// create a new node that has weight equal to sum of their weights combined.
+/// After we are done with these nodes they will become children of created nodes
+/// and they will be passed so that they wont be used in this process again.
+/// Finally, we are adding the bytes from m_trie_root to leaf's
+/// and after this is done every leaf will have a transformation string that corresponds to it
+/// It is actually a very neat process. Using 4th and 5th code blocks, we are making sure that
+/// the most used character is using least number of bits.
+/// Specific number of bits we re going to use for that character is determined by weight distribution
                 void initialize_trie()
                 {
                         huff_trie *e = m_trie.data();
@@ -237,27 +245,22 @@ namespace compression
                         }
                 }
                 
-                /// \brief Count usage frequency of bytes inside the file and store the information
-                /// in long integer massive (bytesFreq) and parallel
-                ///
-                /// \param path - char sequence representing the path to a folder of file
+/// \brief Count usage frequency of bytes inside the file and store the information
+/// in long integer massive (bytesFreq) and parallel
+///
+/// \param path - char sequence representing the path to a folder of file
                 void count_file_bytes_freq(const std::string &path)
                 {
                         m_total_bits += OsBites;
-                        
-                        std::ifstream in(path, std::ifstream::binary);
-                        std::string buff(fs::file_size(path), 0);
-                        
-                        in.read(buff.data(), buff.size());
-                        
+                        const std::string buff = return_file_info(path);
                         
                         for (const auto &item: buff)
                                 m_occurrence_symbol[item]++;
                 }
                 
-                /// \brief This function counts usage frequency of bytes inside a folder
-                ///
-                /// \param path - char sequence representing the path to a folder of file
+/// \brief This function counts usage frequency of bytes inside a folder
+///
+/// \param path - char sequence representing the path to a folder of file
                 void count_folder_bytes_freq(const std::string &path)
                 {
                         m_total_bits += Folder;
@@ -279,8 +282,8 @@ namespace compression
                         }
                 }
                 
-                /// \brief Process the compression and write the compressed file size
-                /// (Manages second from part 2)
+/// \brief Process the compression and write the compressed file size
+/// (Manages second from part 2)
                 void process()
                 {
                         for (auto it = m_trie.begin(); it < m_trie.begin() + m_symbols; ++it) {
@@ -297,22 +300,22 @@ namespace compression
                                 write_bytes(huffbit);
                                 m_total_bits += it->bit.size() * (it->number);
                         }
-                        if (m_total_bits % Byte)
-                                m_total_bits = (m_total_bits / Byte + 1) * Byte;
+                        if (m_total_bits % CHAR_BIT)
+                                m_total_bits = (m_total_bits / CHAR_BIT + 1) * CHAR_BIT;
                         
                         
                         std::cout << "The size of the sum of ORIGINAL m_files is: " << m_all_size << " bytes" << std::endl;
-                        std::cout << "The size of the COMPRESSED file will be: " << m_total_bits / Byte << " bytes" << std::endl;
-                        std::cout << "Compressed file's size will be [%" << 100 * ((float) m_total_bits / Byte / (float) m_all_size)
+                        std::cout << "The size of the COMPRESSED file will be: " << m_total_bits / CHAR_BIT << " bytes" << std::endl;
+                        std::cout << "Compressed file's size will be [%" << 100 * ((float) m_total_bits / CHAR_BIT / (float) m_all_size)
                                   << "] of the original file"
                                   << std::endl;
-                        if (m_total_bits / Byte > m_all_size)
+                        if (m_total_bits / CHAR_BIT > m_all_size)
                                 std::cout << std::endl << "WARNING: COMPRESSED FILE'S SIZE WILL BE HIGHER THAN THE SUM OF ORIGINALS" << std::endl <<
                                           std::endl;
                 }
                 
-                /// \brief Writes all information in compressed order.
-                /// (Manages from third to seventh of part 2)
+/// \brief Writes all information in compressed order.
+/// (Manages from third to seventh of part 2)
                 void all_file_write()
                 {
                         write_file_count(m_files.size());
@@ -325,7 +328,7 @@ namespace compression
                                         long size = ftell(original_fp);
                                         rewind(original_fp);
                                         
-                                        if (m_current_bit_count == Byte) {
+                                        if (m_current_bit_count == CHAR_BIT) {
                                                 fwrite(&m_current_byte, 1, 1, m_compressed_fp);
                                                 m_current_bit_count = 0;
                                         }
@@ -338,7 +341,7 @@ namespace compression
                                         write_file_content(item);
                                         fclose(original_fp);
                                 } else {
-                                        if (m_current_bit_count == Byte) {
+                                        if (m_current_bit_count == CHAR_BIT) {
                                                 fwrite(&m_current_byte, 1, 1, m_compressed_fp);
                                                 m_current_bit_count = 0;
                                         }
@@ -351,16 +354,16 @@ namespace compression
                                 }
                         }
                         
-                        if (m_current_bit_count == Byte)
+                        if (m_current_bit_count == CHAR_BIT)
                                 fwrite(&m_current_byte, 1, 1, m_compressed_fp);
                         else {
-                                m_current_byte <<= Byte - m_current_bit_count;
+                                m_current_byte <<= CHAR_BIT - m_current_bit_count;
                                 fwrite(&m_current_byte, 1, 1, m_compressed_fp);
                         }
                 }
                 
-                /// \brief Open dir path and count regular m_files in it.
-                /// Then write this count in compressed file. (Manages third of part 2)
+/// \brief Open dir path and count regular m_files in it.
+/// Then write this count in compressed file. (Manages third of part 2)
                 void write_folder_files_count(const std::string &path)
                 {
                         int file_count = 0;
@@ -374,10 +377,10 @@ namespace compression
                         write_file_count(file_count);
                 }
                 
-                /// \brief This function manages all other function to make folder compression available.
-                /// (Manages from third to seventh of part 2 for a folder)
-                ///
-                /// \param path - folder name
+/// \brief This function manages all other function to make folder compression available.
+/// (Manages from third to seventh of part 2 for a folder)
+///
+/// \param path - folder name
                 void write_folder(const std::string &path)
                 {
                         write_folder_files_count(path);
@@ -390,7 +393,7 @@ namespace compression
                                 
                                 if (!entry.is_directory()) {
                                         FILE *original_fp = fopen(next_path.c_str(), "rb");
-                                        if (m_current_bit_count == Byte) {
+                                        if (m_current_bit_count == CHAR_BIT) {
                                                 fwrite(&m_current_byte, 1, 1, m_compressed_fp);
                                                 m_current_bit_count = 0;
                                         }
@@ -403,7 +406,7 @@ namespace compression
                                         write_file_content(next_path);
                                         fclose(original_fp);
                                 } else {
-                                        if (m_current_bit_count == Byte) {
+                                        if (m_current_bit_count == CHAR_BIT) {
                                                 fwrite(&m_current_byte, 1, 1, m_compressed_fp);
                                                 m_current_bit_count = 0;
                                         }
@@ -417,28 +420,26 @@ namespace compression
                         }
                 }
                 
-                /// \brief This function translates and writes bytes from current input file to the compressed file.
-                /// (Manages seventh of part 2)
-                ///
-                /// \param original_fp - file pointer to original file
-                /// \param size - size of the original file
+/// \brief This function translates and writes bytes from current input file to the compressed file.
+/// (Manages seventh of part 2)
+///
+/// \param original_fp - file pointer to original file
+/// \param size - size of the original file
                 void write_file_content(const std::string &path)
                 {
-                        std::ifstream in(path, std::ifstream::binary);
-                        std::string buff(fs::file_size(path), 0);
-                        in.read(buff.data(), buff.size());
-                        
+                        const std::string buff = return_file_info(path);
+        
                         for (const auto &item: buff)
                                 write_bytes(m_char_huffbit[item]);
                 }
                 
-                /// \brief Writes provided string bytes to the new compressed file
-                ///
-                /// \param for_write - string that will be written
+/// \brief Writes provided string bytes to the new compressed file
+///
+/// \param for_write - string that will be written
                 void write_bytes(const std::string &for_write)
                 {
                         for (const auto &item: for_write) {
-                                if (m_current_bit_count == Byte) {
+                                if (m_current_bit_count == CHAR_BIT) {
                                         fwrite(&m_current_byte, 1, 1, m_compressed_fp);
                                         m_current_bit_count = 0;
                                 }
@@ -457,10 +458,10 @@ namespace compression
                         }
                 }
                 
-                /// \brief This function writes bytes that are translated from current input file's name to the compressed file.
-                /// (Manages sixth of part 2)
-                ///
-                /// \param file_name - name of the file
+/// \brief This function writes bytes that are translated from current input file's name to the compressed file.
+/// (Manages sixth of part 2)
+///
+/// \param file_name - name of the file
                 void write_file_name(const std::string &file_name)
                 {
                         write_from_ch(file_name.size());
@@ -468,24 +469,24 @@ namespace compression
                                 write_bytes(m_char_huffbit[item]);
                 }
                 
-                /// \brief This function is writing byte count of current input file to compressed file using 8 bytes.
-                /// It is done like this to make sure that it can work on little, big or middle-endian systems.
-                /// (Manages fifth of part 2)
-                ///
-                /// \param size - size of the original file
+/// \brief This function is writing byte count of current input file to compressed file using 8 bytes.
+/// It is done like this to make sure that it can work on little, big or middle-endian systems.
+/// (Manages fifth of part 2)
+///
+/// \param size - size of the original file
                 void write_file_size(unsigned long size)
                 {
-                        for (size_t i = 0; i < Byte; i++) {
+                        for (size_t i = 0; i < CHAR_BIT; i++) {
                                 write_from_ch(size % 256);
                                 size /= 256;
                         }
                 }
                 
-                /// \brief This function is writing number of m_files we re going to translate inside current folder to compressed file's 2 bytes
-                /// It is done like this to make sure that it can work on little, big or middle-endian systems
-                /// (Manages third of part 2)
-                ///
-                /// \param file_count - number of m_files that are provided (argc - 1)
+/// \brief This function is writing number of m_files we re going to translate inside current folder to compressed file's 2 bytes
+/// It is done like this to make sure that it can work on little, big or middle-endian systems
+/// (Manages third of part 2)
+///
+/// \param file_count - number of m_files that are provided (argc - 1)
                 void write_file_count(unsigned long file_count)
                 {
                         unsigned char temp = file_count % 256;
@@ -494,14 +495,14 @@ namespace compression
                         write_from_ch(temp);
                 }
                 
-                /// \brief This function is used for writing the uChar to compressed file.
-                /// It does not write it directly as one byte! Instead it mixes uChar and current byte, writes 8 bits of it
-                /// and puts the rest to current byte for later use.
-                ///
-                /// \param ch - character
+/// \brief This function is used for writing the uChar to compressed file.
+/// It does not write it directly as one byte! Instead it mixes uChar and current byte, writes 8 bits of it
+/// and puts the rest to current byte for later use.
+///
+/// \param ch - character
                 void write_from_ch(unsigned char ch)
                 {
-                        m_current_byte <<= Byte - m_current_bit_count;
+                        m_current_byte <<= CHAR_BIT - m_current_bit_count;
                         m_current_byte |= (ch >> m_current_bit_count);
                         fwrite(&m_current_byte, 1, 1, m_compressed_fp);
                         m_current_byte = ch;
@@ -510,36 +511,33 @@ namespace compression
     }
     class Compressor {
     private:
-            storage::huff_trie::CompressorInternal compressor_internal;
+            using pimpl = storage::detail::CompressorInternal;
+            std::unique_ptr<pimpl> compressor_internal;
     public:
-            /// \brief Constructor of the compression class with which you can compress provided m_files
-            ///
-            /// \param argc - number of m_files for compress
-            /// \param argv - path's to m_files for compress
-            Compressor(const int argc, const char *argv[], const std::string &compressed_name = "")
+/// \brief Constructor of the compression class with which you can compress provided m_files
+///
+/// \param argc - number of m_files for compress
+/// \param argv - path's to m_files for compress
+            explicit Compressor(const std::vector<std::string>& args, const std::string &compressed_name = "")
             {
-                    std::vector<std::string> files;
-                    files.reserve(argc - 1);
                     std::string new_compressed_name;
-                    for (int i = 1; i < argc; ++i)
-                            files.emplace_back(argv[i]);
                     
-                    //                if (argc == 1)
-                    //                        TODO: Logger task
+//                if (args.empty())
+//                        TODO: Logger task
                     if (!compressed_name.empty())
                             new_compressed_name = compressed_name;
-                    else if (argc == 2)
-                            new_compressed_name = files[0] + ".huff";
+                    else if (args.size() == 1)
+                            new_compressed_name = args[0] + ".huff";
                     else
                             new_compressed_name = "bundle.huff";
                     
-                    compressor_internal = storage::huff_trie::CompressorInternal(files, new_compressed_name);
+                    compressor_internal = std::make_unique<pimpl>(args, new_compressed_name);
             }
             
-            /// \brief The main function of compression class that do all the magic with provided m_files.
+/// \brief The main function of compression class that do all the magic with provided m_files.
             void operator()()
             {
-                    compressor_internal();
+                    (*compressor_internal)();
             }
     };
 }

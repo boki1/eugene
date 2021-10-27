@@ -13,7 +13,6 @@
 
 static constexpr unsigned char Check = 0b10000000;
 static constexpr int Symbols = 256;
-static constexpr size_t Byte = CHAR_BIT;
 static constexpr int MkdirPermission = 0755;
 
 
@@ -45,16 +44,16 @@ static constexpr int MkdirPermission = 0755;
 ///    start writing the files(and folders) inside the current folder from third to seventh
 namespace decompression
 {
-    namespace storage::decompress
+    namespace storage::detail
     {
-        class DecompressorInternal {
+        class DecompressorImpl {
         public:
-                DecompressorInternal() = default;
+                DecompressorImpl() = default;
                 
-                explicit DecompressorInternal(FILE *compressed): m_compressed(compressed)
+                explicit DecompressorImpl(FILE *compressed): m_compressed(compressed)
                 { }
         
-                /// \brief The main function of decompression class that do all the magic with provided m_files.
+/// \brief The main function of decompression class that do all the magic with provided m_files.
                 void operator()()
                 {
                         fread(&m_symbols, 1, 1, m_compressed);
@@ -74,7 +73,7 @@ namespace decompression
                 }
         
         
-                /// \brief This structure will be used to represent the trie
+/// \brief This structure will be used to represent the trie
                 struct huff_trie {
                         huff_trie *zero{nullptr}, *one{nullptr}; //!< zero and one bit representation nodes of the m_trie_root
                         unsigned char character{'\0'}; //!< associated character in the trie node
@@ -118,7 +117,7 @@ namespace decompression
                         bool val;
                         if (m_current_bit_count == 0) {
                                 fread(&m_current_byte, 1, 1, m_compressed);
-                                m_current_bit_count = Byte;
+                                m_current_bit_count = CHAR_BIT;
                         }
                         val = m_current_byte & Check;
                         m_current_byte <<= 1;
@@ -135,7 +134,7 @@ namespace decompression
                         unsigned char val, temp_byte;
                         fread(&temp_byte, 1, 1, m_compressed);
                         val = m_current_byte | (temp_byte >> m_current_bit_count);
-                        m_current_byte = temp_byte << (Byte - m_current_bit_count);
+                        m_current_byte = temp_byte << (CHAR_BIT - m_current_bit_count);
                         return val;
                 }
 
@@ -151,7 +150,7 @@ namespace decompression
                         for (int i = 0; i < len; i++) {
                                 if (m_current_bit_count == 0) {
                                         fread(&m_current_byte, 1, 1, m_compressed);
-                                        m_current_bit_count = Byte;
+                                        m_current_bit_count = CHAR_BIT;
                                 }
                                 
                                 switch (m_current_byte & Check) {
@@ -183,14 +182,14 @@ namespace decompression
                 {
                         long int size = 0;
                         long int multiplier = 1;
-                        for (size_t i = 0; i < Byte; i++) {
+                        for (size_t i = 0; i < CHAR_BIT; i++) {
                                 size += process_byte_number() * multiplier;
                                 multiplier *= Symbols;
                         }
                         return size;
                 }
-
-///
+                
+                
                 std::string create_new_file()
                 {
                         const int file_name_length = process_byte_number();
@@ -209,7 +208,7 @@ namespace decompression
                                 while (node->zero || node->one) {
                                         if (m_current_bit_count == 0) {
                                                 fread(&m_current_byte, 1, 1, m_compressed);
-                                                m_current_bit_count = Byte;
+                                                m_current_bit_count = CHAR_BIT;
                                         }
                                         if (m_current_byte & Check) {
                                                 node = node->one;
@@ -234,7 +233,7 @@ namespace decompression
                                 while (node->zero || node->one) {
                                         if (m_current_bit_count == 0) {
                                                 fread(&m_current_byte, 1, 1, m_compressed);
-                                                m_current_bit_count = Byte;
+                                                m_current_bit_count = CHAR_BIT;
                                         }
                                         if (m_current_byte & Check) {
                                                 node = node->one;
@@ -283,11 +282,12 @@ namespace decompression
     }
     class Decompressor {
     private:
-            storage::decompress::DecompressorInternal decompressor_internal;
+            using pimpl = storage::detail::DecompressorImpl;
+            std::unique_ptr<pimpl> decompressor_impl;
     public:
-/// \brief Constructor of the decompression class with which you can decompress provided file
+/// \brief Constructor of the decompression class with which you can detail provided file
 ///
-/// \param path - path to the file for decompress
+/// \param path - path to the file for detail
             explicit Decompressor(const std::string &path)
             {
                     FILE *path_to_compressed;
@@ -297,13 +297,13 @@ namespace decompression
                             std::cout << "Please provide valid file name" << std::endl;
                             return;
                     }
-                    decompressor_internal = storage::decompress::DecompressorInternal(path_to_compressed);
+                    decompressor_impl = std::make_unique<pimpl>(path_to_compressed);
             }
 
 /// \brief The main function of decompression class that do all the magic with provided m_files.
             void operator()()
             {
-                    decompressor_internal();
+                    (*decompressor_impl)();
             }
     };
 }
