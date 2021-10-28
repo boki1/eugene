@@ -4,8 +4,17 @@ project(eugene)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/build")
 
-add_compile_options(-Wall -Wextra -pedantic -ggdb3)
+add_compile_options(
+	-Wall
+	-Wno-comment
+	-Wextra
+	-Werror
+	-pedantic
+	-ggdb3
+	-fdiagnostics-color
+	-fconcepts-diagnostics-depth=2)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 enable_testing()
 include(FetchContent)
@@ -27,4 +36,7 @@ add_subdirectory(src/eugene)
 
 add_subdirectory(clients)
 
-add_subdirectory(tests)
+if (NOT "$ENV{BUILD_TESTS}" STREQUAL "")
+	message("-- Building tests")
+	add_subdirectory(tests)
+endif()
