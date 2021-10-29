@@ -1,5 +1,5 @@
 set(BTREE_DIR "btree/")
-set(BTREE_SOURCES Btree.h)
+set(BTREE_SOURCES Btree.h BtreePrinter.h)
 list(TRANSFORM BTREE_SOURCES PREPEND ${BTREE_DIR})
 
 add_library(btree ${BTREE_SOURCES})
