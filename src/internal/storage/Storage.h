@@ -1,27 +1,46 @@
-#ifndef _EUGENE_STORAGEDEVICE_INCLUDED_
-#define _EUGENE_STORAGEDEVICE_INCLUDED_
+#pragma once
 
 #include <concepts>
+#include <functional>// std::hash
 
 #include <external/expected/Expected.h>
 
-namespace internal::storage
-{
-    	using Position = unsigned long int;
-    	static constexpr Position PositionPoison = 0x41CEBEEF;
-    
+namespace internal::storage {
+
+class Position {
+public:
+	Position() = default;
+	Position(const Position &) = default;
+
 	/*
-	* TODO
-	*/
-	template<typename Dev>
-	concept StorageDevice = true;
+	 * Intentionally implicit
+	 */
+	Position(long pos) : m_pos{pos}, m_isset{true} {}
+	operator long() { return m_pos; }
 
-	struct DefaultStorageDev {
+	static auto poison() { return Position(); }
 
-	};
+	[[nodiscard]] auto get() const noexcept { return m_pos; }
+	[[nodiscard]] bool is_set() const noexcept { return m_isset; }
 
-	static_assert(StorageDevice<DefaultStorageDev>, "Default storage device is not a storage device!");
-}
+	void set(long pos) noexcept {
+		m_pos = pos;
+		m_isset = true;
+	}
 
-#endif
+	bool operator==(const Position &rhs) const noexcept { return m_pos == rhs.m_pos; }
+	bool operator!=(const Position &rhs) const noexcept { return m_pos != rhs.m_pos; }
 
+private:
+	long m_pos{0x41CEBEEF};
+	bool m_isset{false};
+};
+
+template<typename Dev>
+concept StorageDevice = true;
+
+struct DefaultStorageDev {
+};
+
+static_assert(StorageDevice<DefaultStorageDev>, "Default storage device is not a storage device!");
+}// namespace internal::storage

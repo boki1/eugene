@@ -19,13 +19,13 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 enable_testing()
 include(FetchContent)
 
-# Gets populated by internal/ subdir
+# Gets populated by internal/ subdirs
 define_property(GLOBAL PROPERTY EUGENE_INTERNAL_LIBS_GLOBAL_LIST BRIEF_DOCS "internal libs of eugene" FULL_DOCS "internal libs of eugene")
 set_property(GLOBAL PROPERTY EUGENE_INTERNAL_LIBS_GLOBAL_LIST "")
 
-macro(add_internal_lib new_lib)
+macro(add_eugene_internal_lib new_lib)
     set_property(GLOBAL APPEND PROPERTY EUGENE_INTERNAL_LIBS_GLOBAL_LIST "${new_lib}")
-endmacro(add_internal_lib)
+endmacro(add_eugene_internal_lib)
 
 add_subdirectory(src/external)
 

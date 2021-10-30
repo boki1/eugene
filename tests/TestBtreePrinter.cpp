@@ -1,5 +1,5 @@
-#include <internal/btree/Btree.h>
-#include <internal/btree/BtreePrinter.h>
+#include <internal/storage/btree/Btree.h>
+#include <internal/storage/btree/BtreePrinter.h>
 
 #include <iostream>
 #include <ranges>
@@ -16,16 +16,20 @@ using it_t = bt_t::Iterator;
 
 // Btree Print Single Layer
 int main() {
-  bt_t bpt;
+	bt_t bpt;
+	bpt.prepare_root_for_inmem();
 
-//  for (const uint32_t index : iota(0) | take(node_t::records_())) {
-  for (const uint32_t index : iota(0, 10)) {
-    const config_::Key key = index;
-    const config_::Val val = index + 1;
+	for (const uint32_t index : iota(0) | take(node_t::num_records_per_node())) {
+		const config_::Key key = index;
+		const config_::Val val = index + 1;
 
-    [[maybe_unused]] const auto it = bpt.insert(key, val);
-  }
+		[[maybe_unused]] const auto it = bpt.insert(key, val);
+		if (!bpt.get(key)) {
+			std::cerr << "failed when looking for inserted key = " << key << '\n';
+			return -1;
+		}
+	}
 
-  btprinter_t printer{bpt};
-  printer.print();
+	btprinter_t printer{bpt};
+	printer.print();
 }

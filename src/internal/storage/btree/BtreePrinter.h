@@ -7,9 +7,19 @@
 #include <utility>
 #include <vector>
 
-#include <internal/btree/Btree.h>
+#include <internal/storage/btree/Btree.h>
 
 namespace internal::btree::util {
+
+template<typename InputIt>
+std::string join(InputIt begin, const InputIt end,
+                        std::string_view delim) {
+	std::stringstream ss;
+	while (begin < end - 1)
+		ss << *begin++ << delim;
+	ss << *begin;
+	return ss.str();
+}
 
 template<BtreeConfig Config>
 class BtreeYAMLPrinter {
@@ -23,16 +33,6 @@ public:
 
 	void operator()() noexcept { print(); }
 
-	template<typename InputIt>
-	static std::string join(InputIt begin, const InputIt end,
-	                        std::string_view delim) {
-		std::stringstream ss;
-		while (begin < end - 1)
-			ss << *begin++ << delim;
-		ss << *begin;
-		return ss.str();
-	}
-
 	void print_node(const Node *node, unsigned level = 1) noexcept {
 		const std::string indentation(level * 2, ' ');
 		m_out << indentation;
@@ -45,16 +45,18 @@ public:
 		m_out << '[' << join(beginning, actual_end, ", ") << "]\n";
 		if (node->is_branch()) {
 			m_out << indentation << "children: \n";
-			for (const auto link : node->branch().links_)
-				print_node(Node::fetch_node(link), level + 1);
+			auto links = node->branch().links_;
+			for (auto it = links.begin(); it != links.end() && *it != Position::poison(); ++it) {
+				print_node(&Node::Cache::the().fetch(*it), level + 1);
+			}
 		}
 	}
 
 	void print() noexcept {
-		m_out << "keys_per_block: " << Node::records_() << '\n';
+		m_out << "keys_per_block: " << Node::num_records_per_node() << '\n';
 		m_out << "tree:\n";
 
-		print_node(&m_btree.m_root);
+		print_node(m_btree.m_root);
 	}
 
 private:
