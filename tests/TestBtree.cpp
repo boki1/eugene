@@ -29,8 +29,7 @@ TEST_CASE("Btree insert", "[btree]") {
 
 	REQUIRE(node_t::num_links_per_branch() - 1 == node_t::num_records_per_node());
 
-	const uint32_t recs = node_t::num_records_per_node();
-	for (const uint32_t index : iota(0) | take(recs)) {
+	for (const uint32_t index : iota(0, 68)) {
 		const config_::Key key = index;
 		const config_::Val val = index + 1;
 		REQUIRE(!bpt.get(key).has_value());

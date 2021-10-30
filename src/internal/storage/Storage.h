@@ -1,7 +1,8 @@
 #pragma once
 
 #include <concepts>
-#include <functional>// std::hash
+#include <functional>
+#include <string>
 
 #include <external/expected/Expected.h>
 
@@ -30,6 +31,9 @@ public:
 
 	bool operator==(const Position &rhs) const noexcept { return m_pos == rhs.m_pos; }
 	bool operator!=(const Position &rhs) const noexcept { return m_pos != rhs.m_pos; }
+	bool operator==(long rhs) const noexcept { return m_pos == rhs; }
+
+	[[nodiscard]] std::string str() const noexcept { return std::to_string(m_pos); }
 
 private:
 	long m_pos{0x41CEBEEF};

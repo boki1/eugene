@@ -6,6 +6,7 @@
 #include <array>        // std::array
 #include <cassert>      // assert
 #include <cmath>        // std::ceil
+#include <iostream>     // std::cerr (for debugging purposes only)
 #include <memory>       // std::unique_ptr
 #include <optional>     // std::optional
 #include <tuple>        // std::tie
@@ -103,7 +104,7 @@ public:// API
 				++it;
 			if (cur->is_leaf())
 				return cur->insert(key, val, it);
-			if (it == cur->end())
+			if (it == end())
 				break;
 
 			const auto links = it->branch().links_;
@@ -239,6 +240,7 @@ public:
 
 			if (!m_buffer.contains(pos)) {
 				// Perform disk-io to get the Node value in the buffer
+				std::cerr << "Tried to fetch from position #" << pos.str() << " of consistent memory";
 				assert(false);
 			}
 
@@ -247,8 +249,8 @@ public:
 
 		Node &put(Position pos, std::unique_ptr<Node> &&inmem) noexcept {
 			assert(pos != Position::poison());
-
 			m_buffer[pos] = std::move(inmem);
+
 			return fetch(pos);
 		}
 
@@ -278,7 +280,6 @@ public:// Accessors
 	[[nodiscard]] bool is_root() const noexcept { return m_header.parent_ == Position::poison(); }
 
 	[[nodiscard]] const Header &header() const noexcept { return m_header; }
-	[[nodiscard]] Header &header_mut() noexcept { return m_header; }
 
 	[[nodiscard]] LeafMeta &leaf() unsafe_ { return std::get<LeafMeta>(m_meta); }
 	[[nodiscard]] BranchMeta &branch() unsafe_ { return std::get<BranchMeta>(m_meta); }
@@ -302,6 +303,20 @@ public:// Accessors
 		assert(m_numfilled > idx);
 		const auto &key_at_idx = raw()[idx];
 		return key_at_idx;
+	}
+
+	void add_branch_link(Position link) {
+		assert(is_branch());
+
+		/*
+		 * TODO:
+		 * Definitely do something about this. It should not be 0(1).
+		 */
+		for (int i = 0; i < num_links_per_branch(); ++i)
+			if (branch().links_[i] == Position::poison()) {
+				branch().links_[i] = link;
+				return;
+			}
 	}
 
 	[[nodiscard]] const Key &first() const noexcept { return at(0); }
@@ -332,8 +347,8 @@ public:// Accessors
 
 public:// Constructors
 	enum class ConstructionStorageFlag {
-		STORE,
-		DONT_STORE
+		POSITION_SET,
+		CALCULATE_POSITION
 	};
 
 	explicit Node(Bt &bt, Header header, ConstructionStorageFlag flag)
@@ -343,7 +358,7 @@ public:// Constructors
 		else
 			m_meta = LeafMeta{};
 
-		if (flag == ConstructionStorageFlag::STORE)
+		if (flag == ConstructionStorageFlag::CALCULATE_POSITION)
 			set_self(m_tree->allocate_node());
 	}
 
@@ -354,7 +369,7 @@ public:// Constructors
 	static Node RootDefault(Bt &bt) {
 		auto head = Header{
 		        bt.allocate_node(), Position::poison(), Position::poison(), Position::poison(), Type::Leaf};
-		return Node(bt, head, ConstructionStorageFlag::STORE);
+		return Node(bt, head, ConstructionStorageFlag::POSITION_SET);
 	}
 
 	Node &operator=(const Node &rhs) noexcept = default;
@@ -382,7 +397,7 @@ private:// Helpers
 
 		set_next(sibling_pos);
 
-		auto sibling_ptr = std::make_unique<Node>(tree(), sibling_head, ConstructionStorageFlag::STORE);
+		auto sibling_ptr = std::make_unique<Node>(tree(), sibling_head, ConstructionStorageFlag::POSITION_SET);
 
 		std::copy(asleaf.keys_.begin() + pivot_idx, asleaf.keys_.end(), sibling_ptr->leaf().keys_.begin());
 		std::copy(asleaf.vals_.begin() + pivot_idx, asleaf.vals_.end(), sibling_ptr->leaf().vals_.begin());
@@ -396,24 +411,32 @@ private:// Helpers
 
 	Iterator raise_to_parent(Iterator origin) noexcept {
 		Node &node = origin.node_mut();
+		const KeyRef &ref = origin.key().value();
 
 		if (node.is_root()) {
+			/*
+			 * Construct new root node
+			 */
 			const auto new_root_pos = m_tree->allocate_node();
 			auto new_root = std::make_unique<Node>(
 			        *node.m_tree,
 			        Header{new_root_pos, Position::poison(), Position::poison(), Position::poison(), Type::Branch},
-			        ConstructionStorageFlag::STORE);
-			const KeyRef &ref = origin.key().value();
+			        ConstructionStorageFlag::POSITION_SET);
 			new_root->branch().refs_[0] = ref;
 			new_root->m_numfilled = 1;
 			new_root->branch().links_[0] = self();
-			new_root->branch().links_[1] = next();
+			origin.node_mut().set_parent(new_root_pos);
 
 			m_tree->m_root = &Cache::the().put(new_root_pos, std::move(new_root));
 			return Iterator{*m_tree->m_root, 0, *m_tree};
 		}
 
-		return m_tree->end();
+		/*
+		 * Insert in the upper branch node
+		 * As of now this happens recursively.
+		 */
+		Node &parent_node = Cache::the().fetch(parent());
+		return parent_node.insert_ref(ref);
 	}
 
 public:// API
@@ -424,6 +447,40 @@ public:// API
 		auto &as_leaf = leaf();
 		as_leaf.keys_[idx] = key;
 		as_leaf.vals_[idx] = val;
+		++m_numfilled;
+
+		if (is_balanced())
+			return it;
+
+		// Not ok. Perform rebalancing policy.
+		// That is - regular B-tree for now.
+
+		bool was_root = is_root();
+		const uint32_t pivot_idx = std::ceil(NumRecords / 2);
+		Iterator pivot = spill_right(leaf(), pivot_idx);
+		Iterator pos = raise_to_parent(pivot);
+
+		if (was_root)
+			Cache::the().fetch(next()).set_parent(parent());
+		Cache::the().fetch(parent()).add_branch_link(next());
+
+		// Finalize rebalancing by modifying current node's meta data
+		set_numfilled(pivot_idx);
+
+		return pos;
+	}
+
+	Iterator insert_ref(const KeyRef &ref, std::optional<Iterator> it_opt = {}) {
+		if (!it_opt.has_value()) {
+			auto [it_, found] = find(ref);
+			if (found)
+				return it_;
+			it_opt = it_;
+		}
+
+		Iterator &it = it_opt.value();
+		auto &as_branch = branch();
+		as_branch.refs_[it.index()] = ref;
 		++m_numfilled;
 
 		if (is_balanced())
@@ -461,13 +518,6 @@ public:// API
 		long idx = std::distance(beginning, hi);
 		auto it = Iterator{*this, idx, *m_tree};
 		return std::make_pair(it, *hi == target && m_numfilled > 0);
-	}
-
-	Iterator insert(const Key &key, const Val &val) noexcept {
-		auto [it, found] = find(key);
-		if (found)
-			return m_tree->end();
-		return insert(key, val, it);
 	}
 
 private:
