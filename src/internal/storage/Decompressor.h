@@ -75,19 +75,10 @@ namespace decompression
         
 /// \brief This structure will be used to represent the trie
                 struct huff_trie {
-                        huff_trie *zero{nullptr}, *one{nullptr}; //!< zero and one bit representation nodes of the m_trie_root
+                        huff_trie *zero{nullptr};
+                        huff_trie *one{nullptr}; //!< zero and one bit representation nodes of the m_trie_root
                         unsigned char character{'\0'}; //!< associated character in the trie node
                 };
-
-/// \brief deallocate_trie function is used for deallocating trie
-///
-/// \param node
-                void deallocate_trie(huff_trie *node)
-                {
-                        if (node->zero)deallocate_trie(node->zero);
-                        if (node->one)deallocate_trie(node->one);
-                        delete node;
-                }
                 
                 huff_trie *m_trie_root = nullptr;
                 FILE *m_compressed = nullptr; //!< file pinter to the compressed file
@@ -277,6 +268,17 @@ namespace decompression
                                         translation(new_path, true);
                                 }
                         }
+                }
+
+        private:
+/// \brief deallocate_trie function is used for deallocating trie
+///
+/// \param node
+                void deallocate_trie(huff_trie *node)
+                {
+                        if (node->zero)deallocate_trie(node->zero);
+                        if (node->one)deallocate_trie(node->one);
+                        delete node;
                 }
         };
     }
