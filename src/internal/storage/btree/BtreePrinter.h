@@ -13,7 +13,7 @@ namespace internal::btree::util {
 
 template<typename InputIt>
 std::string join(InputIt begin, const InputIt end,
-                        std::string_view delim) {
+                 std::string_view delim) {
 	std::stringstream ss;
 	while (begin < end - 1)
 		ss << *begin++ << delim;
@@ -44,7 +44,7 @@ public:
 		const auto actual_end = beginning + node->numfilled();
 		m_out << '[' << join(beginning, actual_end, ", ") << "]\n";
 		if (node->is_branch()) {
-			m_out << indentation << "children: \n";
+			m_out << indentation << (level > 1 ? "  " : "") << "children: \n";
 			auto links = node->branch().links_;
 			for (auto it = links.begin(); it != links.end() && *it != Position::poison(); ++it) {
 				print_node(&Node::Cache::the().fetch(*it), level + 1);
@@ -53,7 +53,7 @@ public:
 	}
 
 	void print() noexcept {
-		m_out << "keys_per_block: " << Node::num_records_per_node() << '\n';
+		m_out << "keys_per_block: " << Node::num_records_per_node() - 1 << '\n';
 		m_out << "tree:\n";
 
 		print_node(m_btree.m_root);

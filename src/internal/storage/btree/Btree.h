@@ -2,7 +2,7 @@
 
 #include <internal/storage/Storage.h>
 
-#include <algorithm>    // std::min
+#include <algorithm>    // std::min, std::fill, std::copy
 #include <array>        // std::array
 #include <cassert>      // assert
 #include <cmath>        // std::ceil
@@ -101,7 +101,7 @@ public:// API
 		while (true) {
 			auto [it, next] = cur->find(key);
 			if (next)
-				++it;
+				++it.index();
 			if (cur->is_leaf())
 				return cur->insert(key, val, it);
 			if (it == end())
@@ -126,7 +126,7 @@ public:// API
 			}
 
 			if (next)
-				++it;
+				++it.index();
 
 			const auto links = it->branch().links_;
 			const auto pos = Position{links[it.index()]};
@@ -345,6 +345,8 @@ public:// Accessors
 
 	auto &tree() noexcept { return /* non null */ *m_tree; }
 
+	auto type() const noexcept { return m_header.type_; }
+
 public:// Constructors
 	enum class ConstructionStorageFlag {
 		POSITION_SET,
@@ -379,6 +381,11 @@ public:// Constructors
 	bool operator<=>(const Node &rhs) const noexcept = default;
 
 private:// Helpers
+	[[nodiscard]] static long middle_element() noexcept { return std::ceil(NumRecords / 2); }
+
+	enum class SmallestRefAction { COPY,
+		                       MOVE };
+
 	/*
 	 * Rebalancing is right-biased.
 	 *
@@ -386,57 +393,77 @@ private:// Helpers
 	 * whereas the second one stores the higher part. The smallest value of the right node is copied
 	 * (or referenced) in the parent node.
 	 */
-	Iterator spill_right(LeafMeta &asleaf, long pivot_idx) noexcept {
+	Iterator make_right_sibling(long pivot_idx, auto action = SmallestRefAction::COPY) noexcept {
 		const auto sibling_pos = m_tree->allocate_node();
 		const auto sibling_head = Header{
-		        sibling_pos,
-		        self(),
-		        Position::poison(),
-		        parent(),
-		        Type::Leaf};
-
-		set_next(sibling_pos);
-
+		        .self_ = sibling_pos,
+		        .prev_ = self(),
+		        .next_ = Position::poison(),
+		        .parent_ = parent(),
+		        .type_ = type()};
 		auto sibling_ptr = std::make_unique<Node>(tree(), sibling_head, ConstructionStorageFlag::POSITION_SET);
 
-		std::copy(asleaf.keys_.begin() + pivot_idx, asleaf.keys_.end(), sibling_ptr->leaf().keys_.begin());
-		std::copy(asleaf.vals_.begin() + pivot_idx, asleaf.vals_.end(), sibling_ptr->leaf().vals_.begin());
-		sibling_ptr->set_numfilled(NumRecords - pivot_idx);
+		long copy_idx = (action == SmallestRefAction::COPY ? pivot_idx : pivot_idx + 1);
+		auto transfer_meta = [copy_idx](const auto &data, auto &dest) {
+			std::copy(data.begin() + copy_idx, data.end(), dest.begin());
+		};
 
-		// Last step: Give ownership of the newly created node to the cache
+		if (is_leaf()) {
+			transfer_meta(leaf().keys_, sibling_ptr->leaf().keys_);
+			transfer_meta(leaf().vals_, sibling_ptr->leaf().vals_);
+		} else {
+			transfer_meta(branch().refs_, sibling_ptr->branch().refs_);
+			transfer_meta(branch().links_, sibling_ptr->branch().links_);
+			std::fill(branch().links_.begin() + copy_idx,
+			          branch().links_.end(),
+			          Position::poison());
+		}
+
+		sibling_ptr->set_numfilled(NumRecords - copy_idx);
+		set_next(sibling_pos);
+		if (parent().is_set())
+			Cache::the().fetch(parent()).add_branch_link(sibling_pos);
+		// Give ownership of the newly created node to the cache
 		Node::Cache::the().put(sibling_pos, std::move(sibling_ptr));
 
 		return Iterator{*this, pivot_idx, *m_tree};
 	}
 
-	Iterator raise_to_parent(Iterator origin) noexcept {
-		Node &node = origin.node_mut();
+	Iterator make_root(Iterator origin) noexcept {
 		const KeyRef &ref = origin.key().value();
+		const auto new_root_pos = m_tree->allocate_node();
+		auto new_root = std::make_unique<Node>(
+		        origin.tree(),
+		        Header{new_root_pos, Position::poison(), Position::poison(), Position::poison(), Type::Branch},
+		        ConstructionStorageFlag::POSITION_SET);
+		new_root->branch().refs_[0] = ref;
+		new_root->m_numfilled = 1;
 
-		if (node.is_root()) {
-			/*
-			 * Construct new root node
-			 */
-			const auto new_root_pos = m_tree->allocate_node();
-			auto new_root = std::make_unique<Node>(
-			        *node.m_tree,
-			        Header{new_root_pos, Position::poison(), Position::poison(), Position::poison(), Type::Branch},
-			        ConstructionStorageFlag::POSITION_SET);
-			new_root->branch().refs_[0] = ref;
-			new_root->m_numfilled = 1;
-			new_root->branch().links_[0] = self();
-			origin.node_mut().set_parent(new_root_pos);
+		new_root->branch().links_[0] = self();
+		new_root->branch().links_[1] = next();
+		Cache::the().fetch(self()).set_parent(new_root_pos);
+		Cache::the().fetch(next()).set_parent(new_root_pos);
 
-			m_tree->m_root = &Cache::the().put(new_root_pos, std::move(new_root));
-			return Iterator{*m_tree->m_root, 0, *m_tree};
-		}
+		m_tree->m_root = &Cache::the().put(new_root_pos, std::move(new_root));
+		return Iterator{*m_tree->m_root, 0, *m_tree};
+	}
 
-		/*
-		 * Insert in the upper branch node
-		 * As of now this happens recursively.
-		 */
-		Node &parent_node = Cache::the().fetch(parent());
-		return parent_node.insert_ref(ref);
+	Iterator rebalance(auto action = SmallestRefAction::COPY) noexcept {
+		const uint32_t pivot_idx = Node::middle_element();
+		Iterator pivot = make_right_sibling(pivot_idx, action);
+		(void) action;
+
+		const Iterator insert_pos = [&] {
+			if (is_root())
+				return make_root(pivot);
+
+			const KeyRef &ref = pivot.key().value();
+			Node &parent_node = Cache::the().fetch(parent());
+			return parent_node.insert_ref(ref);
+		}();
+
+		set_numfilled(pivot_idx);
+		return insert_pos;
 	}
 
 public:// API
@@ -452,22 +479,7 @@ public:// API
 		if (is_balanced())
 			return it;
 
-		// Not ok. Perform rebalancing policy.
-		// That is - regular B-tree for now.
-
-		bool was_root = is_root();
-		const uint32_t pivot_idx = std::ceil(NumRecords / 2);
-		Iterator pivot = spill_right(leaf(), pivot_idx);
-		Iterator pos = raise_to_parent(pivot);
-
-		if (was_root)
-			Cache::the().fetch(next()).set_parent(parent());
-		Cache::the().fetch(parent()).add_branch_link(next());
-
-		// Finalize rebalancing by modifying current node's meta data
-		set_numfilled(pivot_idx);
-
-		return pos;
+		return rebalance(SmallestRefAction::COPY);
 	}
 
 	Iterator insert_ref(const KeyRef &ref, std::optional<Iterator> it_opt = {}) {
@@ -486,19 +498,7 @@ public:// API
 		if (is_balanced())
 			return it;
 
-		// Not ok. Perform rebalancing policy.
-		// That is - regular B-tree for now.
-
-		const uint32_t pivot_idx = std::ceil(NumRecords / 2);
-		Iterator pivot = spill_right(leaf(), pivot_idx);
-		Iterator pos = raise_to_parent(pivot);
-
-		// Finalize rebalancing by modifying current node's meta data
-		set_numfilled(pivot_idx);
-		if (is_root())
-			set_parent(pos.node().self());
-
-		return pos;
+		return rebalance(SmallestRefAction::MOVE);
 	}
 
 	std::pair<Iterator, bool> find(const Key &target) noexcept {
@@ -587,6 +587,8 @@ public:
 	Iterator &operator=(const Iterator &) = default;
 
 public:// Properties
+	Btree<Config> &tree() const noexcept { return *m_node->m_tree; }
+
 	optional_cref<Val> val() const noexcept {
 		assert(m_node->numfilled() > m_index);
 		assert(m_tree && m_node && m_index >= 0);
@@ -604,10 +606,10 @@ public:// Properties
 	}
 
 	const Node &node() const noexcept { return *m_node; }
-
 	Node &node_mut() noexcept { return *m_node; }
 
 	long index() const noexcept { return m_index; }
+	long &index() noexcept { return m_index; }
 
 private:
 	static optional_cref<Node> parent_of_node(const Node &node) {
