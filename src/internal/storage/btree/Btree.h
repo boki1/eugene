@@ -163,6 +163,8 @@ public:// Accessors
 	[[nodiscard]] Node *root_ptr() noexcept { return m_root; }
 	[[nodiscard]] Node &root() noexcept { return *m_root; }
 
+	[[nodiscard]] uint32_t height() const noexcept { return m_height; }
+
 private:
 	Position allocate_node() noexcept {
 		auto pos = m_stored_end;
@@ -173,6 +175,7 @@ private:
 private:
 	Storage m_storage;
 	Node *m_root{nullptr};
+	uint32_t m_height{1};
 	Position m_stored_end{0ul};
 };
 
@@ -423,6 +426,17 @@ private:// Helpers
 		set_next(sibling_pos);
 		if (parent().is_set())
 			Cache::the().fetch(parent()).add_branch_link(sibling_pos);
+
+		/*
+		 * Highly inefficient. Improve ASAP.
+		 * Probably at some point parent pointers will get removed.
+		 */
+		if (sibling_ptr->is_branch()) {
+			auto &sibling_links = sibling_ptr->branch().links_;
+			for (auto link = sibling_links.begin(); link != sibling_links.end() && *link != Position::poison(); ++link)
+				Cache::the().fetch(*link).set_parent(sibling_pos);
+		}
+
 		// Give ownership of the newly created node to the cache
 		Node::Cache::the().put(sibling_pos, std::move(sibling_ptr));
 
@@ -445,13 +459,16 @@ private:// Helpers
 		Cache::the().fetch(next()).set_parent(new_root_pos);
 
 		m_tree->m_root = &Cache::the().put(new_root_pos, std::move(new_root));
+
+		// Update tree height
+		++m_tree->m_height;
+
 		return Iterator{*m_tree->m_root, 0, *m_tree};
 	}
 
 	Iterator rebalance(auto action = SmallestRefAction::COPY) noexcept {
 		const uint32_t pivot_idx = Node::middle_element();
 		Iterator pivot = make_right_sibling(pivot_idx, action);
-		(void) action;
 
 		const Iterator insert_pos = [&] {
 			if (is_root())
