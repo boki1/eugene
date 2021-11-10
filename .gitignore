@@ -1,12 +1,21 @@
 # .DS_Store macOS Desktop Service store
 *.DS_Store
 
+# Eugene script
+build
+compile_commands.json
+
 # IDEA
 .idea
 cmake-build-debug
-build/
-out
+cmake-build-Release
+
+# CMake
+Testing
 CMakeFiles
+
+# QtCreator
+CMakeLists.txt.user
 
 # Prerequisites
 *.d
