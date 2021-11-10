@@ -1,6 +1,13 @@
 # .DS_Store macOS Desktop Service store
 *.DS_Store
 
+# IDEA
+.idea
+cmake-build-debug
+build/
+out
+CMakeFiles
+
 # Prerequisites
 *.d
 
@@ -34,4 +41,6 @@
 *.out
 *.app
 
-build/
+# Tags
+tags
+scope.out
