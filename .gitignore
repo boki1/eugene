@@ -1,3 +1,6 @@
+# .DS_Store macOS Desktop Service store
+*.DS_Store
+
 # Eugene script
 build
 compile_commands.json

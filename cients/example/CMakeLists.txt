@@ -1,0 +1,2 @@
+add_executable(example_client Main.cpp)
+target_link_libraries(example_client PRIVATE eugene)
