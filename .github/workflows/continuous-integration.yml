@@ -1,0 +1,39 @@
+name: build-and-tests
+
+on: push
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    env:
+      BUILD_TYPE: Debug
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-20.04]
+        cxx: [g++-11]
+        cc: [gcc-11]
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup dependencies
+        run: |
+             sudo apt update
+             sudo apt install gcc-11 g++-11
+
+      - name: Configure CMake
+        env:
+          CXX: ${{ matrix.cxx }}
+        shell: bash
+        working-directory: ${{github.workspace}}
+        run: cmake .
+
+      - name: Build
+        working-directory: ${{github.workspace}}
+        shell: bash
+        run: cmake --build . --config $BUILD_TYPE
+
+      - name: Test
+        working-directory: ${{github.workspace}}
+        shell: bash
+        run: ctest -C $BUILD_TYPE --no-tests=error

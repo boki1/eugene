@@ -8,15 +8,23 @@ target_include_directories(btree PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(btree PRIVATE pthread)
 
 get_property(EUGENE_INTERNAL_LIBS GLOBAL PROPERTY EUGENE_INTERNAL_LIBS_PROPERTY)
-add_internal_lib(btree)
+add_eugene_internal_lib(btree)
 
-###############
-set(STORAGE_DIR "storage/")
-set(STORAGE_SOURCES Storage.h Compressor.h Decompressor.h)
-list(TRANSFORM STORAGE_SOURCES PREPEND ${STORAGE_DIR})
+set(BTREE_SOURCES
+        btree/Btree.h
+        btree/BtreePrinter.h)
 
+set(COMPR_SOURCE
+        Compressor.h
+        Decompressor.h)
+
+set(STORAGE_SOURCES Storage.h "${BTREE_SOURCE}" "${COMPR_SOURCE}")
+list(TRANSFORM STORAGE_SOURCES PREPEND "storage/")
 
 add_library(storage "${STORAGE_SOURCES}")
+add_eugene_internal_lib(storage)
+
 set_target_properties(storage PROPERTIES LINKER_LANGUAGE CXX)
-target_include_directories(storage PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
-add_internal_lib(storage)
+
+target_include_directories(storage PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../")
+target_link_libraries(storage PRIVATE pthread expected)

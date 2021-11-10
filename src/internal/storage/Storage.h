@@ -1,17 +1,50 @@
-#ifndef _EUGENE_STORAGEDEVICE_INCLUDED_
-#define _EUGENE_STORAGEDEVICE_INCLUDED_
+#pragma once
+
+#include <concepts>
+#include <functional>
+#include <string>
+
+#include <external/expected/Expected.h>
 
 namespace internal::storage {
 
-template<typename Dev>
-concept StorageDevice = requires(Dev dev) {
-	{ dev.close() } -> std::same_as<void>;
-	{ dev.open() } -> std::same_as<void>;
-	{ dev.read() } -> std::same_as<void>;
-	{ dev.write() } -> std::same_as<void>;
-	{ dev.seek() } -> std::same_as<void>;
+class Position {
+public:
+	Position() = default;
+	Position(const Position &) = default;
+
+	/*
+	 * Intentionally implicit
+	 */
+	Position(long pos) : m_pos{pos}, m_isset{true} {}
+	operator long() { return m_pos; }
+
+	static auto poison() { return Position(); }
+
+	[[nodiscard]] auto get() const noexcept { return m_pos; }
+	[[nodiscard]] bool is_set() const noexcept { return m_isset; }
+
+	void set(long pos) noexcept {
+		m_pos = pos;
+		m_isset = true;
+	}
+
+	bool operator==(const Position &rhs) const noexcept { return m_pos == rhs.m_pos; }
+	bool operator!=(const Position &rhs) const noexcept { return m_pos != rhs.m_pos; }
+	bool operator==(long rhs) const noexcept { return m_pos == rhs; }
+
+	[[nodiscard]] std::string str() const noexcept { return std::to_string(m_pos); }
+
+private:
+	long m_pos{0x41CEBEEF};
+	bool m_isset{false};
 };
 
-}
+template<typename Dev>
+concept StorageDevice = true;
 
-#endif
+struct DefaultStorageDev {
+};
+
+static_assert(StorageDevice<DefaultStorageDev>, "Default storage device is not a storage device!");
+}// namespace internal::storage

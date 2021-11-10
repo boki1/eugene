@@ -1,0 +1,3 @@
+[submodule "tools/btree-printer"]
+	path = tools/btree-printer
+	url = https://github.com/Felerius/btree-generator
