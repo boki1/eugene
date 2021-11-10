@@ -8,7 +8,7 @@ target_include_directories(btree PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../")
 target_link_libraries(btree PRIVATE pthread)
 
 get_property(EUGENE_INTERNAL_LIBS GLOBAL PROPERTY EUGENE_INTERNAL_LIBS_PROPERTY)
-add_internal_lib(btree)
+add_eugene_internal_lib(btree)
 
 
 set(BTREE_SOURCES
