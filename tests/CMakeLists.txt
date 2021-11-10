@@ -14,6 +14,6 @@ add_test(NAME ItWorks COMMAND test__itworks)
 
 ############################## Compression
 
-add_executable(test__compressor CompressorDecompressorTests/TestCompressor.cpp)
+add_executable(test__compressor TestCompressorDecompressor.cpp)
 target_link_libraries(test__compressor PUBLIC test__main_fun)
 add_test(NAME Compressor COMMAND test__compressor)

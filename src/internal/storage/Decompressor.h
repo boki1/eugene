@@ -52,27 +52,27 @@ namespace decompression
                 
                 explicit DecompressorImpl(FILE *compressed): m_compressed(compressed)
                 { }
-        
+
 /// \brief The main function of decompression class that do all the magic with provided m_files.
                 void operator()()
                 {
                         fread(&m_symbols, 1, 1, m_compressed);
                         if (m_symbols == 0)m_symbols = Symbols;
-                
-                
+                        
+                        
                         m_trie_root = new huff_trie;
                         for (unsigned long i = 0; i < m_symbols; i++)
                                 process_n_bits_to_string(m_trie_root);
-                
+                        
                         translation("", false);
-                
-                
+                        
+                        
                         fclose(m_compressed);
                         deallocate_trie(m_trie_root);
                         std::cout << "Decompression is complete" << std::endl;
                 }
-        
-        
+
+
 /// \brief This structure will be used to represent the trie
                 struct huff_trie {
                         huff_trie *zero{nullptr};
@@ -132,6 +132,8 @@ namespace decompression
 /// \brief process_n_bits_to_string function reads n successive bits from the compressed file
 /// and stores it in a leaf of the translation trie,
 /// after creating that leaf and sometimes after creating nodes that are binding that leaf to the trie.
+///
+/// \param node - pointer to the trie node that is going to be created
                 void process_n_bits_to_string(huff_trie *node)
                 {
                         unsigned char curr_char = process_byte_number();
@@ -144,19 +146,16 @@ namespace decompression
                                         m_current_bit_count = CHAR_BIT;
                                 }
                                 
-                                switch (m_current_byte & Check) {
-                                        case 0:
-                                                if (!(node->zero))
-                                                        node->zero = new huff_trie;
-                                                
-                                                node = node->zero;
-                                                break;
-                                        case 128:
-                                                if (!(node->one))
-                                                        node->one = new huff_trie;
-                                                
-                                                node = node->one;
-                                                break;
+                                if (m_current_byte & Check) {
+                                        if (!(node->one))
+                                                node->one = new huff_trie;
+                                        
+                                        node = node->one;
+                                } else {
+                                        if (!(node->zero))
+                                                node->zero = new huff_trie;
+                                        
+                                        node = node->zero;
                                 }
                                 m_current_byte <<= 1;
                                 m_current_bit_count--;
@@ -190,53 +189,56 @@ namespace decompression
                 }
 
 /// \brief Decodes current file's name and writes file name to new_file char array
+///
+/// \param new_file - char array to write file name to
+/// \param file_name_length - length of file name
                 void write_file_name(unsigned char *new_file, int file_name_length)
                 {
                         huff_trie *node;
                         new_file[file_name_length] = 0;
                         for (int i = 0; i < file_name_length; i++) {
                                 node = m_trie_root;
-                                while (node->zero || node->one) {
-                                        if (m_current_bit_count == 0) {
-                                                fread(&m_current_byte, 1, 1, m_compressed);
-                                                m_current_bit_count = CHAR_BIT;
-                                        }
-                                        if (m_current_byte & Check) {
-                                                node = node->one;
-                                        } else {
-                                                node = node->zero;
-                                        }
-                                        m_current_byte <<= 1;
-                                        m_current_bit_count--;
-                                }
+                                iterate_over_nodes(&node);
                                 new_file[i] = node->character;
                         }
                 }
 
 /// \brief This function translates compressed file from info that is now stored in the translation trie
 /// then writes it to a newly created file
+///
+/// \param path - path to the file that is being decoded
+/// \param size - size of the file that is being decoded
                 void translate_file(const std::string &path, long int size)
                 {
                         huff_trie *node;
                         FILE *fp_new = fopen(path.c_str(), "wb");
                         for (long int i = 0; i < size; i++) {
                                 node = m_trie_root;
-                                while (node->zero || node->one) {
-                                        if (m_current_bit_count == 0) {
-                                                fread(&m_current_byte, 1, 1, m_compressed);
-                                                m_current_bit_count = CHAR_BIT;
-                                        }
-                                        if (m_current_byte & Check) {
-                                                node = node->one;
-                                        } else {
-                                                node = node->zero;
-                                        }
-                                        m_current_byte <<= 1;
-                                        m_current_bit_count--;
-                                }
+                                iterate_over_nodes(&node);
                                 fwrite(&(node->character), 1, 1, fp_new);
                         }
                         fclose(fp_new);
+                }
+
+/// \brief This function iterates over the translation trie and writes the file
+/// to a newly created file
+///
+/// \param node - pointer to the current node in the trie
+                void iterate_over_nodes(huff_trie **node)
+                {
+                        while ((*node)->zero || (*node)->one) {
+                                if (m_current_bit_count == 0) {
+                                        fread(&m_current_byte, 1, 1, m_compressed);
+                                        m_current_bit_count = CHAR_BIT;
+                                }
+                                if (m_current_byte & Check) {
+                                        (*node) = (*node)->one;
+                                } else {
+                                        (*node) = (*node)->zero;
+                                }
+                                m_current_byte <<= 1;
+                                m_current_bit_count--;
+                        }
                 }
 
 /// \brief translation function is used for creating files and folders inside given path
@@ -269,11 +271,11 @@ namespace decompression
                                 }
                         }
                 }
-
+        
         private:
 /// \brief deallocate_trie function is used for deallocating trie
 ///
-/// \param node
+/// \param node - pointer to the current node in the trie
                 void deallocate_trie(huff_trie *node)
                 {
                         if (node->zero)deallocate_trie(node->zero);
@@ -282,6 +284,7 @@ namespace decompression
                 }
         };
     }
+    
     class Decompressor {
     private:
             using pimpl = storage::detail::DecompressorImpl;

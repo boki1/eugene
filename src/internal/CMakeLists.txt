@@ -20,9 +20,3 @@ add_library(storage "${STORAGE_SOURCES}")
 set_target_properties(storage PROPERTIES LINKER_LANGUAGE CXX)
 target_include_directories(storage PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 add_internal_lib(storage)
-
-
-add_executable(compressor storage/Compressor.cpp)
-target_link_libraries(compressor PUBLIC storage)
-add_executable(decompressor storage/Decompressor.cpp)
-target_link_libraries(decompressor PUBLIC storage)

@@ -3,7 +3,7 @@
 #include <internal/storage/Compressor.h>
 #include <internal/storage/Decompressor.h>
 
-bool create_testing_directory(const std::string &new_structure)
+bool create_testing_directory(const std::string &new_structure, const int text_size)
 {
         for (int i = 0; i < 3; ++i) {
                 std::string filesystem_structure = new_structure;
@@ -16,7 +16,7 @@ bool create_testing_directory(const std::string &new_structure)
                         return false;
                 
                 std::ofstream ofs(path);
-                for (int j = 0; j < 200; ++j)
+                for (int j = 0; j < text_size; ++j)
                         ofs << "this is some text in the new file\n";
                 ofs.close();
         }
@@ -51,25 +51,31 @@ bool compare_folders(const std::string &first, const std::string &second)
         return true;
 }
 
-bool clean(const std::map<std::string, std::string> &files)
+bool clean(std::map<std::string, std::string> &files)
 {
+        unsigned long long int initial_size = std::accumulate(
+                fs::recursive_directory_iterator(files["change_name"].c_str()),
+                fs::recursive_directory_iterator(), 0,
+                [ ](auto sz, auto entry) { return is_directory(entry) ? sz : sz + file_size(entry); });
+        unsigned long long int compressed_size = fs::file_size(files["compressed_name"]);
+        
+        REQUIRE(compressed_size < initial_size);
+        std::cout << std::endl << std::endl << "#############################################################" << std::endl;
+        std::cout << "Passed with initial size: " << initial_size << " and compressed size: " << compressed_size << std::endl;
+        std::cout << "#############################################################" << std::endl << std::endl << std::endl;
+        
         return std::ranges::all_of(files.cbegin(), files.cend(),
-                                   [ ](const std::pair<std::string, std::string> &i) {
-                                           return fs::remove_all(i.second);
+                                   [ ](const auto &pair) {
+                                           return fs::remove_all(pair.second);
                                    });
 }
 
-TEST_CASE("Compressor compress", "[compressor]")
+void basic_test(std::map<std::string, std::string> &params, const int text_size)
 {
-        std::map<std::string, std::string> params;
-        params["test_dir_name"] = "ForTesting";
-        params["change_name"] = "InitialDir";
-        params["compressed_name"] = "Test";
-        
         for (const auto &item: params)
                 REQUIRE(!exists(item.second));
         
-        REQUIRE(create_testing_directory(params["test_dir_name"]));
+        REQUIRE(create_testing_directory(params["test_dir_name"], text_size));
         REQUIRE(exists(params["test_dir_name"]));
         
         compression::Compressor compress{
@@ -89,4 +95,15 @@ TEST_CASE("Compressor compress", "[compressor]")
         
         REQUIRE(compare_folders("InitialDir", "ForTesting"));
         REQUIRE(clean(params));
+}
+
+TEST_CASE("Compressor compress", "[compressor]")
+{
+        std::map<std::string, std::string> params;
+        params["test_dir_name"] = "ForTesting";
+        params["change_name"] = "InitialDir";
+        params["compressed_name"] = "Test";
+        
+        for (int i = 1; i < 4; ++i)
+                basic_test(params, (int) pow(10, i));
 }
