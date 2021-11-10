@@ -620,7 +620,7 @@ public:// Properties
 	}
 
 	const Node &node() const noexcept { return *m_node; }
-	Node &node_mut() noexcept { return *m_node; }
+	[[maybe_unused]] Node &node() noexcept { return *m_node; }
 
 	long index() const noexcept { return m_index; }
 	long &index() noexcept { return m_index; }
