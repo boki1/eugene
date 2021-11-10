@@ -10,3 +10,14 @@ target_link_libraries(test__main_fun ${TESTS_DEPENDENCIES})
 add_executable(test__itworks TestItWorks.cpp)
 target_link_libraries(test__itworks PUBLIC test__main_fun)
 add_test(NAME ItWorks COMMAND test__itworks)
+
+############################## Btree
+
+add_executable(test__btree TestBtree.cpp)
+target_link_libraries(test__btree PUBLIC test__main_fun storage)
+add_test(NAME Btree COMMAND test__btree)
+
+############################## Btree Printer
+
+add_executable(test__btree_printer TestBtreePrinter.cpp)
+target_link_libraries(test__btree_printer PUBLIC storage)
