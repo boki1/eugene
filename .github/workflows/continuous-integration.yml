@@ -36,4 +36,4 @@ jobs:
       - name: Test
         working-directory: ${{github.workspace}}
         shell: bash
-        run: ctest -C $BUILD_TYPE --no-tests=error
+        run: ctest -C $BUILD_TYPE --no-tests=error --rerun-failed --output-on-failure
