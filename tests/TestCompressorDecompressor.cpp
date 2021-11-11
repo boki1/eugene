@@ -27,8 +27,7 @@ bool exists(const fs::path &p, fs::file_status s = fs::file_status{ })
 {
         if (fs::status_known(s) ? fs::exists(s) : fs::exists(p))
                 return true;
-        else
-                return false;
+        return false;
 }
 
 bool compare_folders(const std::string &first, const std::string &second)
@@ -83,7 +82,7 @@ void basic_test(std::map<std::string, std::string> &params, const int text_size)
                 params["compressed_name"]
         };
         compress();
-        REQUIRE(exists("test"));
+        REQUIRE(exists(params["compressed_name"]));
         
         
         fs::rename(params["test_dir_name"], params["change_name"]);
@@ -104,6 +103,6 @@ TEST_CASE("TestCompressorDecompressor compress_decompress", "[compressor_decompr
         params["change_name"] = "InitialDir";
         params["compressed_name"] = "Test";
         
-        for (int i = 1; i < 3; ++i)
+        for (int i = 1; i < 5; ++i)
                 basic_test(params, (int) pow(10, i));
 }
