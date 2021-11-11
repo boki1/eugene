@@ -13,9 +13,9 @@ add_test(NAME ItWorks COMMAND test__itworks)
 
 ############################## Compression
 
-add_executable(test__compressor TestCompressorDecompressor.cpp)
-target_link_libraries(test__compressor PUBLIC test__main_fun)
-add_test(NAME Compressor COMMAND test__compressor)
+add_executable(test__compressor_decompressor TestCompressorDecompressor.cpp)
+target_link_libraries(test__compressor_decompressor PUBLIC test__main_fun)
+add_test(NAME TestCompressorDecompressor COMMAND test__compressor_decompressor)
 
 ############################## Btree
 

@@ -97,13 +97,13 @@ void basic_test(std::map<std::string, std::string> &params, const int text_size)
         REQUIRE(clean(params));
 }
 
-TEST_CASE("Compressor compress", "[compressor]")
+TEST_CASE("TestCompressorDecompressor compress_decompress", "[compressor_decompressor]")
 {
         std::map<std::string, std::string> params;
         params["test_dir_name"] = "ForTesting";
         params["change_name"] = "InitialDir";
         params["compressed_name"] = "Test";
         
-        for (int i = 1; i < 4; ++i)
+        for (int i = 1; i < 3; ++i)
                 basic_test(params, (int) pow(10, i));
 }
