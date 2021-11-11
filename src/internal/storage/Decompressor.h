@@ -183,7 +183,7 @@ namespace decompression
                 std::string create_new_file()
                 {
                         const int file_name_length = process_byte_number();
-                        unsigned char new_file[file_name_length + 4];
+                        auto *new_file = new unsigned char[file_name_length + 4];
                         write_file_name(new_file, file_name_length);
                         return reinterpret_cast<const char *>(new_file);
                 }
