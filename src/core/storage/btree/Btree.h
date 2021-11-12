@@ -1,6 +1,6 @@
 #pragma once
 
-#include <internal/storage/Storage.h>
+#include <core/storage/Storage.h>
 
 #include <algorithm>    // std::min, std::fill, std::copy
 #include <array>        // std::array

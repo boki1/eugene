@@ -1,7 +1,7 @@
-#include <external/catch2/Catch2.h>
-#include <external/expected/Expected.h>
-#include <internal/storage/Compressor.h>
-#include <internal/storage/Decompressor.h>
+#include <third-party/catch2/Catch2.h>
+#include <third-party/expected/Expected.h>
+#include <core/storage/compression/Compressor.h>
+#include <core/storage/compression/Decompressor.h>
 
 bool create_testing_directory(const std::string &new_structure, const int text_size)
 {

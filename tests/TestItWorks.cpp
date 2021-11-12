@@ -1,5 +1,5 @@
-#include <external/catch2/Catch2.h>
-#include <external/expected/Expected.h>
+#include <third-party/catch2/Catch2.h>
+#include <third-party/expected/Expected.h>
 
 TEST_CASE("ItWorks", "[it-works]")
 {

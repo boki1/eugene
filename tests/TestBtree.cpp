@@ -1,7 +1,7 @@
-#include <external/catch2/Catch2.h>
+#include <third-party/catch2/Catch2.h>
 
-#include <internal/storage/Storage.h>
-#include <internal/storage/btree/Btree.h>
+#include <core/storage/Storage.h>
+#include <core/storage/btree/Btree.h>
 
 #include <iostream>
 #include <ranges>

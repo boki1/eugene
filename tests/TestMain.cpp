@@ -6,4 +6,4 @@
 
 #define CATCH_CONFIG_MAIN
 
-#include <external/catch2/Catch2.h>
+#include <third-party/catch2/Catch2.h>

@@ -27,12 +27,12 @@ macro(add_eugene_internal_lib new_lib)
     set_property(GLOBAL APPEND PROPERTY EUGENE_INTERNAL_LIBS_GLOBAL_LIST "${new_lib}")
 endmacro(add_eugene_internal_lib)
 
-add_subdirectory(src/external)
+add_subdirectory(src/third-party)
 
 # Keep before eugene since EUGENE_INTERNAL_LIBS needs to be filled
-add_subdirectory(src/internal)
+add_subdirectory(src/core)
 
-add_subdirectory(src/eugene)
+add_subdirectory(src/eugene-api)
 
 add_subdirectory(clients)
 

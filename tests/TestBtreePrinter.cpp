@@ -1,5 +1,5 @@
-#include <internal/storage/btree/Btree.h>
-#include <internal/storage/btree/BtreePrinter.h>
+#include <core/storage/btree/Btree.h>
+#include <core/storage/btree/BtreePrinter.h>
 
 #include <iostream>
 #include <ranges>
