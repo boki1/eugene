@@ -40,12 +40,3 @@ add_subdirectory(src/core)
 add_subdirectory(src/eugene-api)
 
 add_subdirectory(clients)
-
-if(NOT DEFINED SKIP_BUILD_TESTS)
-  set(SKIP_BUILD_TESTS "False")
-endif()
-
-if("${SKIP_BUILD_TESTS}" STREQUAL "False")
-  message("-- Building tests")
-  add_subdirectory(tests)
-endif()

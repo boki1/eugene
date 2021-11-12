@@ -133,7 +133,7 @@ def do_lint():
     print("Linting")
     clangtidy_cmd = "clang-tidy -file --check=modernize,readability,performance"
     cmake_format_cmd = 'find . -name "CMakeLists.txt" | xargs cmake-format -i'
-    clang_format_all_cmd = "clang-format-all src/core src/eugene-api tests/".split()
+    clang_format_all_cmd = "clang-format-all src/core src/eugene-api".split()
     sp.run(clang_format_all_cmd)
     sp.run(cmake_format_cmd, shell=True, stdout=sp.PIPE)
 
