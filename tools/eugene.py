@@ -14,7 +14,6 @@ def setup(pip):
 
 
 try:
-    import cmake-format
     from colorama import Fore as color
     from colorama import Style
     from pylev import classic_levenshtein as lev
