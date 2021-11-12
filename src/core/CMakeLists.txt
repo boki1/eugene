@@ -1,10 +1,6 @@
-set(BTREE_SOURCES
-        btree/Btree.h
-        btree/BtreePrinter.h)
+set(BTREE_SOURCES btree/Btree.h btree/BtreePrinter.h)
 
-set(COMPR_SOURCE
-        compression/Compressor.h
-        compression/Decompressor.h)
+set(COMPR_SOURCE compression/Compressor.h compression/Decompressor.h)
 
 set(STORAGE_SOURCES Storage.h "${BTREE_SOURCE}" "${COMPR_SOURCE}")
 list(TRANSFORM STORAGE_SOURCES PREPEND "storage/")

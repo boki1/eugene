@@ -130,9 +130,12 @@ def do_updoc():
 
 
 def do_lint():
-    clangtidy_cmd = "clang-tidy -file --check=modernize,readability,performance"
-    cmakeformat_cmd = 'find . -name "CMakeLists.txt" | xargs cmake-format -i'
     print("Linting")
+    clangtidy_cmd = "clang-tidy -file --check=modernize,readability,performance"
+    cmake_format_cmd = 'find . -name "CMakeLists.txt" | xargs cmake-format -i'
+    clang_format_all_cmd = "clang-format-all src/core src/eugene-api tests/".split()
+    sp.run(clang_format_all_cmd)
+    sp.run(cmake_format_cmd, shell=True, stdout=sp.PIPE)
 
 
 def do_clean(is_kind=False):
@@ -173,7 +176,7 @@ def parse(cmd_line, cmd, cmd_args, cmd_argc):
         do_clean(kind and not forced)
 
     elif cmd == 'lint':
-        assert cmd_argc == 1
+        assert cmd_argc == 0
         do_lint()
 
     elif cmd == 'doc':
@@ -198,4 +201,3 @@ if __name__ == "__main__":
 
     args = [arg.lower() for arg in sys.argv]
     parse(args[1:], args[1], args[2:], len(args) - 2)
-    

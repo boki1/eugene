@@ -26,7 +26,6 @@ TEST_CASE("Btree insert", "[btree]") {
 	bt_t bpt;
 	bpt.prepare_root_for_inmem();
 
-
 	REQUIRE(node_t::num_links_per_branch() - 1 == node_t::num_records_per_node());
 
 	for (const uint32_t index : iota(0, 68)) {
