@@ -1,7 +1,7 @@
-#include <external/catch2/Catch2.h>
-#include <external/expected/Expected.h>
-#include <internal/storage/Compressor.h>
-#include <internal/storage/Decompressor.h>
+#include <core/storage/compression/Compressor.h>
+#include <core/storage/compression/Decompressor.h>
+#include <third-party/catch2/Catch2.h>
+#include <third-party/expected/Expected.h>
 
 bool create_testing_directory(const std::string &new_structure, const int text_size)
 {
@@ -50,26 +50,35 @@ bool compare_folders(const std::string &first, const std::string &second)
         return true;
 }
 
-bool clean(std::map<std::string, std::string> &files)
+bool clean(const std::map<std::string, std::string> &files)
 {
-        unsigned long long int initial_size = std::accumulate(
-                fs::recursive_directory_iterator(files["change_name"].c_str()),
-                fs::recursive_directory_iterator(), 0,
-                [ ](auto sz, auto entry) { return is_directory(entry) ? sz : sz + file_size(entry); });
-        unsigned long long int compressed_size = fs::file_size(files["compressed_name"]);
-        
-        REQUIRE(compressed_size < initial_size);
-        std::cout << std::endl << std::endl << "#############################################################" << std::endl;
-        std::cout << "Passed with initial size: " << initial_size << " and compressed size: " << compressed_size << std::endl;
-        std::cout << "#############################################################" << std::endl << std::endl << std::endl;
-        
         return std::ranges::all_of(files.cbegin(), files.cend(),
                                    [ ](const auto &pair) {
                                            return fs::remove_all(pair.second);
                                    });
 }
 
-void basic_test(std::map<std::string, std::string> &params, const int text_size)
+void check_initial_compressed_size(const std::string &initial_file_folder, const std::string &compressed_file)
+{
+        unsigned long initial_size;
+        std::cout << "directory: " << fs::is_directory(initial_file_folder) << std::endl;
+        if (fs::is_directory(initial_file_folder))
+                initial_size = std::accumulate(
+                        fs::recursive_directory_iterator(initial_file_folder.c_str()),
+                        fs::recursive_directory_iterator(), 0,
+                        [ ](auto sz, auto entry) { return is_directory(entry) ? sz : sz + file_size(entry); });
+        else
+                initial_size = fs::file_size(initial_file_folder);
+        
+        unsigned long long int compressed_size = fs::file_size(compressed_file);
+        
+        REQUIRE(compressed_size < initial_size);
+        std::cout << std::endl << std::endl << "#############################################################" << std::endl;
+        std::cout << "Passed with initial size: " << initial_size << " and compressed size: " << compressed_size << std::endl;
+        std::cout << "#############################################################" << std::endl << std::endl << std::endl;
+}
+
+void folder_test(std::map<std::string, std::string> &params, const int text_size)
 {
         for (const auto &item: params)
                 REQUIRE(!exists(item.second));
@@ -85,24 +94,58 @@ void basic_test(std::map<std::string, std::string> &params, const int text_size)
         REQUIRE(exists(params["compressed_name"]));
         
         
-        fs::rename(params["test_dir_name"], params["change_name"]);
-        REQUIRE(exists(params["change_name"]));
+        fs::rename(params["test_dir_name"], params["changed_to_initial_dir"]);
+        REQUIRE(exists(params["changed_to_initial_dir"]));
         
         decompression::Decompressor decompress{params["compressed_name"]};
         decompress();
         REQUIRE(exists(params["test_dir_name"]));
         
         REQUIRE(compare_folders("InitialDir", "ForTesting"));
+        
+        check_initial_compressed_size(params["test_dir_name"], params["compressed_name"]);
         REQUIRE(clean(params));
 }
 
-TEST_CASE("TestCompressorDecompressor compress_decompress", "[compressor_decompressor]")
+void specific_file_size_test(const int file_size,
+                             const std::string &file_name = "test.txt",
+                             const std::string &compressed_file_name = "compressed")
+{
+        std::ofstream ofs(file_name);
+        for (int j = 0; j < file_size; ++j)
+                ofs << "some text here \n";
+        ofs.close();
+        
+        REQUIRE(exists(file_name));
+        
+        
+        compression::Compressor compress{
+                std::vector<std::string>(1, file_name),
+                compressed_file_name
+        };
+        compress();
+        REQUIRE(exists(compressed_file_name));
+        
+        check_initial_compressed_size(file_name, compressed_file_name);
+        REQUIRE(clean(std::map<std::string, std::string>{
+                {"file_name",            file_name},
+                {"compressed_file_name", compressed_file_name}
+        }));
+}
+
+
+TEST_CASE("Compressor compress_decompress", "[compressor_decompressor]")
 {
         std::map<std::string, std::string> params;
         params["test_dir_name"] = "ForTesting";
-        params["change_name"] = "InitialDir";
+        params["changed_to_initial_dir"] = "InitialDir";
         params["compressed_name"] = "Test";
         
         for (int i = 1; i < 5; ++i)
-                basic_test(params, (int) pow(10, i));
+                folder_test(params, (int) pow(10, i));
+        
+        //        In this test - in the file are written 16 chars
+        //        so if you want specific number of bytes(N)
+        //        you give value of file_size with the formula N / 16
+        specific_file_size_test(32);
 }

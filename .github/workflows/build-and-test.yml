@@ -26,12 +26,15 @@ jobs:
           CXX: ${{ matrix.cxx }}
         shell: bash
         working-directory: ${{github.workspace}}
-        run: cmake .
+        run: |
+             export EUGENE_BUILD_TESTS=1
+             cmake .
 
       - name: Build
         working-directory: ${{github.workspace}}
         shell: bash
-        run: cmake --build . --config $BUILD_TYPE
+        run:
+             cmake --build . --config $BUILD_TYPE
 
       - name: Test
         working-directory: ${{github.workspace}}

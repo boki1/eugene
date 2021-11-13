@@ -1,7 +1,7 @@
-#include <external/catch2/Catch2.h>
+#include <third-party/catch2/Catch2.h>
 
-#include <internal/storage/Storage.h>
-#include <internal/storage/btree/Btree.h>
+#include <core/storage/Storage.h>
+#include <core/storage/btree/Btree.h>
 
 #include <iostream>
 #include <ranges>
@@ -25,7 +25,6 @@ TEST_CASE("Btree find", "[btree]") {
 TEST_CASE("Btree insert", "[btree]") {
 	bt_t bpt;
 	bpt.prepare_root_for_inmem();
-
 
 	REQUIRE(node_t::num_links_per_branch() - 1 == node_t::num_records_per_node());
 

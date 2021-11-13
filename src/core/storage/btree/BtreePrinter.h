@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include <internal/storage/btree/Btree.h>
+#include <core/storage/btree/Btree.h>
 
 namespace internal::btree::util {
 
