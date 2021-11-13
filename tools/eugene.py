@@ -102,7 +102,7 @@ def do_build(test=False, doc=False):
     ninja_command = "ninja -Cbuild -j4"
 
     if test:
-        os.environ["BUILD_TESTS"] = "1"
+        os.environ["EUGENE_BUILD_TESTS"] = "1"
         building += ' and tests'
 
     print_style("Configuring project")
