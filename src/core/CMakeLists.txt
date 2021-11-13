@@ -20,7 +20,7 @@ if(DEFINED ENV{EUGENE_BUILD_TESTS})
   add_library(test_main Main.cpp)
   target_link_libraries(test_main catch2)
 
-  add_executable(test_compressor_decompressor storage/compression/Compressor.cpp)
+  add_executable(test_compressor_decompressor storage/compression/TestCompressorDecompressor.cpp)
   target_link_libraries(test_compressor_decompressor PUBLIC test_main)
   add_test(NAME TestCompressorDecompressor COMMAND test_compressor_decompressor)
 

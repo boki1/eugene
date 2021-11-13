@@ -98,7 +98,7 @@ def do_build(test=False, doc=False):
         print_scream("INFO: 'build/' directory already exists")
 
     building = "Building project"
-    cmake_command = "/usr/bin/cmake -S. -Bbuild -GNinja"
+    cmake_command = "cmake -S. -Bbuild -GNinja"
     ninja_command = "ninja -Cbuild -j4"
 
     if test:
