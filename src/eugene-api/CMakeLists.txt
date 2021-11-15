@@ -1,4 +1,4 @@
-set(EUGENE_SOURCES Index.h)
+set(EUGENE_SOURCES Index.h Index.cpp)
 add_library(eugene "${EUGENE_SOURCES}")
 set_target_properties(eugene PROPERTIES LINKER_LANGUAGE CXX)
 target_include_directories(eugene PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
