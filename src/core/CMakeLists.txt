@@ -27,4 +27,8 @@ if(DEFINED ENV{EUGENE_BUILD_TESTS})
   add_executable(test_btree storage/btree/Btree.cpp)
   target_link_libraries(test_btree PUBLIC test_main storage)
   add_test(NAME TestBtree COMMAND test_btree)
+
+  add_executable(test_page storage/Page.h storage/Page.cpp)
+  target_link_libraries(test_page PUBLIC test_main)
+  add_test(NAME TestPage COMMAND test_page)
 endif()
