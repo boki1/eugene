@@ -1,10 +1,7 @@
-set(BTREE_SOURCES btree/Btree.h btree/BtreePrinter.h)
+set(STORAGE_SOURCES Position.h Page.h Storage.h btree/Btree.h btree/BtreePrinter.h
+                    compression/Compressor.h compression/Decompressor.h)
 
-set(COMPR_SOURCE compression/Compressor.h compression/Decompressor.h)
-
-set(STORAGE_SOURCES Storage.h "${BTREE_SOURCE}" "${COMPR_SOURCE}")
 list(TRANSFORM STORAGE_SOURCES PREPEND "storage/")
-
 add_library(storage "${STORAGE_SOURCES}")
 add_eugene_internal_lib(storage)
 
