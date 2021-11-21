@@ -31,7 +31,6 @@ public:
 	Page &operator=(const Page &) noexcept = default;
 	Page &operator=(Page &&) noexcept = default;
 
-	using data_iterator = std::array<uint8_t, Page::SIZE>::iterator;
 	using data_citerator = std::array<uint8_t, Page::SIZE>::const_iterator;
 
 	static Page empty() noexcept {

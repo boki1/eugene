@@ -48,7 +48,7 @@ TEST_CASE("buffer-pool-ops", "[bufpool]") {
 	REQUIRE(std::filesystem::file_size("/tmp/eu-bufpool-test1") == test_num_pages * Page::size());
 
 	std::fstream fbufpool("/tmp/eu-bufpool-test1", std::ios::in);
-	fbufpool.seekg(fbufpool.beg);
+	fbufpool.seekg(std::fstream::beg);
 
 	auto value_of_page = [](int i) {
 		return i * 2 + 1;

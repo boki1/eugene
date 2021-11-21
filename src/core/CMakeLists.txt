@@ -1,5 +1,6 @@
 set(STORAGE_SOURCES Position.h PageCache.h Page.h Storage.h btree/Btree.h btree/BtreePrinter.h
-                    compression/Compressor.h compression/Decompressor.h)
+	compression/Compressor.h compression/Decompressor.h btree/Btree.cpp compression/TestCompressorDecompressor.cpp
+	PageCache.cpp Page.cpp)
 
 list(TRANSFORM STORAGE_SOURCES PREPEND "storage/")
 add_library(storage "${STORAGE_SOURCES}")
