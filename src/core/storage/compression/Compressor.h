@@ -248,7 +248,7 @@ public:
 	/// \brief This function counts usage frequency of bytes inside a folder
 	///
 	/// \param path - char sequence representing the path to a folder of file
-	void count_folder_bytes_freq(const std::string &path) {
+	void count_folder_bytes_freq(std::string_view path) {
 		m_total_bits += Folder;
 
 		for (const auto &entry : fs::recursive_directory_iterator(path)) {
@@ -348,7 +348,7 @@ public:
 
 	/// \brief Open dir path and count regular m_files in it.
 	/// Then write this count in compressed file. (Manages third of part 2)
-	void write_folder_files_count(const std::string &path) {
+	void write_folder_files_count(std::string_view path) {
 		int file_count = 0;
 		for (const auto &entry : fs::directory_iterator(path)) {
 			const std::string next_path = entry.path();
@@ -364,7 +364,7 @@ public:
 	/// (Manages from third to seventh of part 2 for a folder)
 	///
 	/// \param path - folder name
-	void write_folder(const std::string &path) {
+	void write_folder(std::string_view path) {
 		write_folder_files_count(path);
 
 		for (const auto &entry : fs::recursive_directory_iterator(path)) {
@@ -417,7 +417,7 @@ public:
 	/// \brief Writes provided string bytes to the new compressed file
 	///
 	/// \param for_write - string that will be written
-	void write_bytes(const std::string &for_write) {
+	void write_bytes(std::string_view for_write) {
 		for (const auto &item : for_write) {
 			if (m_current_bit_count == CHAR_BIT) {
 				fwrite(&m_current_byte, 1, 1, m_compressed_fp);
@@ -444,7 +444,7 @@ public:
 	/// (Manages sixth of part 2)
 	///
 	/// \param file_name - name of the file
-	void write_file_name(const std::string &file_name) {
+	void write_file_name(std::string_view file_name) {
 		write_from_ch(file_name.size());
 		for (const auto &item : file_name)
 			write_bytes(m_char_huffbit[item]);
@@ -497,7 +497,7 @@ public:
 	///
 	/// \param argc - number of m_files for compress
 	/// \param argv - path's to m_files for compress
-	explicit Compressor(const std::vector<std::string> &args, const std::string &compressed_name = "") {
+	explicit Compressor(const std::vector<std::string> &args, std::string_view compressed_name = "") {
 		std::string new_compressed_name;
 
 		//                if (args.empty())

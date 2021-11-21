@@ -54,7 +54,7 @@ public:
 	/// \brief The main function of decompression class that do all the magic with provided m_files.
 	///
 	/// \param folder_name name of the folder to decompress (by default it is set to decompress all the files)
-	void operator()(const std::string &folder_name = "") {
+	void operator()(std::string_view folder_name = "") {
 		fread(&m_symbols, 1, 1, m_compressed);
 		if (m_symbols == 0)
 			m_symbols = Symbols;
@@ -77,7 +77,7 @@ public:
 	struct huff_trie {
 		huff_trie *zero{nullptr};
 		huff_trie *one{nullptr};      //!< zero and one bit representation nodes of the m_trie_root
-		unsigned char character{'\0'};//!< associated character in the trie node
+		char character{'\0'};//!< associated character in the trie node
 	};
 
 	huff_trie *m_trie_root = nullptr;
@@ -91,12 +91,13 @@ public:
 	/// \brief Creating a file, when the parent directories might not exist
 	///
 	/// \param path - path to the file
-	static void create_desired_dirs(const std::string &path) {
+//	TODO: use boost instead
+	static void create_desired_dirs(std::string_view path) {
 		std::size_t founded = 0;
 
 		for (int i = 0; i < std::count(path.begin(), path.end(), '/'); ++i) {
 			founded = path.find('/', founded + 1);
-			std::string curr_path = path.substr(0, founded);
+			std::string_view curr_path = path.substr(0, founded);
 
 			if (!std::filesystem::exists(curr_path))
 				std::filesystem::create_directory(curr_path);
@@ -138,7 +139,7 @@ public:
 	unsigned char process_byte_number() {
 		unsigned char val, temp_byte;
 		fread(&temp_byte, 1, 1, m_compressed);
-		val = m_current_byte | (temp_byte >> m_current_bit_count);
+		val = (m_current_byte | (temp_byte >> m_current_bit_count));
 		m_current_byte = temp_byte << (CHAR_BIT - m_current_bit_count);
 		return val;
 	}
@@ -149,8 +150,8 @@ public:
 	///
 	/// \param node - pointer to the trie node that is going to be created
 	void process_n_bits_to_string(huff_trie *node) {
-		unsigned char curr_char = process_byte_number();
-		int len = process_byte_number();
+		char curr_char = (char) process_byte_number();
+		long len = process_byte_number();
 		if (len == 0)
 			len = Symbols;
 
@@ -192,28 +193,20 @@ public:
 		return size;
 	}
 
-	/// \brief Reads the file name from the compressed file
+	/// \brief Decodes current file's name and writes file name to new_file string
 	///
-	/// \return file name
+	/// \param file_length - length of file name
 	std::string get_name() {
-		const int file_name_length = process_byte_number();
-		auto *new_file = new char[file_name_length + 4];
-		write_file_name(new_file, file_name_length);
-		return new_file;
-	}
-
-	/// \brief Decodes current file's name and writes file name to new_file char array
-	///
-	/// \param new_file - char array to write file name to
-	/// \param file_name_length - length of file name
-	void write_file_name(char *new_file, int file_name_length) {
 		huff_trie *node;
-		new_file[file_name_length] = 0;
-		for (int i = 0; i < file_name_length; i++) {
+		std::string new_file;
+		int file_length = process_byte_number();
+
+		for (int i = 0; i < file_length; i++) {
 			node = m_trie_root;
 			iterate_over_nodes(&node);
-			new_file[i] = node->character;
+			new_file.push_back(node->character);
 		}
+		return new_file;
 	}
 
 	/// \brief This function translates compressed file from info that is now stored in the translation trie
@@ -288,7 +281,7 @@ public:
 	///
 	/// \param for_decompress - folder to decompress
 	/// \param change_path - if there are compressed folders - this flag allows recursion
-	void translation_search(const std::string &path, const std::string &for_decompress,
+	void translation_search(const std::string &path, std::string_view for_decompress,
 	                        bool change_path) {
 		unsigned long file_count = get_file_count();
 		for (unsigned long current_file = 0; current_file < file_count; current_file++) {
@@ -358,7 +351,7 @@ public:
 	}
 
 	/// \brief The main function of decompression class that do all the magic with provided m_files.
-	void operator()(const std::string &folder_name = "") {
+	void operator()(std::string_view folder_name = "") {
 		(*decompressor_impl)(folder_name);
 	}
 };
