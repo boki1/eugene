@@ -6,7 +6,7 @@ from collections import namedtuple as nt
 
 
 def setup(pip):
-    reqs = [ "cmake-format" , "colorama", "pylev" ]
+    reqs = ["cmake-format", "colorama", "pylev"]
     for req in reqs:
         cmd = f"{pip} install {req}"
         print(cmd)
@@ -29,8 +29,9 @@ except ImportError:
     from colorama import Style
     from pylev import classic_levenshtein as lev
 
-
 previous_color_ = color.WHITE
+
+
 def get_color():
     global previous_color_
     colors = [color.GREEN, color.YELLOW, color.BLUE, color.MAGENTA, color.CYAN]
@@ -42,13 +43,13 @@ def get_color():
 
 
 def print_style(*args, **kwargs):
-        print(f"\n{get_color()} > ", end='')
-        print(*args, **kwargs)
-        print(Style.RESET_ALL)
+    print(f"\n{get_color()} > ", end='')
+    print(*args, **kwargs)
+    print(Style.RESET_ALL)
 
 
 def print_scream(string):
-        print(f"{color.RED}{string}{Style.RESET_ALL}")
+    print(f"{color.RED}{string}{Style.RESET_ALL}")
 
 
 def do_if(cmd, msg, qprompt=False):
@@ -61,15 +62,16 @@ def do_if(cmd, msg, qprompt=False):
 
 Param = nt('Param', 'field desc subcmds')
 AvailableParams = list([
-            Param('build', 'build project only', ['test: builds tests', 'doc: builds doc']),
-            Param('test', 'build tests', ['runtest: runs tests']),
-            Param('lint', 'run local linters', ['style: clang-format', 'tidy: ctidy']),
-            Param('doc', 'build local documentation', ['updoc: uploads to gh-pages']),
-            Param('clean', 'clean metadata', ['ignored: removes all files and dirs from the .gitignore']),
+    Param('build', 'build project only', ['test: builds tests', 'doc: builds doc']),
+    Param('test', 'build tests', ['runtest: runs tests']),
+    Param('lint', 'run local linters', ['style: clang-format', 'tidy: ctidy']),
+    Param('doc', 'build local documentation', ['updoc: uploads to gh-pages']),
+    Param('clean', 'clean metadata', ['ignored: removes all files and dirs from the .gitignore']),
 ])
 
-
 retry_avail_ = True
+
+
 def autocomplete(arg):
     global retry_avail_
     if not retry_avail_:
@@ -98,7 +100,7 @@ def do_build(test=False, doc=False):
         print_scream("INFO: 'build/' directory already exists")
 
     building = "Building project"
-    cmake_command = "cmake -S. -Bbuild -GNinja"
+    cmake_command = "cmake -S. -Bbuild -GNinja -D CMAKE_C_COMPILER=gcc-11 -D CMAKE_CXX_COMPILER=g++-11"
     ninja_command = "ninja -Cbuild -j4"
 
     if test:
@@ -106,7 +108,11 @@ def do_build(test=False, doc=False):
         building += ' and tests'
 
     print_style("Configuring project")
-    sp.run(cmake_command.split())
+    try:
+        sp.check_call(cmake_command.split())
+        sp.run(cmake_command.split())
+    except:
+        sp.run("cmake -S. -Bbuild -GNinja -D CMAKE_C_COMPILER=gcc -D CMAKE_CXX_COMPILER=g++".split())
 
     print_style(building)
     sp.run(ninja_command.split())
