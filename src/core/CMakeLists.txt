@@ -28,3 +28,7 @@ if(DEFINED ENV{EUGENE_BUILD_TESTS})
   target_link_libraries(test_btree PUBLIC test_main storage)
   add_test(NAME TestBtree COMMAND test_btree)
 endif()
+
+# add executable for compression/CompDecomp.cpp
+add_executable(comp_decomp storage/compression/CompDecomp.cpp)
+target_link_libraries(comp_decomp PUBLIC test_main)
