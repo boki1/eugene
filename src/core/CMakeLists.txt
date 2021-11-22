@@ -1,10 +1,8 @@
-set(BTREE_SOURCES btree/Btree.h btree/BtreePrinter.h btree/Btree.cpp)
+set(STORAGE_SOURCES Position.h PageCache.h Page.h Storage.h btree/Btree.h btree/BtreePrinter.h
+	compression/Compressor.h compression/Decompressor.h btree/Btree.cpp compression/TestCompressorDecompressor.cpp
+	PageCache.cpp Page.cpp)
 
-set(COMPR_SOURCE compression/Compressor.h compression/Decompressor.h compression/TestCompressorDecompressor.cpp)
-
-set(STORAGE_SOURCES Storage.h "${BTREE_SOURCE}" "${COMPR_SOURCE}")
 list(TRANSFORM STORAGE_SOURCES PREPEND "storage/")
-
 add_library(storage "${STORAGE_SOURCES}")
 add_eugene_internal_lib(storage)
 
@@ -27,4 +25,12 @@ if(DEFINED ENV{EUGENE_BUILD_TESTS})
   add_executable(test_btree storage/btree/Btree.cpp)
   target_link_libraries(test_btree PUBLIC test_main storage)
   add_test(NAME TestBtree COMMAND test_btree)
+
+  add_executable(test_page storage/Page.h storage/Page.cpp)
+  target_link_libraries(test_page PUBLIC test_main)
+  add_test(NAME TestPage COMMAND test_page)
+
+  add_executable(test_pgcache storage/PageCache.h storage/PageCache.cpp)
+  target_link_libraries(test_pgcache PUBLIC test_main)
+  add_test(NAME TestPageCache COMMAND test_pgcache)
 endif()
