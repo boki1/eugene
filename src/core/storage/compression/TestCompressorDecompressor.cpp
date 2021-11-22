@@ -66,10 +66,12 @@ void check_initial_compressed_size(const std::string &initial_file_folder, const
 	unsigned long long int compressed_size = fs::file_size(compressed_file);
 
 	REQUIRE(compressed_size < initial_size);
-	std::cout << std::endl << std::endl << "#############################################################" << std::endl;
-	std::cout << "Passed with initial size: " << initial_size << " and compressed size: " << compressed_size
-	          << std::endl;
-	std::cout << "#############################################################" << std::endl << std::endl << std::endl;
+	std::cout << std::endl << std::endl
+	          << "#############################################################" << std::endl;
+	std::cout << "Passed with initial size: " << initial_size << " and compressed size: "
+	          << compressed_size << std::endl;
+	std::cout << "#############################################################"
+	          << std::endl << std::endl << std::endl;
 }
 
 void folder_test(std::map<std::string, std::string> &params, const int text_size) {
@@ -81,8 +83,7 @@ void folder_test(std::map<std::string, std::string> &params, const int text_size
 
 	compression::Compressor compress{
 		std::vector<std::string>(1, params["test_dir_name"]),
-		params["compressed_name"]
-	};
+		params["compressed_name"]};
 	compress();
 	REQUIRE(exists(params["compressed_name"]));
 
@@ -99,8 +100,7 @@ void folder_test(std::map<std::string, std::string> &params, const int text_size
 	REQUIRE(clean(params));
 }
 
-TEST_CASE("CompressorDecompressor compress_decompress", "[compressor_decompressor]")
-{
+TEST_CASE("CompressorDecompressor compress_decompress", "[compressor_decompressor]") {
 	std::map<std::string, std::string> params;
 	params["test_dir_name"] = "ForTesting";
 	params["changed_to_initial_dir"] = "InitialDir";
@@ -113,8 +113,7 @@ TEST_CASE("CompressorDecompressor compress_decompress", "[compressor_decompresso
 /// \brief In this test - in the file are written 16 chars
 /// so if you want specific number of bytes(N)
 /// you give value of file_size with the formula N / 16
-TEST_CASE("CompressorDecompressor specific_file_size_test", "[specific_file_size_test]")
-{
+TEST_CASE("CompressorDecompressor specific_file_size_test", "[specific_file_size_test]") {
 	const int file_size = 32;
 	const std::string &file_name = "test.txt";
 	const std::string &compressed_file_name = "compressed";
@@ -128,32 +127,27 @@ TEST_CASE("CompressorDecompressor specific_file_size_test", "[specific_file_size
 
 	compression::Compressor compress{
 		std::vector<std::string>(1, file_name),
-		compressed_file_name
-	};
+		compressed_file_name};
 	compress();
 	REQUIRE(exists(compressed_file_name));
 
 	check_initial_compressed_size(file_name, compressed_file_name);
-	REQUIRE(clean(std::map<std::string, std::string>{
-		{"file_name", file_name},
-		{"compressed_file_name", compressed_file_name}
-	}));
+	REQUIRE(clean({{"file_name", file_name},
+	               {"compressed_file_name", compressed_file_name}}));
 }
 
-TEST_CASE("CompressorDecompressor partial_decompress", "[partial_decompress]")
-{
+TEST_CASE("CompressorDecompressor partial_decompress", "[partial_decompress]") {
 	std::map<std::string, std::string> params;
-    params["test_dir_name"] = "ForTesting";
-    params["changed_to_initial_dir"] = "InitialDir";
-    params["compressed_name"] = "Test";
+	params["test_dir_name"] = "ForTesting";
+	params["changed_to_initial_dir"] = "InitialDir";
+	params["compressed_name"] = "Test";
 
 	REQUIRE(create_testing_directory(params["test_dir_name"], 100));
 	REQUIRE(exists(params["test_dir_name"]));
 
 	compression::Compressor compress{
 		std::vector<std::string>(1, params["test_dir_name"]),
-		params["compressed_name"]
-	};
+		params["compressed_name"]};
 	compress();
 	REQUIRE(exists(params["compressed_name"]));
 
@@ -165,5 +159,5 @@ TEST_CASE("CompressorDecompressor partial_decompress", "[partial_decompress]")
 	REQUIRE(exists(params["test_dir_name"]));
 
 	compare_folders("InitialDir/1", "ForTesting/1");
-	REQUIRE(clean(params));
+//	REQUIRE(clean(params));
 }
