@@ -10,6 +10,8 @@
 #include <memory>
 #include <string>
 #include <sys/stat.h>
+#include <fstream>
+#include <filesystem>
 
 static constexpr unsigned char Check = 0b10000000;
 static constexpr int Symbols = 256;
@@ -50,7 +52,9 @@ public:
 	explicit DecompressorImpl(FILE *compressed) : m_compressed(compressed) {}
 
 	/// \brief The main function of decompression class that do all the magic with provided m_files.
-	void operator()() {
+	///
+	/// \param folder_name name of the folder to decompress (by default it is set to decompress all the files)
+	void operator()(std::string_view folder_name = "") {
 		fread(&m_symbols, 1, 1, m_compressed);
 		if (m_symbols == 0)
 			m_symbols = Symbols;
@@ -59,7 +63,10 @@ public:
 		for (unsigned long i = 0; i < m_symbols; i++)
 			process_n_bits_to_string(m_trie_root);
 
-		translation("", false);
+		if (folder_name.empty())
+			translation("", false);
+		else
+			translation_search("", folder_name, false);
 
 		fclose(m_compressed);
 		deallocate_trie(m_trie_root);
@@ -70,7 +77,7 @@ public:
 	struct huff_trie {
 		huff_trie *zero{nullptr};
 		huff_trie *one{nullptr};      //!< zero and one bit representation nodes of the m_trie_root
-		unsigned char character{'\0'};//!< associated character in the trie node
+		char character{'\0'};//!< associated character in the trie node
 	};
 
 	huff_trie *m_trie_root = nullptr;
@@ -78,15 +85,33 @@ public:
 	unsigned long m_symbols = 0; //!< count of the file or folder m_symbols
 
 	unsigned char m_current_byte = '\0';//!< unsigned char value
-	                                    //!< that represents the current byte
+	//!< that represents the current byte
 	int m_current_bit_count = 0;        //!< integer value of current bits count
+
+	/// \brief Creating a file, when the parent directories might not exist
+	///
+	/// \param path - path to the file
+//	TODO: use boost instead
+	static void create_desired_dirs(std::string_view path) {
+		std::size_t founded = 0;
+
+		for (int i = 0; i < std::count(path.begin(), path.end(), '/'); ++i) {
+			founded = path.find('/', founded + 1);
+			std::string_view curr_path = path.substr(0, founded);
+
+			if (!std::filesystem::exists(curr_path))
+				std::filesystem::create_directory(curr_path);
+		}
+	}
 
 	/// \brief Reads how many folders/files the program is going to create inside
 	/// the main folder. File count was written to the compressed file from least significant byte
 	/// to most significant byte to make sure system's endianness does not affect the process and that is
 	/// why we are processing size information like this
-	int get_file_count() {
-		int file_count;
+	///
+	/// \return integer value of the file count
+	unsigned long get_file_count() {
+		unsigned long file_count;
 		file_count = process_byte_number();
 		file_count += Symbols * process_byte_number();
 		return file_count;
@@ -114,7 +139,7 @@ public:
 	unsigned char process_byte_number() {
 		unsigned char val, temp_byte;
 		fread(&temp_byte, 1, 1, m_compressed);
-		val = m_current_byte | (temp_byte >> m_current_bit_count);
+		val = (m_current_byte | (temp_byte >> m_current_bit_count));
 		m_current_byte = temp_byte << (CHAR_BIT - m_current_bit_count);
 		return val;
 	}
@@ -125,8 +150,8 @@ public:
 	///
 	/// \param node - pointer to the trie node that is going to be created
 	void process_n_bits_to_string(huff_trie *node) {
-		unsigned char curr_char = process_byte_number();
-		int len = process_byte_number();
+		char curr_char = (char) process_byte_number();
+		long len = process_byte_number();
 		if (len == 0)
 			len = Symbols;
 
@@ -168,25 +193,20 @@ public:
 		return size;
 	}
 
-	std::string create_new_file() {
-		const int file_name_length = process_byte_number();
-		auto *new_file = new unsigned char[file_name_length + 4];
-		write_file_name(new_file, file_name_length);
-		return reinterpret_cast<const char *>(new_file);
-	}
-
-	/// \brief Decodes current file's name and writes file name to new_file char array
+	/// \brief Decodes current file's name and writes file name to new_file string
 	///
-	/// \param new_file - char array to write file name to
-	/// \param file_name_length - length of file name
-	void write_file_name(unsigned char *new_file, int file_name_length) {
+	/// \param file_length - length of file name
+	std::string get_name() {
 		huff_trie *node;
-		new_file[file_name_length] = 0;
-		for (int i = 0; i < file_name_length; i++) {
+		std::string new_file;
+		int file_length = process_byte_number();
+
+		for (int i = 0; i < file_length; i++) {
 			node = m_trie_root;
 			iterate_over_nodes(&node);
-			new_file[i] = node->character;
+			new_file.push_back(node->character);
 		}
+		return new_file;
 	}
 
 	/// \brief This function translates compressed file from info that is now stored in the translation trie
@@ -196,13 +216,15 @@ public:
 	/// \param size - size of the file that is being decoded
 	void translate_file(const std::string &path, long int size) {
 		huff_trie *node;
-		FILE *fp_new = fopen(path.c_str(), "wb");
+
+		create_desired_dirs(path);
+		std::ofstream new_file(path, std::ios::binary);
 		for (long int i = 0; i < size; i++) {
 			node = m_trie_root;
 			iterate_over_nodes(&node);
-			fwrite(&(node->character), 1, 1, fp_new);
+			new_file << node->character;
 		}
-		fclose(fp_new);
+		new_file.close();
 	}
 
 	/// \brief This function iterates over the translation trie and writes the file
@@ -215,11 +237,10 @@ public:
 				fread(&m_current_byte, 1, 1, m_compressed);
 				m_current_bit_count = CHAR_BIT;
 			}
-			if (m_current_byte & Check) {
+			if (m_current_byte & Check)
 				(*node) = (*node)->one;
-			} else {
+			else
 				(*node) = (*node)->zero;
-			}
 			m_current_byte <<= 1;
 			m_current_bit_count--;
 		}
@@ -233,26 +254,66 @@ public:
 	/// \param path - the file will be created here
 	/// \param change_path - if there are compressed folders - this flag allows recursion
 	void translation(const std::string &path, bool change_path) {
-		int file_count = get_file_count();
-		for (int current_file = 0; current_file < file_count; current_file++) {
-			if (is_file()) {
-				long int size = read_file_size();
+		unsigned long file_count = get_file_count();
+		for (unsigned long current_file = 0; current_file < file_count; current_file++) {
+			long int size;
+			bool file = is_file();
+			if (file)
+				size = read_file_size();
 
-				std::string new_path = create_new_file();
+			std::string new_path = get_name();
+			if (change_path)
+				new_path.insert(0, path + "/");
 
-				if (change_path)
-					new_path.insert(0, path + "/");
+			if (file) {
 				translate_file(new_path, size);
 			} else {
-				std::string new_path = create_new_file();
-
-				if (change_path)
-					new_path.insert(0, path + "/");
-
 				mkdir(new_path.c_str(), MkdirPermission);
 				translation(new_path, true);
 			}
 		}
+	}
+
+	/// \brief translation function is used for creating files and folders inside given path
+	/// by using information from the compressed file.
+	/// whenever it creates another file it will recursively call itself with path of the newly created file
+	/// and in this way translates the compressed file.
+	///
+	/// \param for_decompress - folder to decompress
+	/// \param change_path - if there are compressed folders - this flag allows recursion
+	void translation_search(const std::string &path, std::string_view for_decompress,
+	                        bool change_path) {
+		unsigned long file_count = get_file_count();
+		for (unsigned long current_file = 0; current_file < file_count; current_file++) {
+			long int size;
+			bool file = is_file();
+			if (file)
+				size = read_file_size();
+
+			std::string new_path = get_name();
+			const std::string curr_file = new_path;
+			if (change_path)
+				new_path.insert(0, path + "/");
+
+			if (file) {
+				if (curr_file == for_decompress) {
+					translate_file(new_path, size);
+					break;
+				}
+				huff_trie *node;
+				for (long int i = 0; i < size; i++) {
+					node = m_trie_root;
+					iterate_over_nodes(&node);
+				}
+			} else {
+				if (curr_file == for_decompress) {
+					translation(new_path, true);
+					break;
+				}
+				translation_search(new_path, for_decompress, true);
+			}
+		}
+//		TODO: logger task - didn't find the file or folder
 	}
 
 private:
@@ -290,8 +351,8 @@ public:
 	}
 
 	/// \brief The main function of decompression class that do all the magic with provided m_files.
-	void operator()() {
-		(*decompressor_impl)();
+	void operator()(std::string_view folder_name = "") {
+		(*decompressor_impl)(folder_name);
 	}
 };
 }// namespace decompression
