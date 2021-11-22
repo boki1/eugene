@@ -11,22 +11,20 @@ void check_initial_compressed_size(const std::string &initial_file_folder, const
 	std::cout << "directory: " << fs::is_directory(initial_file_folder) << std::endl;
 	if (fs::is_directory(initial_file_folder))
 		initial_size = std::accumulate(
-		        fs::recursive_directory_iterator(initial_file_folder.c_str()),
-		        fs::recursive_directory_iterator(), 0,
-		        [](auto sz, auto entry) { return is_directory(entry) ? sz : sz + file_size(entry); });
+			fs::recursive_directory_iterator(initial_file_folder.c_str()),
+			fs::recursive_directory_iterator(), 0,
+			[](auto sz, auto entry) { return is_directory(entry) ? sz : sz + file_size(entry); });
 	else
 		initial_size = fs::file_size(initial_file_folder);
 
 	unsigned long long int compressed_size = fs::file_size(compressed_file);
 
-	std::cout << std::endl
-	          << std::endl
+	std::cout << std::endl << std::endl
 	          << "#############################################################" << std::endl;
-	std::cout << "Passed with initial size: " << initial_size << " and compressed size: " << compressed_size
-	          << std::endl;
+	std::cout << "Passed with initial size: " << initial_size << " and compressed size: "
+	          << compressed_size << std::endl;
 	std::cout << "#############################################################" << std::endl
-	          << std::endl
-	          << std::endl;
+	          << std::endl << std::endl;
 }
 
 bool clean(const std::map<std::string, std::string> &files) {
@@ -49,8 +47,8 @@ int main() {
 	auto start = std::chrono::high_resolution_clock::now();
 
 	compression::Compressor compress{
-	        std::vector<std::string>(1, file_name),
-	        compressed_file_name};
+		std::vector<std::string>(1, file_name),
+		compressed_file_name};
 	compress();
 
 	auto stop = std::chrono::high_resolution_clock::now();

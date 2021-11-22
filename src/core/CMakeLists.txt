@@ -30,5 +30,5 @@ if(DEFINED ENV{EUGENE_BUILD_TESTS})
 endif()
 
 # add executable for compression/CompDecomp.cpp
-add_executable(comp_decomp storage/compression/CompDecomp.cpp)
+add_executable(comp_decomp storage/compression/Benchmark.cpp)
 target_link_libraries(comp_decomp PUBLIC test_main)
