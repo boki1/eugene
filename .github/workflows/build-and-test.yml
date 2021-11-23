@@ -6,7 +6,7 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     env:
-      BUILD_TYPE: Debug
+      BUILD_TYPE: RelWithDebInfo
     strategy:
       fail-fast: true
       matrix:
@@ -16,12 +16,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
-      - name: Setup dependencies
+      - name: Dependency setup
         run: |
              sudo apt update
              sudo apt install gcc-11 g++-11
+             pip3 install conan --upgrade
+             CXX=g++-11 CC=gcc-11 conan install . --build=missing
 
-      - name: Configure CMake
+      - name: Configure
         env:
           CXX: ${{ matrix.cxx }}
         shell: bash
@@ -39,4 +41,4 @@ jobs:
       - name: Test
         working-directory: ${{github.workspace}}
         shell: bash
-        run: ctest -C $BUILD_TYPE --no-tests=error --rerun-failed --output-on-failure
+        run: ctest -VV -C $BUILD_TYPE --no-tests=error --rerun-failed --output-on-failure
