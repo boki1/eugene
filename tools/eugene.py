@@ -92,29 +92,41 @@ def autocomplete(arg):
     return None
 
 
-def do_build(test=False, doc=False):
+def do_config_cmd(compiler_matrix) -> bool:
+		cmake_command = f"cmake -S. -Bbuild -GNinja \
+				  -DCMAKE_C_COMPILER={compiler_matrix[0]} \
+				  -DCMAKE_CXX_COMPILER={compiler_matrix[1]}".split()
+		conan_install_command = "conan install . -if build".split()
+		print_style("Trying to configure project ...")
+		try:
+			sp.check_call(conan_install_command)
+			sp.run(conan_install_command)
+			sp.check_call(cmake_command)
+			sp.run(cmake_command)
+			print_style("Configuration successful!")
+		except:
+			print_style("Configuration failed :(")
+			return False
+		return True
+
+
+def do_config():
     try:
         os.mkdir("build/")
         print("INFO: Created 'build/' directory")
     except OSError:
-        print_scream("INFO: 'build/' directory already exists")
+        print_style("INFO: 'build/' directory already exists")
 
-    building = "Building project"
-    cmake_command = "cmake -S. -Bbuild -GNinja -D CMAKE_C_COMPILER=gcc-11 -D CMAKE_CXX_COMPILER=g++-11"
-    ninja_command = "ninja -Cbuild -j4"
+    if not do_config_cmd(('gcc-11', 'g++-11')):
+        if not do_config_cmd(('gcc', 'g++')):
+            sys.exit(-1)
 
+def do_build(test=False, doc=False):
+    do_config()
+    ninja_command="ninja -Cbuild -j4"
     if test:
         os.environ["EUGENE_BUILD_TESTS"] = "1"
-        building += ' and tests'
-
-    print_style("Configuring project")
-    try:
-        sp.check_call(cmake_command.split())
-        sp.run(cmake_command.split())
-    except:
-        sp.run("cmake -S. -Bbuild -GNinja -D CMAKE_C_COMPILER=gcc -D CMAKE_CXX_COMPILER=g++".split())
-
-    print_style(building)
+    print_style(f"Building project{' and tests' if test else ''}")
     sp.run(ninja_command.split())
 
     if doc:
@@ -171,14 +183,18 @@ def parse(cmd_line, cmd, cmd_args, cmd_argc):
             test, doc = False, False
         do_build(test, doc)
 
+    elif cmd == 'config':
+        assert cmd_argc == 0
+        do_config()
+    
     elif cmd == 'test':
         do_build(test=True, doc=False)
         if cmd_argc == 1 and 'run' in cmd_args[0]:
             do_run_test()
 
     elif cmd == 'clean' or cmd == 'mrproper':
-        forced = cmd_argc == 1 and 'force' in cmd_args[0]
-        kind = (cmd_argc == 1 and 'kind' in cmd_args[0]) or cmd_argc == 0
+        forced = (cmd_argc == 1 and 'force' in cmd_args[0]) or cmd_argc == 0
+        kind = cmd_argc == 1 and 'kind' in cmd_args[0]
         do_clean(kind and not forced)
 
     elif cmd == 'lint':
