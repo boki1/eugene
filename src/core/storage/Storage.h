@@ -4,8 +4,6 @@
 #include <functional>
 #include <string>
 
-#include <third-party/expected/Expected.h>
-
 namespace internal::storage {
 
 class Position {
