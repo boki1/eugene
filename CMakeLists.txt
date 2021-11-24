@@ -29,7 +29,7 @@ set(LibEugeneCore_SRC
         compression/Compressor.h compression/Decompressor.h compression/Compression.cpp)
 list(TRANSFORM LibEugeneCore_SRC PREPEND "${EUGENE_STORAGE}/")
 
-add_library(LibEugeneCore SHARED "${LibEugeneCore_SRC}")
+add_library(LibEugeneCore "${LibEugeneCore_SRC}")
 set_target_properties(LibEugeneCore PROPERTIES LINKER_LANGUAGE CXX)
 target_include_directories(LibEugeneCore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(LibEugeneCore
