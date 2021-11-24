@@ -93,21 +93,23 @@ def autocomplete(arg):
 
 
 def do_config_cmd(compiler_matrix) -> bool:
-		cmake_command = f"cmake -S. -Bbuild -GNinja \
-				  -DCMAKE_C_COMPILER={compiler_matrix[0]} \
-				  -DCMAKE_CXX_COMPILER={compiler_matrix[1]}".split()
-		conan_install_command = "conan install . -if build".split()
-		print_style("Trying to configure project ...")
-		try:
-			sp.check_call(conan_install_command)
-			sp.run(conan_install_command)
-			sp.check_call(cmake_command)
-			sp.run(cmake_command)
-			print_style("Configuration successful!")
-		except:
-			print_style("Configuration failed :(")
-			return False
-		return True
+    os.environ["CC"] = compiler_matrix[0]
+    os.environ["CXX"] = compiler_matrix[1]
+    cmake_command = f"cmake -S. -Bbuild -GNinja \
+            -DCMAKE_C_COMPILER={compiler_matrix[0]} \
+            -DCMAKE_CXX_COMPILER={compiler_matrix[1]}".split()
+    conan_install_command = f"conan install . -if build --build=missing".split()
+    print_style("Trying to configure project ...")
+    try:
+        sp.check_call(conan_install_command)
+        sp.run(conan_install_command)
+        sp.check_call(cmake_command)
+        sp.run(cmake_command)
+        print_style("Configuration successful!")
+    except:
+        print_style("Configuration failed :(")
+        return False
+    return True
 
 
 def do_config():
