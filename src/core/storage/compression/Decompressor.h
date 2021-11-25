@@ -137,7 +137,8 @@ public:
 	///
 	/// \return the latter 8 successive bits in uint8_t form
 	uint8_t process_byte_number() {
-		uint8_t val, temp_byte;
+		uint8_t val;
+		uint8_t temp_byte;
 		fread(&temp_byte, 1, 1, m_compressed);
 		val = (m_current_byte | (temp_byte >> m_current_bit_count));
 		m_current_byte = temp_byte << (CHAR_BIT - m_current_bit_count);
