@@ -84,7 +84,7 @@ public:
 
 	CompressorInternal(std::vector<std::string> files, std::string new_compressed_name)
 		: m_files(std::move(files)), m_compressed_name(std::move(new_compressed_name)) {
-		std::fill(m_occurrence_symbol, m_occurrence_symbol + 256, 0);
+		std::fill(m_occurrence_symbol.begin(), m_occurrence_symbol.end(), 0);
 	}
 
 	void operator()() {
@@ -107,9 +107,10 @@ public:
 				count_file_bytes_freq(item);
 		}
 
-		for (long int *i = m_occurrence_symbol; i < m_occurrence_symbol + 256; i++)
-			if (*i)
+		for (const auto &item: m_occurrence_symbol) {
+			if (item)
 				m_symbols++;
+		}
 
 		m_trie.resize(m_symbols * 2 - 1);
 		initialize_trie();
@@ -147,7 +148,7 @@ public:
 	std::vector<std::string> m_files;//!< path to the m_files for compress
 	FILE *m_compressed_fp = nullptr; //!< file pinter to the new created compressed file
 
-	long int m_occurrence_symbol[256];//!< long integer array that will contain
+	std::array<long int, 256> m_occurrence_symbol;//!< long integer array that will contain
 	//!< the number of occurrences of each symbol in the m_files
 
 	std::vector<huff_trie> m_trie;//!< vector of detail's that represents trie
@@ -157,7 +158,7 @@ public:
 	unsigned long m_total_bits = 0;//!< count the compressed file size
 	unsigned long m_symbols = 0;   //!< count of the file or folder m_symbols
 
-	std::string m_char_huffbits[256];//!< transformation string
+	std::array<std::string, 256> m_char_huffbits;//!< transformation string
 	//!< is put to m_str_huffbits array to make the compression process more time efficient
 
 	unsigned char m_current_byte = '\0';//!< unsigned char value that represents the m_current_byte
@@ -176,14 +177,15 @@ public:
 	/// Specific number of bits we re going to use for that character is determined by weight distribution
 	void initialize_trie() {
 		huff_trie *e = m_trie.data();
-		for (long int *i = m_occurrence_symbol; i < m_occurrence_symbol + 256; i++)
-			if (*i) {
+		for (unsigned long i = 0; i < m_occurrence_symbol.size(); ++i) {
+			if (m_occurrence_symbol[i]) {
 				e->right = nullptr;
 				e->left = nullptr;
-				e->number = *i;
-				e->character = i - m_occurrence_symbol;
+				e->number = m_occurrence_symbol[i];
+				e->character = i;
 				e++;
 			}
+		}
 		std::sort(m_trie.begin(), m_trie.end() - (long) (m_symbols - 1));
 
 		huff_trie *min1 = m_trie.data();    //!< min1 and min2 represents nodes that has minimum weights

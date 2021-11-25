@@ -159,5 +159,5 @@ TEST_CASE("CompressorDecompressor partial_decompress", "[partial_decompress]") {
 	REQUIRE(exists(params["test_dir_name"]));
 
 	compare_folders("InitialDir/1", "ForTesting/1");
-//	REQUIRE(clean(params));
+	REQUIRE(clean(params));
 }
