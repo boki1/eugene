@@ -3,7 +3,7 @@
 #include <concepts>
 #include <cstdint>
 
-#include <core/storage/SizeMetrics.h>
+#include <core/SizeMetrics.h>
 
 namespace internal::storage::btree {
 

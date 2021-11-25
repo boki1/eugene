@@ -12,8 +12,7 @@ add_compile_options(
         -Werror
         -pedantic
         -ggdb3
-        -fdiagnostics-color
-        -fconcepts-diagnostics-depth=2)
+        -fdiagnostics-color)
 
 enable_testing()
 include(FetchContent)
@@ -21,13 +20,32 @@ include(FetchContent)
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup(TARGETS)
 
-set(EUGENE_STORAGE src/core/storage)
+
+set(LibEugeneBtree_SRC
+	storage/btree/Btree.h
+	storage/btree/Btree.cpp
+	storage/btree/Node.h
+	storage/btree/BtreePrinter.h
+	storage/btree/Config.h)
+
+set (LibEugenePager_SRC
+	storage/Position.h
+	storage/PageCache.h
+	storage/PageCache.cpp
+	storage/Page.h
+	storage/Page.cpp)
+
+set(LibEugeneCompression_SRC
+	storage/compression/Compressor.h
+	storage/compression/Decompressor.h
+	storage/compression/Compression.cpp)
+
 set(LibEugeneCore_SRC
-		Position.h SizeMetrics.h
-		PageCache.h PageCache.cpp Page.h Page.cpp
-		btree/Btree.h btree/BtreePrinter.h btree/Btree.cpp btree/Config.h
-        compression/Compressor.h compression/Decompressor.h compression/Compression.cpp)
-list(TRANSFORM LibEugeneCore_SRC PREPEND "${EUGENE_STORAGE}/")
+		Util.h SizeMetrics.h
+		${LibEugeneBtree_SRC}
+		${LibEugenePager_SRC}
+		${LibEugeneCompression_SRC})
+list(TRANSFORM LibEugeneCore_SRC PREPEND "src/core/")
 
 add_library(LibEugeneCore "${LibEugeneCore_SRC}")
 set_target_properties(LibEugeneCore PROPERTIES LINKER_LANGUAGE CXX)
@@ -37,6 +55,7 @@ target_link_libraries(LibEugeneCore
         CONAN_PKG::ms-gsl
         CONAN_PKG::outcome
         CONAN_PKG::spdlog
+        CONAN_PKG::libnop
         CONAN_PKG::catch2)
 
 if (DEFINED ENV{EUGENE_BUILD_TESTS})
@@ -53,8 +72,8 @@ if (DEFINED ENV{EUGENE_BUILD_TESTS})
     add_library(TestMain src/core/Main.cpp)
     target_link_libraries(TestMain CONAN_PKG::catch2)
 
-    eugene_test(Compression ${EUGENE_STORAGE}/compression)
-    eugene_test(Btree ${EUGENE_STORAGE}/btree)
-    eugene_test(Page ${EUGENE_STORAGE})
-    eugene_test(PageCache ${EUGENE_STORAGE})
+    eugene_test(Compression src/core/storage/compression)
+    eugene_test(Btree src/core/storage/btree)
+    eugene_test(Page src/core/storage)
+    eugene_test(PageCache src/core/storage)
 endif ()

@@ -7,6 +7,7 @@ namespace internal::storage {
 
 class Position {
 	friend std::hash<Position>;
+
 public:
 	Position() = default;
 	Position(const Position &) = default;
@@ -42,15 +43,14 @@ private:
 
 }// namespace internal::storage
 
-
 /*
  * Implement std::hash<> for Position
  */
 namespace std {
-	template <>
-	struct hash<internal::storage::Position> {
-		size_t operator() (const internal::storage::Position pos) const noexcept {
-			return std::hash<decltype(pos.m_pos)>{}(pos.m_pos);
-		}
-	};
-}
+template<>
+struct hash<internal::storage::Position> {
+	size_t operator()(const internal::storage::Position pos) const noexcept {
+		return std::hash<decltype(pos.m_pos)>{}(pos.m_pos);
+	}
+};
+}// namespace std
