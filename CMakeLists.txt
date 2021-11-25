@@ -57,4 +57,8 @@ if (DEFINED ENV{EUGENE_BUILD_TESTS})
     eugene_test(Btree ${EUGENE_STORAGE}/btree)
     eugene_test(Page ${EUGENE_STORAGE})
     eugene_test(PageCache ${EUGENE_STORAGE})
+
+    # add executable for compression/Benchmark.cpp
+    add_executable(benchmark ${EUGENE_STORAGE}/compression/Benchmark.cpp)
+    target_link_libraries(benchmark PUBLIC LibEugeneCore TestMain)
 endif ()
