@@ -13,7 +13,7 @@
 #include <fstream>
 #include <filesystem>
 
-static constexpr unsigned char Check = 0b10000000;
+static constexpr uint8_t Check = 0b10000000;
 static constexpr int Symbols = 256;
 static constexpr int MkdirPermission = 0755;
 
@@ -84,7 +84,7 @@ public:
 	FILE *m_compressed = nullptr;//!< file pinter to the compressed file
 	unsigned long m_symbols = 0; //!< count of the file or folder m_symbols
 
-	unsigned char m_current_byte = '\0';//!< unsigned char value
+	uint8_t m_current_byte = '\0';//!< uint8_t value
 	//!< that represents the current byte
 	int m_current_bit_count = 0;        //!< integer value of current bits count
 
@@ -135,9 +135,10 @@ public:
 	/// \brief process_byte_number reads 8 successive bits from compressed file
 	/// (does not have to be in the same byte)
 	///
-	/// \return the latter 8 successive bits in unsigned char form
-	unsigned char process_byte_number() {
-		unsigned char val, temp_byte;
+	/// \return the latter 8 successive bits in uint8_t form
+	uint8_t process_byte_number() {
+		uint8_t val;
+		uint8_t temp_byte;
 		fread(&temp_byte, 1, 1, m_compressed);
 		val = (m_current_byte | (temp_byte >> m_current_bit_count));
 		m_current_byte = temp_byte << (CHAR_BIT - m_current_bit_count);
