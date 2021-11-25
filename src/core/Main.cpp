@@ -5,4 +5,5 @@
 
 #define CATCH_CONFIG_MAIN
 
-#include <third-party/catch2/Catch2.h>
+#include "catch2/catch.hpp"
+

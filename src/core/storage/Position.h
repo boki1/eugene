@@ -1,15 +1,17 @@
 #pragma once
 
-#include <concepts>
 #include <functional>
 #include <string>
 
 namespace internal::storage {
 
 class Position {
+	friend std::hash<Position>;
 public:
 	Position() = default;
 	Position(const Position &) = default;
+
+	Position &operator=(const Position &) = default;
 
 	/*
 	 * Intentionally implicit
@@ -38,11 +40,17 @@ private:
 	bool m_isset{false};
 };
 
-template<typename Dev>
-concept StorageDevice = true;
-
-struct DefaultStorageDev {
-};
-
-static_assert(StorageDevice<DefaultStorageDev>, "Default storage device is not a storage device!");
 }// namespace internal::storage
+
+
+/*
+ * Implement std::hash<> for Position
+ */
+namespace std {
+	template <>
+	struct hash<internal::storage::Position> {
+		size_t operator() (const internal::storage::Position pos) const noexcept {
+			return std::hash<decltype(pos.m_pos)>{}(pos.m_pos);
+		}
+	};
+}

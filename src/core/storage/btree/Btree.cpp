@@ -1,4 +1,4 @@
-#include <third-party/catch2/Catch2.h>
+#include "catch2/catch.hpp"
 
 #include <core/storage/Storage.h>
 #include <core/storage/btree/Btree.h>
