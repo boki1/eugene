@@ -99,7 +99,7 @@ public:
 		m_total_bits = Folder + 9 * m_files.size();
 		for (const auto &item: m_files) {
 			for (const char *c = item.c_str(); *c; c++)
-				m_occurrence_symbol[(unsigned char) *c]++;
+				m_occurrence_symbol[(uint8_t) *c]++;
 
 			if (fs::is_directory(item))
 				count_folder_bytes_freq(item);
@@ -132,13 +132,13 @@ public:
 	/// \brief This structure will be used to create the trie
 	struct huff_trie {
 		huff_trie *left{nullptr}, *right{nullptr};//!< left and right nodes of the m_trie_root
-		unsigned char character;                  //!< associated character in the m_trie_root node
+		uint8_t character;                  //!< associated character in the m_trie_root node
 		long int number;                          //<! occurrences of the respective character
 		std::string bit;                          //<! bit that represents Huffman code of current character
 
 		huff_trie() = default;
 
-		huff_trie(long int num, unsigned char c) : character(c), number(num) {}
+		huff_trie(long int num, uint8_t c) : character(c), number(num) {}
 
 		bool operator<(const huff_trie &second) const {
 			return this->number < second.number;
@@ -161,7 +161,7 @@ public:
 	std::array<std::string, 256> m_char_huffbits;//!< transformation string
 	//!< is put to m_str_huffbits array to make the compression process more time efficient
 
-	unsigned char m_current_byte = '\0';//!< unsigned char value that represents the m_current_byte
+	uint8_t m_current_byte = '\0';//!< uint8_t value that represents the m_current_byte
 	int m_current_bit_count = 0;        //!< integer value of m_current_bit_count
 
 	/// \brief First creates the base of trie(and then sorting them by ascending frequencies).
@@ -251,7 +251,7 @@ public:
 		const std::string buff = return_file_info(path);
 
 		for (const auto &item: buff)
-			m_occurrence_symbol[(unsigned char) item]++;
+			m_occurrence_symbol[(uint8_t) item]++;
 	}
 
 	/// \brief This function counts usage frequency of bytes inside a folder
@@ -268,7 +268,7 @@ public:
 
 			m_total_bits += 9;
 			for (const auto &item: curr_fdir_name)
-				m_occurrence_symbol[(unsigned char) item]++;
+				m_occurrence_symbol[(uint8_t) item]++;
 
 			if (entry.is_directory())
 				m_total_bits += Folder;
@@ -410,7 +410,7 @@ public:
 		const std::string buff = return_file_info(path);
 
 		for (const auto &item: buff)
-			write_bytes(m_char_huffbits[(unsigned char) item]);
+			write_bytes(m_char_huffbits[(uint8_t) item]);
 	}
 
 	/// \brief Writes provided string bytes to the new compressed file
@@ -444,7 +444,7 @@ public:
 	void write_file_name(std::string_view file_name) {
 		write_from_ch(file_name.size());
 		for (const auto &item: file_name)
-			write_bytes(m_char_huffbits[(unsigned char) item]);
+			write_bytes(m_char_huffbits[(uint8_t) item]);
 	}
 
 	/// \brief This function is writing byte count of current input file to compressed file using 8 bytes.
@@ -465,7 +465,7 @@ public:
 	///
 	/// \param file_count - number of m_files that are provided (argc - 1)
 	void write_file_count(unsigned long file_count) {
-		unsigned char temp = file_count % 256;
+		uint8_t temp = file_count % 256;
 		write_from_ch(temp);
 		temp = file_count / 256;
 		write_from_ch(temp);
@@ -476,7 +476,7 @@ public:
 	/// and puts the rest to current byte for later use.
 	///
 	/// \param ch - character
-	void write_from_ch(unsigned char ch) {
+	void write_from_ch(uint8_t ch) {
 		m_current_byte <<= CHAR_BIT - m_current_bit_count;
 		m_current_byte |= (ch >> m_current_bit_count);
 		fwrite(&m_current_byte, 1, 1, m_compressed_fp);
