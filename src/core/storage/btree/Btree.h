@@ -1,7 +1,5 @@
 #pragma once
 
-#include <core/storage/Storage.h>
-
 #include <algorithm>    // std::min, std::fill, std::copy
 #include <array>        // std::array
 #include <cassert>      // assert
@@ -14,6 +12,8 @@
 #include <utility>      // std::move, std::pair
 #include <variant>      // std::variant
 
+#include <core/storage/btree/Config.h>
+
 template<typename T>
 consteval bool PowerOf2(T num) {
 	return (num & (num - 1)) == 0;
@@ -24,48 +24,25 @@ consteval bool PowerOf2(T num) {
 template<typename T>
 using optional_cref = std::optional<std::reference_wrapper<const T>>;
 
-namespace internal::btree {
+namespace internal::storage::btree {
 
 using namespace storage;
 
-template<typename Config>
-concept BtreeConfig = requires(Config conf) {
-	typename Config::Key;
-	typename Config::KeyRef;
-	typename Config::Val;
-	typename Config::StorageDev;
-
-	requires std::convertible_to<decltype(conf.ApplyCompression), bool>;
-	requires StorageDevice<typename Config::StorageDev>;
-	requires std::unsigned_integral<decltype(conf.BtreeNodeSize)>;
-}
-&&PowerOf2(Config::BtreeNodeSize);
-
-struct DefaultBtreeConfig {
-	using Key = uint32_t;
-	using KeyRef = Key;
-	using Val = uint32_t;
-	using StorageDev = DefaultStorageDev;
-	static constexpr unsigned BtreeNodeSize = 1 << 10;
-	static constexpr bool ApplyCompression = false;
-};
-
 namespace util {
-template<BtreeConfig Config>
+template<BtreeConfig C>
 class BtreeYAMLPrinter;
 }
 
-template<typename Config = DefaultBtreeConfig>
+template<typename C = DefaultBtreeConfig>
 requires BtreeConfig<Config>
 class Btree final {
 private:
-	using Key = typename Config::Key;
-	using KeyRef = typename Config::KeyRef;
-	using Val = typename Config::Val;
-	using Storage = typename Config::StorageDev;
+	using Key = typename C::Key;
+	using KeyRef = typename C::KeyRef;
+	using Val = typename C::Val;
 
-	static constexpr bool ApplyCompression = Config::ApplyCompression;
-	static constexpr uint32_t BtreeNodeSize = Config::BtreeNodeSize;
+	static constexpr bool APPLY_COMPRESSION = C::APPLY_COMPRESSION;
+	static constexpr uint32_t BTREE_NODE_SIZE = C::BTREE_NODE_SIZE;
 
 public:
 	class Node;
@@ -165,7 +142,7 @@ public:// Accessors
 private:
 	Position allocate_node() noexcept {
 		auto pos = m_stored_end;
-		m_stored_end.set(m_stored_end.get() + BtreeNodeSize);
+		m_stored_end.set(m_stored_end.get() + BTREE_NODE_SIZE);
 		return pos;
 	}
 
@@ -176,7 +153,7 @@ private:
 	Position m_stored_end{0ul};
 };
 
-template<BtreeConfig Config>
+template<BtreeConfig C>
 class Btree<Config>::Node final {
 private:
 	using Bt = Btree<Config>;
@@ -204,7 +181,7 @@ private:
 	}
 
 	enum {
-		NodeLimit = Config::BtreeNodeSize,
+		NodeLimit = C::BTREE_NODE_SIZE,
 		MetaSize = NodeLimit - sizeof(Header),
 		NumRecords = _calc_num_records(MetaSize),
 		NumLinks = NumRecords + 1,
@@ -542,7 +519,7 @@ private:
 	long m_numfilled{0};
 };
 
-template<BtreeConfig Config>
+template<BtreeConfig C>
 class Btree<Config>::Iterator final {
 public:// Iterator traits
 	using difference_type = long;
@@ -552,8 +529,8 @@ public:// Iterator traits
 	using iterator_category = std::bidirectional_iterator_tag;
 
 private:
-	using Val = Config::Val;
-	using Key = Config::Key;
+	using Val = C::Val;
+	using Key = C::Key;
 
 public:// Constructor
 	Iterator() = default;

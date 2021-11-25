@@ -7,7 +7,7 @@
 #include <ranges>
 using namespace std::ranges::views;
 
-using namespace internal::btree;
+using namespace internal::storage::btree;
 using config_ = DefaultBtreeConfig;
 using bt_t = Btree<config_>;
 using node_t = bt_t::Node;

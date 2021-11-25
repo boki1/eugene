@@ -23,9 +23,9 @@ conan_basic_setup(TARGETS)
 
 set(EUGENE_STORAGE src/core/storage)
 set(LibEugeneCore_SRC
-        Position.h PageCache.h Page.h PageCache.cpp Page.cpp
-        Storage.h
-        btree/Btree.h btree/BtreePrinter.h btree/Btree.cpp
+		Position.h SizeMetrics.h
+		PageCache.h PageCache.cpp Page.h Page.cpp
+		btree/Btree.h btree/BtreePrinter.h btree/Btree.cpp btree/Config.h
         compression/Compressor.h compression/Decompressor.h compression/Compression.cpp)
 list(TRANSFORM LibEugeneCore_SRC PREPEND "${EUGENE_STORAGE}/")
 
