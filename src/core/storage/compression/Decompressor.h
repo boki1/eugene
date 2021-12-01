@@ -1,6 +1,7 @@
 #ifndef STORAGE_DECOMPRESSOR_INCLUDED
 #define STORAGE_DECOMPRESSOR_INCLUDED
 
+#include <core/storage/Logger.h>
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
@@ -70,7 +71,7 @@ public:
 
 		fclose(m_compressed);
 		deallocate_trie(m_trie_root);
-		std::cout << "Decompression is complete" << std::endl;
+		Logger::the().log(spdlog::level::info, "Decompression is complete");
 	}
 
 	/// \brief This structure will be used to represent the trie
@@ -341,11 +342,21 @@ public:
 	///
 	/// \param path - path to the file for detail
 	explicit Decompressor(const std::string &path) {
+		//		generate logger
+		try {
+			auto log = spdlog::basic_logger_mt("compressor_logger",
+			                                   "logs.txt", false);
+			spdlog::set_default_logger(log);
+		}
+		catch (const spdlog::spdlog_ex &ex) {
+//			std::cerr << "Log init failed: " << ex.what() << std::endl;
+			spdlog::set_default_logger(spdlog::get("compressor_logger"));
+		}
+
 		FILE *path_to_compressed;
 		path_to_compressed = fopen(path.c_str(), "rb");
 		if (!path_to_compressed) {
-			//                        TODO: task for the logger
-			std::cout << "Please provide valid file name" << std::endl;
+			Logger::the().log(spdlog::level::err, "File not found: {}", path);
 			return;
 		}
 		decompressor_impl = std::make_unique<pimpl>(path_to_compressed);

@@ -1,6 +1,7 @@
 #ifndef STORAGE_COMPRESSOR_INCLUDED
 #define STORAGE_COMPRESSOR_INCLUDED
 
+#include <core/storage/Logger.h>
 #include <algorithm>
 #include <climits>
 #include <cstdio>
@@ -96,6 +97,12 @@ public:
 			else
 				m_all_size += fs::file_size(file);
 		}
+
+//		log m_files size
+		Logger::the().log(spdlog::level::info,
+		                  "Compressor: started for {0} file/files/folder/folders with size: {1} bytes",
+		                  m_files.begin()->c_str(), m_all_size);
+
 		m_total_bits = Folder + 9 * m_files.size();
 		for (const auto &item: m_files) {
 			for (const char *c = item.c_str(); *c; c++)
@@ -114,6 +121,10 @@ public:
 
 		m_trie.resize(m_symbols * 2 - 1);
 		initialize_trie();
+//		log initialization of the trie
+		Logger::the().log(spdlog::level::info,
+		                  "Compressor: initialized the trie with {0} symbols and {1} nodes",
+		                  m_symbols, m_trie.size());
 
 		m_compressed_fp = fopen(m_compressed_name.c_str(), "wb");
 		fwrite(&m_symbols, 1, 1, m_compressed_fp);
@@ -124,9 +135,14 @@ public:
 		all_file_write();
 		fclose(m_compressed_fp);
 
-		std::cout << std::endl
-		          << "Created compressed file: " << m_compressed_name << std::endl;
-		std::cout << "Compression is completed" << std::endl;
+//		std::cout << std::endl
+//		          << "Created compressed file: " << m_compressed_name << std::endl;
+//		std::cout << "Compression is completed" << std::endl;
+		Logger::the().log(spdlog::level::info,
+		                  "Compressor: created compressed file: {0}",
+		                  m_compressed_name);
+		Logger::the().log(spdlog::level::info,
+		                  "Compressor: compression is completed");
 	}
 
 	/// \brief This structure will be used to create the trie
@@ -293,15 +309,20 @@ public:
 		if (m_total_bits % CHAR_BIT)
 			m_total_bits = (m_total_bits / CHAR_BIT + 1) * CHAR_BIT;
 
-		std::cout << "The size of the sum of ORIGINAL m_files is: " << m_all_size << " bytes" << std::endl;
-		std::cout << "The size of the COMPRESSED file will be: " << m_total_bits / CHAR_BIT << " bytes" << std::endl;
-		std::cout << "Compressed file's size will be [%" << 100 * ((float) m_total_bits / CHAR_BIT / (float) m_all_size)
-		          << "] of the original file"
-		          << std::endl;
+		Logger::the().log(spdlog::level::info,
+		                  "Compressor: The size of the sum of ORIGINAL m_files is: {} bytes",
+		                  m_all_size);
+		Logger::the().log(spdlog::level::info,
+		                  "Compressor: The size of the COMPRESSED file will be: {} bytes",
+		                  m_total_bits / CHAR_BIT);
+		Logger::the().
+			log(spdlog::level::info, "Compressor: Compressed file's size will be [%{}] of the original file",
+			    100 * ((float) m_total_bits / (float) CHAR_BIT / (float) m_all_size));
+
 		if (m_total_bits / CHAR_BIT > m_all_size)
-			std::cout << std::endl
-			          << "WARNING: COMPRESSED FILE'S SIZE WILL BE HIGHER THAN THE SUM OF ORIGINALS" << std::endl
-			          << std::endl;
+			Logger::the().
+				log(spdlog::level::warn,
+				    "Compressor: COMPRESSED FILES SIZE WILL BE HIGHER THAN THE SUM OF ORIGINALS");
 	}
 
 	/// \brief Writes all information in compressed order.
@@ -431,8 +452,7 @@ public:
 				m_current_bit_count++;
 				break;
 
-				//  TODO:                                logger case
-			default: continue;
+			default: Logger::the().log(spdlog::level::err, "Function write_bytes incorrect configuration!");
 			}
 		}
 	}
@@ -497,8 +517,8 @@ public:
 	explicit Compressor(const std::vector<std::string> &args, std::string_view compressed_name = "") {
 		std::string new_compressed_name;
 
-		//                if (args.empty())
-		//                        TODO: Logger task
+		if (args.empty())
+			Logger::the().log(spdlog::level::err, "No files provided!");
 		if (!compressed_name.empty())
 			new_compressed_name = compressed_name;
 		else if (args.size() == 1)
