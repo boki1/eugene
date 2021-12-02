@@ -71,7 +71,7 @@ public:
 
 		fclose(m_compressed);
 		deallocate_trie(m_trie_root);
-		Logger::the().log(spdlog::level::info, "Decompression is complete");
+		Logger::the().log(spdlog::level::info, "Decompression is completed");
 	}
 
 	/// \brief This structure will be used to represent the trie
@@ -88,22 +88,6 @@ public:
 	uint8_t m_current_byte = '\0';//!< uint8_t value
 	//!< that represents the current byte
 	int m_current_bit_count = 0;        //!< integer value of current bits count
-
-	/// \brief Creating a file, when the parent directories might not exist
-	///
-	/// \param path - path to the file
-//	TODO: use boost instead
-	static void create_desired_dirs(std::string_view path) {
-		std::size_t founded = 0;
-
-		for (int i = 0; i < std::count(path.begin(), path.end(), '/'); ++i) {
-			founded = path.find('/', founded + 1);
-			std::string_view curr_path = path.substr(0, founded);
-
-			if (!std::filesystem::exists(curr_path))
-				std::filesystem::create_directory(curr_path);
-		}
-	}
 
 	/// \brief Reads how many folders/files the program is going to create inside
 	/// the main folder. File count was written to the compressed file from least significant byte
@@ -219,7 +203,7 @@ public:
 	void translate_file(const std::string &path, long int size) {
 		huff_trie *node;
 
-		create_desired_dirs(path);
+		std::filesystem::create_directories(path.substr(0, path.find_last_of('/')));
 		std::ofstream new_file(path, std::ios::binary);
 		for (long int i = 0; i < size; i++) {
 			node = m_trie_root;
@@ -315,7 +299,7 @@ public:
 				translation_search(new_path, for_decompress, true);
 			}
 		}
-//		TODO: logger task - didn't find the file or folder
+		Logger::the().log(spdlog::level::err, "There isn't such compressed file/dir: {}", path);
 	}
 
 private:
@@ -341,7 +325,7 @@ public:
 	/// \brief Constructor of the decompression class with which you can detail provided file
 	///
 	/// \param path - path to the file for detail
-	explicit Decompressor(const std::string &path) {
+	explicit Decompressor(std::string_view path) {
 		//		generate logger
 		try {
 			auto log = spdlog::basic_logger_mt("compressor_logger",
@@ -354,7 +338,7 @@ public:
 		}
 
 		FILE *path_to_compressed;
-		path_to_compressed = fopen(path.c_str(), "rb");
+		path_to_compressed = fopen(path.begin(), "rb");
 		if (!path_to_compressed) {
 			Logger::the().log(spdlog::level::err, "File not found: {}", path);
 			return;

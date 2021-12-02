@@ -81,6 +81,18 @@ public:
 		return buff;
 	}
 
+	static unsigned long get_file_folder_size(const std::string &path) {
+		unsigned long size = 0;
+		if (fs::is_directory(path))
+			size += std::accumulate(
+				fs::recursive_directory_iterator(path.c_str()), fs::recursive_directory_iterator(), 0,
+				[](auto sz, auto entry) { return is_directory(entry) ? sz : sz + file_size(entry); });
+		else
+			size += fs::file_size(path);
+		return size;
+	}
+
+
 	CompressorInternal() = default;
 
 	CompressorInternal(std::vector<std::string> files, std::string new_compressed_name)
@@ -90,15 +102,9 @@ public:
 
 	void operator()() {
 		for (const auto &file: m_files) {
-			if (fs::is_directory(file))
-				m_all_size += std::accumulate(
-					fs::recursive_directory_iterator(file.c_str()), fs::recursive_directory_iterator(), 0,
-					[](auto sz, auto entry) { return is_directory(entry) ? sz : sz + file_size(entry); });
-			else
-				m_all_size += fs::file_size(file);
+			m_all_size += get_file_folder_size(file);
 		}
 
-//		log m_files size
 		Logger::the().log(spdlog::level::info,
 		                  "Compressor: started for {0} file/files/folder/folders with size: {1} bytes",
 		                  m_files.begin()->c_str(), m_all_size);
@@ -121,7 +127,7 @@ public:
 
 		m_trie.resize(m_symbols * 2 - 1);
 		initialize_trie();
-//		log initialization of the trie
+
 		Logger::the().log(spdlog::level::info,
 		                  "Compressor: initialized the trie with {0} symbols and {1} nodes",
 		                  m_symbols, m_trie.size());
@@ -135,9 +141,6 @@ public:
 		all_file_write();
 		fclose(m_compressed_fp);
 
-//		std::cout << std::endl
-//		          << "Created compressed file: " << m_compressed_name << std::endl;
-//		std::cout << "Compression is completed" << std::endl;
 		Logger::the().log(spdlog::level::info,
 		                  "Compressor: created compressed file: {0}",
 		                  m_compressed_name);
