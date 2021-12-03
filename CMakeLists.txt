@@ -65,5 +65,5 @@ if (DEFINED ENV{EUGENE_BUILD_TESTS})
 
     # add executable for compression/benchmarks/BenchmarkCompressor.cpp
     add_executable(benchmark ${EUGENE_STORAGE}/compression/BenchmarkCompression.cpp)
-    target_link_libraries(benchmark PUBLIC LibEugeneCore)
+    target_link_libraries(benchmark PUBLIC LibEugeneCore TestMain)
 endif ()

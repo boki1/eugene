@@ -64,14 +64,19 @@ public:
 		for (unsigned long i = 0; i < m_symbols; i++)
 			process_n_bits_to_string(m_trie_root);
 
-		if (folder_name.empty())
+		if (folder_name.empty()) {
+			Logger::the().log(spdlog::level::info, "Decompressor: Decompressing all files...");
 			translation("", false);
-		else
+		} else {
+			Logger::the().log(spdlog::level::info,
+			                  R"(Decompressor: Decompressing files in file/folder: "{}")",
+			                  folder_name);
 			translation_search("", folder_name, false);
+		}
 
 		fclose(m_compressed);
 		deallocate_trie(m_trie_root);
-		Logger::the().log(spdlog::level::info, "Decompression is completed");
+		Logger::the().log(spdlog::level::info, "Decompressor: Decompression is completed");
 	}
 
 	/// \brief This structure will be used to represent the trie
@@ -299,7 +304,7 @@ public:
 				translation_search(new_path, for_decompress, true);
 			}
 		}
-		Logger::the().log(spdlog::level::err, "There isn't such compressed file/dir: {}", path);
+		Logger::the().log(spdlog::level::debug, R"(Decompressor: File "{}" skipped)", path);
 	}
 
 private:
@@ -326,21 +331,10 @@ public:
 	///
 	/// \param path - path to the file for detail
 	explicit Decompressor(std::string_view path) {
-		//		generate logger
-		try {
-			auto log = spdlog::basic_logger_mt("compressor_logger",
-			                                   "logs.txt", false);
-			spdlog::set_default_logger(log);
-		}
-		catch (const spdlog::spdlog_ex &ex) {
-//			std::cerr << "Log init failed: " << ex.what() << std::endl;
-			spdlog::set_default_logger(spdlog::get("compressor_logger"));
-		}
-
 		FILE *path_to_compressed;
 		path_to_compressed = fopen(path.begin(), "rb");
 		if (!path_to_compressed) {
-			Logger::the().log(spdlog::level::err, "File not found: {}", path);
+			Logger::the().log(spdlog::level::err, R"(Decompressor: File not found: "{}")", path);
 			return;
 		}
 		decompressor_impl = std::make_unique<pimpl>(path_to_compressed);
