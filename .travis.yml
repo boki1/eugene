@@ -1,13 +1,11 @@
 language: cpp
 
 install:
-  # Pip cannot install Conan without these upgrades
   - python3 -m pip install --upgrade pip setuptools
-  # Install Conan and CMake >= 3.15
   - python3 -m pip install conan cmake
 
-  # Fail if we can't run Conan.
   - conan --version
+  - conan user
 
 jobs:
   include:
@@ -16,7 +14,7 @@ jobs:
       osx_image: xcode11.2    # includes gcc-9 by default
       env:
 		- EUGENE_BUILD_TESTS="1"
-        - GCC_VER="9"
+        - GCC_VER="11"
         - MATRIX_EVAL="CC=gcc-${GCC_VER} && CXX=g++-${GCC_VER}"
     - os: osx
       compiler: clang
@@ -29,7 +27,7 @@ jobs:
       compiler: gcc
       env:
 		- EUGENE_BUILD_TESTS="1"
-        - GCC_VER="9"
+        - GCC_VER="11"
         - MATRIX_EVAL="CC=gcc-${GCC_VER} && CXX=g++-${GCC_VER}"
 
       addons:
@@ -37,8 +35,8 @@ jobs:
           sources:
             - ubuntu-toolchain-r-test
           packages:
-            - gcc-9
-            - g++-9
+            - gcc-11
+            - g++-11
             - python3-pip
     - os: linux
       dist: bionic
