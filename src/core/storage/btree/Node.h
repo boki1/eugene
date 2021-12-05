@@ -50,7 +50,7 @@ public:
 
 	using Metadata = nop::Variant<Branch, Leaf>;
 
-private:
+public:
 	[[nodiscard]] bool is_leaf() const noexcept { return m_metadata.template is<Leaf>(); }
 	[[nodiscard]] bool is_branch() const noexcept { return m_metadata.template is<Branch>(); }
 
