@@ -2,13 +2,18 @@
 
 #include <algorithm>
 #include <cassert>
+#include <nop/status.h>
 #include <optional>
-#include <variant>
 #include <vector>
+
+#include <nop/serializer.h>
+#include <nop/structure.h>
+#include <nop/types/variant.h>
+#include <nop/utility/buffer_reader.h>
+#include <nop/utility/buffer_writer.h>
 
 #include <core/storage/Page.h>
 #include <core/storage/Position.h>
-
 #include <core/storage/btree/Config.h>
 
 namespace internal::storage::btree {
@@ -16,7 +21,7 @@ namespace internal::storage::btree {
 template<BtreeConfig Config>
 class Btree;
 
-template<BtreeConfig Config>
+template<BtreeConfig Config = DefaultConfig>
 class Node {
 	friend Btree<Config>;
 
@@ -30,26 +35,34 @@ public:
 	struct Branch {
 		std::vector<Self::Ref> m_refs;
 		std::vector<Position> m_links;
+
+		auto operator<=>(const Branch &) const noexcept = default;
+		NOP_STRUCTURE(Branch, m_refs, m_links);
 	};
 
 	struct Leaf {
 		std::vector<Self::Key> m_keys;
 		std::vector<Self::Val> m_vals;
+
+		auto operator<=>(const Leaf &) const noexcept = default;
+		NOP_STRUCTURE(Leaf, m_keys, m_vals);
 	};
 
-	using Metadata = std::variant<Branch, Leaf>;
+	using Metadata = nop::Variant<Branch, Leaf>;
 
 private:
-	[[nodiscard]] bool is_leaf() const noexcept { return std::holds_alternative<Leaf>(m_metadata); }
-	[[nodiscard]] bool is_branch() const noexcept { return std::holds_alternative<Branch>(m_metadata); }
+	[[nodiscard]] bool is_leaf() const noexcept { return m_metadata.template is<Leaf>(); }
+	[[nodiscard]] bool is_branch() const noexcept { return m_metadata.template is<Branch>(); }
 
-	[[nodiscard]] Leaf &leaf() { return std::get<Leaf>(m_metadata); }
-	[[nodiscard]] Branch &branch() { return std::get<Branch>(m_metadata); }
+	// TODO:
+	// Consider adding some error handling here. As of now calling `leaf()` or `branch()` in either of their const
+	// variants _REQUIRES_ that the value inside is actually the one which we ask for.
+	[[nodiscard]] Leaf &leaf() { return *m_metadata.template get<Leaf>(); }
+	[[nodiscard]] Branch &branch() { return *m_metadata.template get<Branch>(); }
+	[[nodiscard]] const Leaf &leaf() const { return *m_metadata.template get<Leaf>(); }
+	[[nodiscard]] const Branch &branch() const { return *m_metadata.template get<Branch>(); }
 
-	[[nodiscard]] const Leaf &leaf() const { return std::get<Leaf>(m_metadata); }
-	[[nodiscard]] const Branch &branch() const { return std::get<Branch>(m_metadata); }
-
-	[[nodiscard]] std::optional<Position> parent() const noexcept { return m_parent_pos; }
+	[[nodiscard]] Position parent() const noexcept { return m_parent_pos; }
 	[[nodiscard]] bool is_root() const noexcept { return m_is_root; }
 
 	[[nodiscard]] long num_filled() const noexcept { return is_leaf() ? leaf().m_keys.size() : branch().m_refs.size(); }
@@ -58,17 +71,37 @@ private:
 	[[nodiscard]] bool is_under(long n) const noexcept { return num_filled() < n - 1 && !m_is_root; }
 
 public:
-	Node(Metadata &&metadata, std::optional<Position> parent_pos = {}, bool is_root = false)
+	explicit Node(Metadata &&metadata, Position parent_pos = {}, bool is_root = false)
 	    : m_metadata{std::move(metadata)},
 	      m_is_root{is_root},
 	      m_parent_pos{parent_pos} {}
 
+	// Used only by serialization library
+	Node()
+	    : m_metadata{} {}
 
-	// TODO:
-	static std::optional<Self> from_page(const Page &) {}
+	auto operator==(const Node &rhs) const noexcept {
+		if (is_leaf() ^ rhs.is_leaf())
+			return false;
+		return is_leaf() ? leaf() == rhs.leaf() : branch() == rhs.branch()
+			&& std::tie(m_is_root, m_parent_pos) == std::tie(rhs.m_is_root, rhs.m_parent_pos);
+	}
 
-	// TODO:
-	[[nodiscard]] Page make_page() const noexcept { return Page::empty(); }
+	static std::optional<Self> from_page(const Page &p) {
+		nop::Deserializer<nop::BufferReader> deserializer{p.raw(), Page::size()};
+		Node node;
+		if (deserializer.Read(&node))
+			return node;
+		return {};
+	}
+
+	[[nodiscard]] std::optional<Page> make_page() const noexcept {
+		auto p = Page::empty();
+		nop::Serializer<nop::BufferWriter> serializer{p.raw(), Page::size()};
+		if (serializer.Write(*this))
+			return p;
+		return {};
+	}
 
 	template<typename T>
 	std::vector<T> break_at_index(std::vector<T> &target, uint32_t pivot) {
@@ -102,12 +135,14 @@ public:
 
 	void set_root(bool flag = true) noexcept { m_is_root = flag; }
 
-	void set_parent(Position pos) noexcept { m_parent_pos.emplace(pos); }
+	void set_parent(Position pos) noexcept { m_parent_pos = pos; }
 
 private:
 	Metadata m_metadata;
-	bool m_is_root;
-	std::optional<Position> m_parent_pos;
+	bool m_is_root{false};
+	Position m_parent_pos{};
+
+	NOP_STRUCTURE(Node, m_metadata, m_is_root, m_parent_pos);
 };
 
 }// namespace internal::storage::btree

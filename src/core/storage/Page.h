@@ -22,6 +22,10 @@ class Page {
 	friend Pager;
 
 public:
+	Page() : m_data{0} {}
+
+	static Page empty() noexcept { return Page(); }
+
 	explicit Page(std::array<uint8_t, Page::SIZE> &&data, bool used = true)
 	    : m_data{std::move(data)}, m_used{used} {}
 
@@ -33,10 +37,6 @@ public:
 
 	using data_citerator = std::array<uint8_t, Page::SIZE>::const_iterator;
 
-	static Page empty() noexcept {
-		std::array<uint8_t, Page::SIZE> a{0};
-		return Page{std::move(a), false};
-	}
 
 	void write(Position pos, int8_t d) noexcept {
 		if (pos + 1 > (long) size())

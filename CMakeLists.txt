@@ -74,6 +74,7 @@ if (DEFINED ENV{EUGENE_BUILD_TESTS})
 
     eugene_test(Compression src/core/storage/compression)
     eugene_test(Btree src/core/storage/btree)
+	eugene_test(Node src/core/storage/btree)
     eugene_test(Page src/core/storage)
     eugene_test(PageCache src/core/storage)
 endif ()

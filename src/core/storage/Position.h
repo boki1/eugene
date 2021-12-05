@@ -1,5 +1,8 @@
 #pragma once
 
+#include <nop/serializer.h>
+#include <nop/structure.h>
+
 #include <functional>
 #include <string>
 
@@ -39,6 +42,8 @@ public:
 private:
 	long m_pos{0x41CEBEEF};
 	bool m_isset{false};
+
+	NOP_STRUCTURE(Position, m_pos, m_isset);
 };
 
 }// namespace internal::storage

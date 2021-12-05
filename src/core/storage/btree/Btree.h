@@ -53,7 +53,7 @@ public:
 	 * the Config structure. Therefore, this ctor is supposed only
 	 * to pass the name of the page cache to its own ctor.
 	 */
-	Btree(std::string_view pgcache_name)
+	explicit Btree(std::string_view pgcache_name)
 	    : m_pgcache{pgcache_name, Config::PAGE_CACHE_SIZE} {}
 
 private:
