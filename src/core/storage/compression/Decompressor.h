@@ -247,7 +247,7 @@ public:
 	void translation(const std::string &path, bool change_path) {
 		unsigned long file_count = get_file_count();
 		for (unsigned long current_file = 0; current_file < file_count; current_file++) {
-			long int size;
+			long int size = 0;
 			bool file = is_file();
 			if (file)
 				size = read_file_size();
@@ -257,6 +257,11 @@ public:
 				new_path.insert(0, path + "/");
 
 			if (file) {
+				if (size == 0) {
+					Logger::the().log(spdlog::level::err, "Size cannot be "
+														  "fetched from compressed file");
+					return;
+				}
 				translate_file(new_path, size);
 			} else {
 				mkdir(new_path.c_str(), MkdirPermission);
@@ -276,7 +281,7 @@ public:
 	                        bool change_path) {
 		unsigned long file_count = get_file_count();
 		for (unsigned long current_file = 0; current_file < file_count; current_file++) {
-			long int size;
+			long int size = 0;
 			bool file = is_file();
 			if (file)
 				size = read_file_size();
@@ -288,6 +293,11 @@ public:
 
 			if (file) {
 				if (curr_file == for_decompress) {
+					if (size == 0) {
+						Logger::the().log(spdlog::level::err, "Size cannot be "
+						                                      "fetched from compressed file");
+						return;
+					}
 					translate_file(new_path, size);
 					break;
 				}
