@@ -83,8 +83,7 @@ public:
 	auto operator==(const Node &rhs) const noexcept {
 		if (is_leaf() ^ rhs.is_leaf())
 			return false;
-		return is_leaf() ? leaf() == rhs.leaf() : branch() == rhs.branch()
-			&& std::tie(m_is_root, m_parent_pos) == std::tie(rhs.m_is_root, rhs.m_parent_pos);
+		return is_leaf() ? leaf() == rhs.leaf() : branch() == rhs.branch() && std::tie(m_is_root, m_parent_pos) == std::tie(rhs.m_is_root, rhs.m_parent_pos);
 	}
 
 	static std::optional<Self> from_page(const Page &p) {
@@ -103,6 +102,7 @@ public:
 		return {};
 	}
 
+private:
 	template<typename T>
 	std::vector<T> break_at_index(std::vector<T> &target, uint32_t pivot) {
 		std::vector<T> second;

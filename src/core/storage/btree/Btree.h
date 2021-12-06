@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include <core/Util.h>
@@ -25,26 +26,46 @@ class Btree final {
 	inline static constexpr uint32_t NUM_RECORDS = Config::NUM_RECORDS;
 
 private:
-	[[nodiscard]] Self::Nod &root() const noexcept {}
-
 	[[nodiscard]] bool is_node_full(const Self::Nod &node) { return node.is_full(NUM_RECORDS); }
 
 	[[nodiscard]] auto node_split(Self::Nod &node) { return node.split(Config::NUM_RECORDS); }
 
+	[[nodiscard]] auto search_subtree(const Self::Nod &node, const Self::Key &target_key) -> optional_cref<Val> {
+		if (node.is_branch()) {
+			const auto &refs = node.branch().m_refs;
+			const std::size_t index = std::distance(refs.cbegin(), std::lower_bound(refs.cbegin(), refs.cend(), target_key));
+			const Position pos = node.branch().m_links[index];
+			const auto opt_node = Nod::from_pager(pgcache().get_page(pos));
+			if (!opt_node)
+				return {};
+			return search_subtree(opt_node.value(), target_key);
+		}
+		assert(node.is_leaf());
+
+		const auto &keys = node.leaf().m_keys;
+		const auto it = std::lower_bound(keys.cbegin(), keys.cend(), target_key);
+		if (it == keys.cend() || *it != target_key)
+			return {};
+		return node.leaf().m_vals[std::distance(keys.cbegin(), it)];
+	}
+
 public:
-	void insert(const Self::Key &key, const Self::Val &val) {
+	[[nodiscard]] auto &pgcache() const noexcept { return m_pgcache; }
+
+	[[nodiscard]] Self::Nod &root() noexcept {}
+	[[nodiscard]] const Self::Nod &root() const noexcept {}
+
+	void put(const Self::Key &key, const Self::Val &val) {
 		(void) key;
 		(void) val;
 	}
 
-	[[nodiscard]] optional_cref<Self::Val> at(const Self::Key &key) const noexcept {
-		(void) key;
-		return {};
+	[[nodiscard]] auto get(const Self::Key &key) const noexcept -> optional_cref<Self::Val> {
+		return search_subtree(root(), key);
 	}
 
 	[[nodiscard]] bool contains(const Self::Key &key) const noexcept {
-		(void) key;
-		return false;
+		return search_subtree(root(), key).has_value();
 	}
 
 public:
@@ -59,7 +80,7 @@ public:
 private:
 	PageCache m_pgcache;
 
-	Self::Nod *m_rootptr;
+	Self::Nod *m_rootptr{nullptr};
 	Position m_rootpos;
 };
 
