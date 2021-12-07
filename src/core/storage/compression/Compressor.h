@@ -144,7 +144,7 @@ public:
 		                  R"(Compressor: created compressed file: "{0}")",
 		                  m_compressed_name);
 		Logger::the().log(spdlog::level::info,
-		                  "Compressor: compression is completed");
+		                  "Compressor: compression is completed\n");
 	}
 
 	/// \brief This structure will be used to create the trie

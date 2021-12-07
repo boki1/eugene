@@ -76,7 +76,7 @@ public:
 
 		fclose(m_compressed);
 		deallocate_trie(m_trie_root);
-		Logger::the().log(spdlog::level::info, "Decompressor: Decompression is completed");
+		Logger::the().log(spdlog::level::info, "Decompressor: Decompression is completed\n");
 	}
 
 	/// \brief This structure will be used to represent the trie
@@ -208,7 +208,9 @@ public:
 	void translate_file(const std::string &path, long int size) {
 		huff_trie *node;
 
-		std::filesystem::create_directories(path.substr(0, path.find_last_of('/')));
+		if (path.find('/') != std::string::npos) {
+			std::filesystem::create_directories(path.substr(0, path.find_last_of('/')));
+		}
 		std::ofstream new_file(path, std::ios::binary);
 		for (long int i = 0; i < size; i++) {
 			node = m_trie_root;
@@ -259,7 +261,7 @@ public:
 			if (file) {
 				if (size == 0) {
 					Logger::the().log(spdlog::level::err, "Size cannot be "
-														  "fetched from compressed file");
+					                                      "fetched from compressed file");
 					return;
 				}
 				translate_file(new_path, size);
