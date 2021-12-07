@@ -1,18 +1,17 @@
 #ifndef STORAGE_DECOMPRESSOR_INCLUDED
 #define STORAGE_DECOMPRESSOR_INCLUDED
 
-#include <core/storage/Logger.h>
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <dirent.h>
-#include <iostream>
 #include <memory>
 #include <string>
 #include <sys/stat.h>
 #include <fstream>
 #include <filesystem>
+#include "core/Logger.h"
 
 static constexpr uint8_t Check = 0b10000000;
 static constexpr int Symbols = 256;

@@ -1,9 +1,8 @@
-#ifndef EUGENE_SRC_EUGENE_API_LOGGER_H
-#define EUGENE_SRC_EUGENE_API_LOGGER_H
+#pragma once
 
-#include "spdlog/spdlog.h"
-#include <spdlog/sinks/basic_file_sink.h>
 #include <memory>
+#include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/spdlog.h>
 
 class Logger {
 public:
@@ -21,5 +20,3 @@ public:
 	Logger(Logger const &) = delete;
 	void operator=(Logger const &) = delete;
 };
-
-#endif

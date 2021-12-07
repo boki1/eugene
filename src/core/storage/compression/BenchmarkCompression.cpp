@@ -1,6 +1,6 @@
+#include <benchmark/cppbenchmark.h>
 #include <core/storage/compression/Compressor.h>
 #include <core/storage/compression/Decompressor.h>
-#include <benchmark/cppbenchmark.h>
 
 namespace fs = std::filesystem;
 

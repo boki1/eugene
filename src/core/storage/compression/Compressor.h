@@ -1,8 +1,6 @@
 #ifndef STORAGE_COMPRESSOR_INCLUDED
 #define STORAGE_COMPRESSOR_INCLUDED
 
-#include <core/storage/Logger.h>
-#include <algorithm>
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
@@ -11,11 +9,11 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 #include <map>
 #include <numeric>
 #include <utility>
 #include <vector>
+#include "core/Logger.h"
 
 static constexpr size_t Folder = 16;
 static constexpr size_t OsBites = 64;
