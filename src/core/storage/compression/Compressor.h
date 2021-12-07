@@ -1,19 +1,11 @@
-#ifndef STORAGE_COMPRESSOR_INCLUDED
-#define STORAGE_COMPRESSOR_INCLUDED
+#pragma once
 
 #include <climits>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <dirent.h>
-#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
-#include <map>
 #include <numeric>
-#include <utility>
-#include <vector>
-#include "core/Logger.h"
+
+#include <core/Logger.h>
 
 static constexpr size_t Folder = 16;
 static constexpr size_t OsBites = 64;
@@ -538,5 +530,3 @@ public:
 	}
 };
 }// namespace compression
-
-#endif

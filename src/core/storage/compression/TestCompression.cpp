@@ -1,6 +1,7 @@
 #include <catch2/catch.hpp>
 
-
+#include <iostream>
+#include <map>
 #include <core/storage/compression/Compressor.h>
 #include <core/storage/compression/Decompressor.h>
 

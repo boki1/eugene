@@ -1,17 +1,8 @@
-#ifndef STORAGE_DECOMPRESSOR_INCLUDED
-#define STORAGE_DECOMPRESSOR_INCLUDED
+#pragma once
 
-#include <climits>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <dirent.h>
-#include <memory>
-#include <string>
 #include <sys/stat.h>
-#include <fstream>
-#include <filesystem>
-#include "core/Logger.h"
+
+#include <core/Logger.h>
 
 static constexpr uint8_t Check = 0b10000000;
 static constexpr int Symbols = 256;
@@ -357,5 +348,3 @@ public:
 	}
 };
 }// namespace decompression
-
-#endif

@@ -1,10 +1,13 @@
+#include <algorithm>
+
 #include <benchmark/cppbenchmark.h>
+
 #include <core/storage/compression/Compressor.h>
 #include <core/storage/compression/Decompressor.h>
 
 namespace fs = std::filesystem;
 
-//	67108864 for 1GB txt file
+//	67108864 for 1GB ".txt" file
 constexpr int file_size = (32);
 constexpr std::string_view file_name = "test.txt";
 constexpr std::string_view compressed_file_name = "compressed";

@@ -25,11 +25,11 @@ conan_basic_setup(TARGETS)
 # Storage setup
 set(EUGENE_STORAGE src/core/storage)
 set(LibEugeneCore_SRC
-        Position.h PageCache.h Page.h PageCache.cpp Page.cpp
-        Storage.h Logger.h
+        Position.h PageCache.h Page.h PageCache.cpp Page.cpp Storage.h
         btree/Btree.h btree/BtreePrinter.h btree/Btree.cpp
         compression/Compressor.h compression/Decompressor.h
-        compression/TestCompression.cpp)
+        compression/TestCompression.cpp
+        ../Logger.h)
 list(TRANSFORM LibEugeneCore_SRC PREPEND "${EUGENE_STORAGE}/")
 
 add_library(LibEugeneCore "${LibEugeneCore_SRC}")
@@ -56,14 +56,14 @@ if (DEFINED ENV{EUGENE_BUILD_TESTS})
     message("-- Building core unit tests")
 
     add_library(TestMain src/core/Main.cpp)
-    target_link_libraries(TestMain LibEugeneCore)
+    target_link_libraries(TestMain CONAN_PKG::catch2)
 
     eugene_test(TestCompression ${EUGENE_STORAGE}/compression)
     eugene_test(Btree ${EUGENE_STORAGE}/btree)
     eugene_test(Page ${EUGENE_STORAGE})
     eugene_test(PageCache ${EUGENE_STORAGE})
 
-    # add executable for compression/benchmarks/BenchmarkCompressor.cpp
+    # add executable for compression/BenchmarkCompressor.cpp
     add_executable(benchmark ${EUGENE_STORAGE}/compression/BenchmarkCompression.cpp)
-    target_link_libraries(benchmark PUBLIC LibEugeneCore TestMain)
+    target_link_libraries(benchmark PUBLIC LibEugeneCore)
 endif ()
