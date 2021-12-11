@@ -21,7 +21,7 @@ jobs:
              sudo apt update
              sudo apt install gcc-11 g++-11
              pip3 install conan --upgrade
-             CXX=g++-11 CC=gcc-11 conan install . --build=missing
+             CXX=g++-11 CC=gcc-11 conan install . --profile .github/eu_conan_profile.toml --build=missing
 
       - name: Configure
         env:
