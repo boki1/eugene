@@ -57,11 +57,11 @@ TEST_CASE("Node serialization", "[btree]") {
 	auto node1 = Nod(Metadata(Branch({1}, {1})), {}, false);
 	auto node2 = Nod(Metadata(Leaf({2}, {2})), 13, true);
 
-	auto node1_as_page = node1.make_page().value();
-	auto node2_as_page = node2.make_page().value();
+	auto node1_as_page = node1.make_page();
+	auto node2_as_page = node2.make_page();
 
-	auto node1_from_page = Nod::from_page(node1_as_page).value();
-	auto node2_from_page = Nod::from_page(node2_as_page).value();
+	auto node1_from_page = Nod::from_page(node1_as_page);
+	auto node2_from_page = Nod::from_page(node2_as_page);
 
 	REQUIRE(node1_from_page == node1);
 	REQUIRE(node2_from_page == node2);
@@ -73,18 +73,18 @@ TEST_CASE("Persitent nodes", "[btree]") {
 
 	auto node1_pos = pr.alloc();
 	auto node1 = Nod(Metadata(Branch({1}, {1})), {}, false);
-	auto node1_as_page = node1.make_page().value();
+	auto node1_as_page = node1.make_page();
 	pr.sync(node1_as_page, node1_pos);
-	auto node1_from_page = Nod::from_page(pr.fetch(page, node1_pos)).value();
+	auto node1_from_page = Nod::from_page(pr.fetch(page, node1_pos));
 	REQUIRE(node1_from_page == node1);
 	REQUIRE(node1_from_page.is_root() == false);
 	REQUIRE(node1_from_page.parent().is_set() == false);
 
 	auto node2_pos = pr.alloc();
 	auto node2 = Nod(Metadata(Leaf({2}, {2})), 13, true);
-	auto node2_as_page = node2.make_page().value();
+	auto node2_as_page = node2.make_page();
 	pr.sync(node2_as_page, node2_pos);
-	auto node2_from_page = Nod::from_page(pr.fetch(page, node2_pos)).value();
+	auto node2_from_page = Nod::from_page(pr.fetch(page, node2_pos));
 	REQUIRE(node2_from_page == node2);
 	REQUIRE(node2_from_page.is_root() == true);
 	REQUIRE(node2_from_page.parent() == Position(13));
@@ -98,10 +98,10 @@ TEST_CASE("Paging with many random nodes", "[btree]") {
 	for (std::size_t i = 0; i < 128; ++i) {
 		auto node = make_node();
 		auto node_pos = pr.alloc();
-		nodes[node_pos] = node;
-		auto node_as_page = node.make_page().value();
+		nodes[node_pos] = node.clone();
+		auto node_as_page = node.make_page();
 		pr.sync(node_as_page, node_pos);
-		auto node_from_page = Nod::from_page(pr.fetch(page, node_pos)).value();
+		auto node_from_page = Nod::from_page(pr.fetch(page, node_pos));
 		REQUIRE(node_from_page == node);
 	}
 
@@ -116,7 +116,7 @@ TEST_CASE("Paging with many random nodes", "[btree]") {
 
 	for (std::size_t i = 0; i < nodes.size(); ++i) {
 		auto [pos, node] = random_node();
-		auto node_from_page = Nod::from_page(pr.fetch(page, pos)).value();
+		auto node_from_page = Nod::from_page(pr.fetch(page, pos));
 		REQUIRE(node_from_page == node);
 	}
 }

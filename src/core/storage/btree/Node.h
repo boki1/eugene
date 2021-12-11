@@ -6,11 +6,13 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+#include <iostream>
 
 #include <nop/serializer.h>
 #include <nop/status.h>
 #include <nop/structure.h>
 #include <nop/types/variant.h>
+#include <nop/utility/die.h>
 #include <nop/utility/buffer_reader.h>
 #include <nop/utility/buffer_writer.h>
 
@@ -83,14 +85,25 @@ public:
 	[[nodiscard]] bool is_under(long n) const noexcept { return num_filled() < n - 1 && !m_is_root; }
 
 public:
-	explicit Node(Metadata &&metadata, Position parent_pos = {}, bool is_root = false)
+	Node() : m_metadata{} {}
+
+	Node(Metadata &&metadata, Position parent_pos, bool is_root = false)
 	    : m_metadata{std::move(metadata)},
 	      m_is_root{is_root},
 	      m_parent_pos{parent_pos} {}
 
-	// Used only by serialization library
-	Node()
-	    : m_metadata{} {}
+private:
+	Node(const Node &) = default;
+
+public:
+	Node &operator=(const Node &) = delete;
+
+	Node(Node &&) noexcept = default;
+	Node &operator=(Node &&) noexcept = default;
+
+	Node clone() const noexcept {
+		return Node{*this};
+	}
 
 	template<typename NodeType, typename... T>
 	static auto meta_of(T &&...ctor_args) {
@@ -105,20 +118,18 @@ public:
 
 	auto operator!=(const Node &rhs) const noexcept { return !operator==(rhs); }
 
-	static std::optional<Self> from_page(const Page &p) {
+	static Self from_page(const Page &p) {
 		nop::Deserializer<nop::BufferReader> deserializer{p.raw(), Page::size()};
 		Node node;
-		if (deserializer.Read(&node))
-			return node;
-		return {};
+		deserializer.Read(&node) || nop::Die(std::cerr);
+		return node;
 	}
 
-	[[nodiscard]] std::optional<Page> make_page() const noexcept {
+	[[nodiscard]] Page make_page() const noexcept {
 		auto p = Page::empty();
 		nop::Serializer<nop::BufferWriter> serializer{p.raw(), Page::size()};
-		if (serializer.Write(*this))
-			return p;
-		return {};
+		serializer.Write(*this) || nop::Die(std::cerr);
+		return p;
 	}
 
 	std::pair<Self::Key, Self> split() {
@@ -128,14 +139,18 @@ public:
 			                     break_at_index(b.m_refs, PIVOT),
 			                     break_at_index(b.m_links, PIVOT)),
 			             parent()};
-			return std::make_pair(b.m_refs[PIVOT], sibling);
+			Self::Key midkey = b.m_refs[PIVOT];
+			b.m_refs.resize(PIVOT);
+			return std::make_pair<Self::Key, Self>(std::move(midkey), std::move(sibling));
 		} else {
 			auto &l = leaf();
 			Node sibling{meta_of<Leaf>(
 			                     break_at_index(l.m_keys, PIVOT),
 			                     break_at_index(l.m_vals, PIVOT)),
 			             parent()};
-			return std::make_pair(l.m_keys[PIVOT], sibling);
+			Self::Key midkey = l.m_keys[PIVOT];
+			l.m_keys.resize(PIVOT);
+			return std::make_pair<Self::Key, Self>(std::move(midkey), std::move(sibling));
 		}
 	}
 
