@@ -4,6 +4,8 @@
 #include <optional>
 #include <utility>
 
+#include <gsl/pointers>
+
 #include <core/Util.h>
 #include <core/storage/Page.h>
 #include <core/storage/PageCache.h>
@@ -28,17 +30,16 @@ class Btree final {
 private:
 	[[nodiscard]] bool is_node_full(const Self::Nod &node) { return node.is_full(NUM_RECORDS); }
 
-	[[nodiscard]] auto node_split(Self::Nod &node) { return node.split(Config::NUM_RECORDS); }
+	[[nodiscard]] auto node_split(Self::Nod &node) { return node.split(NUM_RECORDS / 2); }
 
-	[[nodiscard]] auto search_subtree(const Self::Nod &node, const Self::Key &target_key) -> optional_cref<Val> {
+
+	[[nodiscard]] auto search_subtree(const Self::Nod &node, const Self::Key &target_key) const noexcept -> optional_cref<Val> {
 		if (node.is_branch()) {
 			const auto &refs = node.branch().m_refs;
 			const std::size_t index = std::distance(refs.cbegin(), std::lower_bound(refs.cbegin(), refs.cend(), target_key));
 			const Position pos = node.branch().m_links[index];
-			const auto opt_node = Nod::from_pager(pgcache().get_page(pos));
-			if (!opt_node)
-				return {};
-			return search_subtree(opt_node.value(), target_key);
+			const auto other = Nod::from_page(m_pgcache.get_page(pos));
+			return search_subtree(other, target_key);
 		}
 		assert(node.is_leaf());
 
@@ -49,15 +50,77 @@ private:
 		return node.leaf().m_vals[std::distance(keys.cbegin(), it)];
 	}
 
-public:
-	[[nodiscard]] auto &pgcache() const noexcept { return m_pgcache; }
+	void make_new_root() {
+		auto &old_root = root();
+		auto old_pos = m_rootpos;
 
-	[[nodiscard]] Self::Nod &root() noexcept {}
-	[[nodiscard]] const Self::Nod &root() const noexcept {}
+		auto new_pos = m_pgcache.get_new_pos();
+
+		old_root.set_parent(new_pos);
+		old_root.set_root(false);
+
+		auto [midkey, sibling] = old_root.split();
+		auto sibling_pos = m_pgcache.get_new_pos();
+
+		Nod new_root(typename Nod::Metadata(typename Nod::Branch({midkey}, {old_pos, sibling_pos})), new_pos, true);
+
+		m_pgcache.put_page(new_pos, new_root.make_page());
+		m_pgcache.put_page(old_pos, old_root.make_page());
+		m_pgcache.put_page(sibling_pos, sibling.make_page());
+
+		m_root = std::move(new_root);
+	}
+
+public:
+	[[nodiscard]] auto &root() noexcept { return m_root; }
+	[[nodiscard]] const auto &root() const noexcept { return m_root; }
 
 	void put(const Self::Key &key, const Self::Val &val) {
-		(void) key;
-		(void) val;
+		if (is_node_full(m_root))
+			make_new_root();
+
+		Nod *curr = &m_root;
+		Position currpos = m_rootpos;
+
+		while (1) {
+			if (curr->is_leaf()) {
+				auto &keys = curr->leaf().m_keys;
+				auto &vals = curr->leaf().m_vals;
+				const std::size_t index = std::distance(keys.begin(), std::lower_bound(keys.begin(), keys.end(), key));
+				keys.insert(keys.begin() + index, key);
+				vals.insert(vals.begin() + index, val);
+				break;
+			}
+
+			auto &branch = curr->branch();
+			const std::size_t index = std::distance(
+					std::lower_bound(branch.m_refs.begin(), branch.m_refs.end(), key), branch.m_refs.begin());
+			const Position child_pos = branch.m_links[index];
+			auto child = Nod::from_page(m_pgcache.get_page(child_pos));
+
+			if (!child.is_full(NUM_RECORDS)) {
+				curr = new Nod{std::move(child)};
+				currpos = m_rootpos;
+				continue;
+			}
+
+			auto [midkey, sibling] = child.split();
+			m_pgcache.put_page(child_pos, child.make_page());
+			auto sibling_pos = m_pgcache.get_new_pos();
+			m_pgcache.put_page(sibling_pos, sibling.make_page());
+
+			auto refs_it = branch.m_refs.begin() + index;
+			branch.m_refs.insert(refs_it, midkey);
+			auto links_it = branch.m_links.begin() + index;
+			branch.m_links.insert(links_it, sibling_pos);
+			if (key < midkey) {
+				curr = new Nod{std::move(child)};
+				currpos = child_pos;
+			} else {
+				curr = new Nod{std::move(sibling)};
+				currpos = sibling_pos;
+			}
+		}
 	}
 
 	[[nodiscard]] auto get(const Self::Key &key) const noexcept -> optional_cref<Self::Val> {
@@ -78,10 +141,10 @@ public:
 	    : m_pgcache{pgcache_name, Config::PAGE_CACHE_SIZE} {}
 
 private:
-	PageCache m_pgcache;
+	mutable PageCache m_pgcache;
 
-	Self::Nod *m_rootptr{nullptr};
-	Position m_rootpos;
+	Position m_rootpos{Position()};
+	Nod m_root{typename Nod::Metadata(typename Nod::Leaf({}, {})), m_rootpos, true};
 };
 
 }// namespace internal::storage::btree
