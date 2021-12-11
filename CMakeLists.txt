@@ -24,6 +24,7 @@ conan_basic_setup(TARGETS)
 set(LibEugeneBtree_SRC
 	storage/btree/Btree.h
 	storage/btree/Btree.cpp
+	storage/btree/Bench.cpp
 	storage/btree/Node.h
 	storage/btree/BtreePrinter.h
 	storage/btree/Config.h)
@@ -56,6 +57,7 @@ target_link_libraries(LibEugeneCore
         CONAN_PKG::outcome
         CONAN_PKG::spdlog
         CONAN_PKG::libnop
+		CONAN_PKG::benchmark
         CONAN_PKG::catch2)
 
 if (DEFINED ENV{EUGENE_BUILD_TESTS})
