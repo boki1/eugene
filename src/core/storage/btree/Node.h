@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <cassert>
-#include <nop/status.h>
 #include <optional>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include <nop/serializer.h>
+#include <nop/status.h>
 #include <nop/structure.h>
 #include <nop/types/variant.h>
 #include <nop/utility/buffer_reader.h>
@@ -31,10 +33,16 @@ class Node {
 	using Key = typename Config::Key;
 	using Ref = typename Config::Ref;
 
+	static constexpr int PIVOT = Config::BTREE_NODE_BREAK_POINT;
+
 public:
 	struct Branch {
 		std::vector<Self::Ref> m_refs;
 		std::vector<Position> m_links;
+
+		Branch() = default;
+		Branch(std::vector<Self::Ref> &&refs, std::vector<Position> &&links)
+		    : m_refs{std::move(refs)}, m_links{std::move(links)} {}
 
 		auto operator<=>(const Branch &) const noexcept = default;
 		NOP_STRUCTURE(Branch, m_refs, m_links);
@@ -43,6 +51,10 @@ public:
 	struct Leaf {
 		std::vector<Self::Key> m_keys;
 		std::vector<Self::Val> m_vals;
+
+		Leaf() = default;
+		Leaf(std::vector<Self::Key> &&keys, std::vector<Self::Val> &&vals)
+		    : m_keys{std::move(keys)}, m_vals{std::move(vals)} {}
 
 		auto operator<=>(const Leaf &) const noexcept = default;
 		NOP_STRUCTURE(Leaf, m_keys, m_vals);
@@ -80,11 +92,18 @@ public:
 	Node()
 	    : m_metadata{} {}
 
+	template<typename NodeType, typename... T>
+	static auto meta_of(T &&...ctor_args) {
+		return Metadata(NodeType{std::forward<T>(ctor_args)...});
+	}
+
 	auto operator==(const Node &rhs) const noexcept {
 		if (is_leaf() ^ rhs.is_leaf())
 			return false;
 		return is_leaf() ? leaf() == rhs.leaf() : branch() == rhs.branch() && std::tie(m_is_root, m_parent_pos) == std::tie(rhs.m_is_root, rhs.m_parent_pos);
 	}
+
+	auto operator!=(const Node &rhs) const noexcept { return !operator==(rhs); }
 
 	static std::optional<Self> from_page(const Page &p) {
 		nop::Deserializer<nop::BufferReader> deserializer{p.raw(), Page::size()};
@@ -102,32 +121,35 @@ public:
 		return {};
 	}
 
+	std::pair<Self::Key, Self> split() {
+		if (is_branch()) {
+			auto &b = branch();
+			Node sibling{meta_of<Branch>(
+			                     break_at_index(b.m_refs, PIVOT),
+			                     break_at_index(b.m_links, PIVOT)),
+			             parent()};
+			return std::make_pair(b.m_refs[PIVOT], sibling);
+		} else {
+			auto &l = leaf();
+			Node sibling{meta_of<Leaf>(
+			                     break_at_index(l.m_keys, PIVOT),
+			                     break_at_index(l.m_vals, PIVOT)),
+			             parent()};
+			return std::make_pair(l.m_keys[PIVOT], sibling);
+		}
+	}
+
 private:
+	// Return (pivot; target.size()) and leave at original vector [0; pivot)
 	template<typename T>
 	std::vector<T> break_at_index(std::vector<T> &target, uint32_t pivot) {
 		std::vector<T> second;
-		second.reserve(target.size() - 1);
-		std::move(target.begin() + pivot, target.end(), std::back_inserter(second));
+		second.reserve(target.size() - pivot - 1);
+		std::move(target.begin() + pivot + 1,
+		          target.end(),
+		          std::back_inserter(second));
+		target.resize(pivot + 1);
 		return second;
-	}
-
-	std::pair<Self::Key, Self> split(uint32_t pivot) {
-		if (is_branch()) {
-			auto sibling_refs = break_at_index(branch().m_refs, pivot - 1);
-			auto sibling_links = break_at_index(branch().m_links, pivot);
-			Ref middle = sibling_refs.back();
-			sibling_refs.pop_back();
-			Node sibling{Branch(sibling_refs, sibling_links), parent()};
-			return std::make_pair(middle, sibling);
-		}
-		assert(is_leaf());
-
-		auto sibling_keys = break_at_index(leaf().m_keys, pivot);
-		auto sibling_vals = break_at_index(leaf().m_vals, pivot);
-		Key middle = sibling_keys.back();
-		sibling_keys.pop_back();
-		Node sibling{Leaf(sibling_keys, sibling_vals), parent()};
-		return std::make_pair(middle, sibling);
 	}
 
 public:

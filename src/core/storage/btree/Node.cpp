@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <fstream>
 #include <optional>
 #include <random>
@@ -11,11 +12,12 @@
 #include <core/storage/btree/Btree.h>
 
 using namespace std::ranges::views;
+using std::find;
 
 using namespace internal::storage;
 using namespace internal::storage::btree;
 
-using Nod = Node<Config>;
+using Nod = Node<DefaultConfig>;
 using Metadata = Nod::Metadata;
 using Branch = Nod::Branch;
 using Leaf = Nod::Leaf;
@@ -35,15 +37,20 @@ static Nod make_node() {
 
 	Metadata metadata;
 	if (dist128(rng) % 2)
-		metadata = Metadata(Branch(b, a));
+		metadata = Metadata(Branch(std::move(b), std::move(a)));
 	else
-		metadata = Metadata(Leaf(b, b));
+		metadata = Metadata(Leaf(std::move(b), std::move(b)));
 
 	Position p;
 	if (auto pp = dist128(rng); pp < 75)
 		p.set(pp);
 
 	return Node(std::move(metadata), p, dist128(rng) % 2);
+}
+
+template <typename T, typename V>
+bool contains(const T& collection, V item) {
+	return std::find(collection.cbegin(), collection.cend(), item) != collection.cend();
 }
 
 TEST_CASE("Node serialization", "[btree]") {
@@ -111,5 +118,56 @@ TEST_CASE("Paging with many random nodes", "[btree]") {
 		auto [pos, node] = random_node();
 		auto node_from_page = Nod::from_page(pr.fetch(page, pos)).value();
 		REQUIRE(node_from_page == node);
+	}
+}
+
+TEST_CASE("Split full nodes", "[btree]") {
+	auto b = Nod(Metadata(Branch({}, {})), {}, false);
+	auto l = Nod(Metadata(Leaf({}, {})), 13, true);
+
+	const auto limit = DefaultConfig::NUM_RECORDS;
+	const auto pivot = DefaultConfig::BTREE_NODE_BREAK_POINT;
+
+	for (uint32_t i = 0; i < limit; ++i) {
+		b.branch().m_refs.push_back(i);
+		b.branch().m_links.push_back(Position(i));
+
+		l.leaf().m_keys.push_back(i);
+		l.leaf().m_vals.push_back(i);
+	}
+
+	uint32_t broken_off = pivot;
+	auto [bkey, bsib] = b.split();
+	REQUIRE(bkey == broken_off);
+	auto [lkey, lsib] = l.split();
+	REQUIRE(lkey == broken_off);
+
+	auto &brefs = bsib.branch().m_refs;
+	auto &blinks = bsib.branch().m_links;
+	auto &lkeys = lsib.leaf().m_keys;
+	auto &lvals = lsib.leaf().m_vals;
+
+	for (uint32_t i = 1; i < pivot; ++i) {
+		REQUIRE(contains(b.branch().m_refs, i));
+		REQUIRE(contains(b.branch().m_links, static_cast<long>(i)));
+		REQUIRE(contains(l.leaf().m_keys, i));
+		REQUIRE(contains(l.leaf().m_vals, i));
+
+		REQUIRE(!contains(brefs, i));
+		REQUIRE(!contains(blinks, static_cast<long>(i)));
+		REQUIRE(!contains(lkeys, i));
+		REQUIRE(!contains(lvals, i));
+	}
+
+	for (uint32_t i = broken_off + 1; i < limit; ++i) {
+		REQUIRE(!contains(b.branch().m_refs, i));
+		REQUIRE(!contains(b.branch().m_links, static_cast<long>(i)));
+		REQUIRE(!contains(l.leaf().m_keys, i));
+		REQUIRE(!contains(l.leaf().m_vals, i));
+
+		REQUIRE(contains(brefs, i));
+		REQUIRE(contains(blinks, static_cast<long>(i)));
+		REQUIRE(contains(lkeys, i));
+		REQUIRE(contains(lvals, i));
 	}
 }
