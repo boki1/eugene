@@ -60,10 +60,13 @@ target_link_libraries(LibEugeneCore
 		CONAN_PKG::benchmark
         CONAN_PKG::catch2)
 
+add_executable(BtreeBench src/core/storage/btree/Bench.cpp)
+target_link_libraries(BtreeBench LibEugeneCore)
+
 if (DEFINED ENV{EUGENE_BUILD_TESTS})
     macro(eugene_test component path_prefix)
         add_executable(Test${component} ${path_prefix}/${component}.cpp)
-        target_link_libraries(Test${component} TestMain LibEugeneCore)
+		target_link_libraries(Test${component} TestMain LibEugeneCore)
         add_test(NAME Test${component}
                 COMMAND Test${component})
         message("   -- Test about '${component}' component added from \"${path_prefix}/${component}.cpp\"")

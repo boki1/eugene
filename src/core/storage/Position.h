@@ -3,6 +3,9 @@
 #include <nop/serializer.h>
 #include <nop/structure.h>
 
+#include <fmt/format.h>
+#include <fmt/core.h>
+
 #include <functional>
 #include <string>
 
@@ -37,7 +40,10 @@ public:
 	bool operator!=(const Position &rhs) const noexcept { return m_pos != rhs.m_pos; }
 	bool operator==(long rhs) const noexcept { return m_pos == rhs; }
 
-	[[nodiscard]] std::string str() const noexcept { return std::to_string(m_pos); }
+	friend std::ostream &operator<<(std::ostream &os, const Position &pos) {
+		os << "Position { .pos = " << pos.get() << ", .is_set = " << std::boolalpha << pos.is_set() << " }";
+		return os;
+	}
 
 private:
 	long m_pos{0x41CEBEEF};
@@ -47,6 +53,19 @@ private:
 };
 
 }// namespace internal::storage
+
+template<>
+struct fmt::formatter<internal::storage::Position> {
+	template<typename ParseContext>
+	constexpr auto parse(ParseContext &ctx) {
+		return ctx.begin();
+	}
+
+	template<typename FormatContext>
+	auto format(const internal::storage::Position &p, FormatContext &ctx) {
+		return fmt::format_to(ctx.out(), "Position {{ .pos='{:#08X}', .is_set={} }}", p.get(), p.is_set());
+	}
+};
 
 /*
  * Implement std::hash<> for Position

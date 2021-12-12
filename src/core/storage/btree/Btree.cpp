@@ -1,13 +1,21 @@
+#include "core/storage/Position.h"
 #include <iostream>
 #include <random>
 #include <map>
+#include <string>
+#include <vector>
 
 #include <catch2/catch.hpp>
+
 #include <fmt/core.h>
+#include <fmt/format.h>
+
+#include <nop/structure.h>
 
 #include <core/storage/Storage.h>
 #include <core/storage/btree/Btree.h>
 using namespace internal::storage::btree;
+using internal::storage::Position;
 
 template<typename T>
 T item();
@@ -61,10 +69,75 @@ TEST_CASE("Btree operations", "[btree]") {
 		backup.emplace(key, val);
 	}
 
-	int i = 1; for (const auto &[key, val] : backup) {
+	// int i = 1;
+	for (const auto &[key, val] : backup) {
 		REQUIRE(bpt.get(key).value() == val);
-		fmt::print("-- {} -> Key '{}' found mapped to '{}'\n", i++, key, val);
+		// fmt::print("-- {} -> Key '{}' found mapped to '{}'\n", i++, key, val);
 	}
+}
+
+TEST_CASE("Header operations", "[btree]") {
+	Btree bpt("/tmp/eu-headerops", "/tmp/eu-headerops-header");
+	bpt.save_header();
+
+	Btree bpt2("/tmp/eu-headerops", "/tmp/eu-headerops-header");
+	bpt2.header().m_numrecords = 1;
+
+	REQUIRE(bpt2.load_header());
+
+	REQUIRE(bpt.header() == bpt2.header());
+}
+
+TEST_CASE("Persistent Btree", "[btree]") {
+	std::map<uint32_t, uint32_t> backup;
+
+	Position rootpos;
+	{
+		// fmt::print("V1 ---\n");
+		Btree bpt("/tmp/eu-persistent-btree", "/tmp/eu-persistent-btree-header");
+		while (backup.size() != 10000) {
+			auto key = item<int>();
+			auto val = item<int>();
+			bpt.put(key, val);
+			backup[key] = val;
+		}
+
+		for (auto &[key, val] : backup) {
+			REQUIRE(bpt.get(key).value().get() == val);
+			// fmt::print("-- '{}' => '{}'\n", key, val);
+		}
+
+		rootpos = bpt.rootpos();
+		// fmt::print("Root pos: {}\n", rootpos);
+		bpt.save();
+		// fmt::print("Btree V1 Saved\n");
+	}
+
+	{
+		// fmt::print("\nV2 ---\n");
+		Btree bpt("/tmp/eu-persistent-btree", "/tmp/eu-persistent-btree-header", true);
+
+		REQUIRE(bpt.rootpos() == rootpos);
+
+		/*
+		for (auto &[key, val] : backup) {
+			REQUIRE(bpt.get(key).value().get() == val);
+			fmt::print("-- '{}' => '{}'\n", key, val);
+		}
+		*/
+	}
+
+	/*
+	{
+		Btree bpt("/tmp/eu-persistent-btree", "/tmp/eu-persistent-btree-header", false);
+
+		int i = 0;
+		for (auto &[key, val] : backup) {
+			REQUIRE(!bpt.contains(key));
+			fmt::print("-- {} -> Key '{}' found mapped to '{}'\n", i++, key, val);
+		}
+	}
+	*/
 }
 
 struct CustomConfigPrimitives : DefaultConfig {

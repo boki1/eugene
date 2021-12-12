@@ -256,7 +256,7 @@ public:
 	void translation(const std::string &path, bool change_path) {
 		unsigned long file_count = get_file_count();
 		for (unsigned long current_file = 0; current_file < file_count; current_file++) {
-			long int size;
+			long int size = 0;
 			bool file = is_file();
 			if (file)
 				size = read_file_size();
@@ -285,7 +285,7 @@ public:
 	                        bool change_path) {
 		unsigned long file_count = get_file_count();
 		for (unsigned long current_file = 0; current_file < file_count; current_file++) {
-			long int size;
+			long int size = 0;
 			bool file = is_file();
 			if (file)
 				size = read_file_size();

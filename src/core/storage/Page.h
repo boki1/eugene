@@ -7,6 +7,8 @@
 #include <optional>
 #include <string_view>
 
+#include <fmt/format.h>
+
 #include <core/storage/Position.h>
 
 namespace internal::storage {
@@ -36,7 +38,6 @@ public:
 	Page &operator=(Page &&) noexcept = default;
 
 	using data_citerator = std::array<uint8_t, Page::SIZE>::const_iterator;
-
 
 	void write(Position pos, int8_t d) noexcept {
 		if (pos + 1 > (long) size())
@@ -97,7 +98,7 @@ class Pager {
 public:
 	explicit Pager(std::string_view fname)
 	    : m_cursor{0},
-	      m_file{fname.data(), std::ios::in | std::ios::out | std::ios::trunc},
+	      m_file{fname.data(), std::ios::in | std::ios::out},
 	      m_filename{fname} {
 		assert(m_file);
 	}
