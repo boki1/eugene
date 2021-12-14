@@ -1,20 +1,11 @@
-#ifndef STORAGE_COMPRESSOR_INCLUDED
-#define STORAGE_COMPRESSOR_INCLUDED
+#pragma once
 
-#include <algorithm>
 #include <climits>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <dirent.h>
-#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
-#include <map>
 #include <numeric>
-#include <utility>
-#include <vector>
+
+#include <core/Logger.h>
 
 static constexpr size_t Folder = 16;
 static constexpr size_t OsBites = 64;
@@ -80,6 +71,17 @@ public:
 		return buff;
 	}
 
+	static unsigned long get_file_folder_size(const std::string &path) {
+		unsigned long size = 0;
+		if (fs::is_directory(path))
+			size += std::accumulate(
+				fs::recursive_directory_iterator(path.c_str()), fs::recursive_directory_iterator(), 0,
+				[](auto sz, auto entry) { return is_directory(entry) ? sz : sz + file_size(entry); });
+		else
+			size += fs::file_size(path);
+		return size;
+	}
+
 	CompressorInternal() = default;
 
 	CompressorInternal(std::vector<std::string> files, std::string new_compressed_name)
@@ -88,16 +90,16 @@ public:
 	}
 
 	void operator()() {
-		for (const auto &file: m_files) {
-			if (fs::is_directory(file))
-				m_all_size += std::accumulate(
-					fs::recursive_directory_iterator(file.c_str()), fs::recursive_directory_iterator(), 0,
-					[](auto sz, auto entry) { return is_directory(entry) ? sz : sz + file_size(entry); });
-			else
-				m_all_size += fs::file_size(file);
+		for (const auto &file : m_files) {
+			m_all_size += get_file_folder_size(file);
 		}
+
+		Logger::the().log(spdlog::level::info,
+		                  R"(Compressor: started for "{0}" file/files/folder/folders with size: "{1}" bytes)",
+		                  m_files.begin()->c_str(), m_all_size);
+
 		m_total_bits = Folder + 9 * m_files.size();
-		for (const auto &item: m_files) {
+		for (const auto &item : m_files) {
 			for (const char *c = item.c_str(); *c; c++)
 				m_occurrence_symbol[(uint8_t) *c]++;
 
@@ -107,13 +109,17 @@ public:
 				count_file_bytes_freq(item);
 		}
 
-		for (const auto &item: m_occurrence_symbol) {
+		for (const auto &item : m_occurrence_symbol) {
 			if (item)
 				m_symbols++;
 		}
 
 		m_trie.resize(m_symbols * 2 - 1);
 		initialize_trie();
+
+		Logger::the().log(spdlog::level::info,
+		                  R"(Compressor: initialized the trie with "{0}" symbols and "{1}" nodes)",
+		                  m_symbols, m_trie.size());
 
 		m_compressed_fp = fopen(m_compressed_name.c_str(), "wb");
 		fwrite(&m_symbols, 1, 1, m_compressed_fp);
@@ -124,9 +130,11 @@ public:
 		all_file_write();
 		fclose(m_compressed_fp);
 
-		std::cout << std::endl
-		          << "Created compressed file: " << m_compressed_name << std::endl;
-		std::cout << "Compression is completed" << std::endl;
+		Logger::the().log(spdlog::level::info,
+		                  R"(Compressor: created compressed file: "{0}")",
+		                  m_compressed_name);
+		Logger::the().log(spdlog::level::info,
+		                  "Compressor: compression is completed\n");
 	}
 
 	/// \brief This structure will be used to create the trie
@@ -250,7 +258,7 @@ public:
 		m_total_bits += OsBites;
 		const std::string buff = return_file_info(path);
 
-		for (const auto &item: buff)
+		for (const auto &item : buff)
 			m_occurrence_symbol[(uint8_t) item]++;
 	}
 
@@ -260,14 +268,14 @@ public:
 	void count_folder_bytes_freq(std::string_view path) {
 		m_total_bits += Folder;
 
-		for (const auto &entry: fs::recursive_directory_iterator(path)) {
+		for (const auto &entry : fs::recursive_directory_iterator(path)) {
 			std::string next_path = entry.path();
 			std::string curr_fdir_name = &next_path.substr(next_path.find_last_of('/'))[1];
 			if (curr_fdir_name[0] == '.')
 				continue;
 
 			m_total_bits += 9;
-			for (const auto &item: curr_fdir_name)
+			for (const auto &item : curr_fdir_name)
 				m_occurrence_symbol[(uint8_t) item]++;
 
 			if (entry.is_directory())
@@ -293,15 +301,20 @@ public:
 		if (m_total_bits % CHAR_BIT)
 			m_total_bits = (m_total_bits / CHAR_BIT + 1) * CHAR_BIT;
 
-		std::cout << "The size of the sum of ORIGINAL m_files is: " << m_all_size << " bytes" << std::endl;
-		std::cout << "The size of the COMPRESSED file will be: " << m_total_bits / CHAR_BIT << " bytes" << std::endl;
-		std::cout << "Compressed file's size will be [%" << 100 * ((float) m_total_bits / CHAR_BIT / (float) m_all_size)
-		          << "] of the original file"
-		          << std::endl;
+		Logger::the().log(spdlog::level::info,
+		                  R"(Compressor: The size of the sum of ORIGINAL m_files is: "{}" bytes)",
+		                  m_all_size);
+		Logger::the().log(spdlog::level::info,
+		                  R"(Compressor: The size of the COMPRESSED file will be: "{}" bytes)",
+		                  m_total_bits / CHAR_BIT);
+		Logger::the().
+			log(spdlog::level::info, "Compressor: Compressed file's size will be [%{}] of the original file",
+			    100 * ((float) m_total_bits / (float) CHAR_BIT / (float) m_all_size));
+
 		if (m_total_bits / CHAR_BIT > m_all_size)
-			std::cout << std::endl
-			          << "WARNING: COMPRESSED FILE'S SIZE WILL BE HIGHER THAN THE SUM OF ORIGINALS" << std::endl
-			          << std::endl;
+			Logger::the().
+				log(spdlog::level::warn,
+				    "Compressor: COMPRESSED FILES SIZE WILL BE HIGHER THAN THE SUM OF ORIGINALS");
 	}
 
 	/// \brief Writes all information in compressed order.
@@ -309,7 +322,7 @@ public:
 	void all_file_write() {
 		write_file_count(m_files.size());
 
-		for (const auto &item: m_files) {
+		for (const auto &item : m_files) {
 			if (!fs::is_directory(item)) {
 				unsigned long size = fs::file_size(item);
 
@@ -352,7 +365,7 @@ public:
 	/// \param path - string that represents the path to the file/folder
 	void write_folder_files_count(std::string_view path) {
 		int file_count = 0;
-		for (const auto &entry: fs::directory_iterator(path)) {
+		for (const auto &entry : fs::directory_iterator(path)) {
 			const std::string next_path = entry.path();
 			const std::string curr_fdir_name = &next_path.substr(next_path.find_last_of('/'))[1];
 			if (curr_fdir_name[0] == '.')
@@ -369,7 +382,7 @@ public:
 	void write_folder(std::string_view path) {
 		write_folder_files_count(path);
 
-		for (const auto &entry: fs::recursive_directory_iterator(path)) {
+		for (const auto &entry : fs::recursive_directory_iterator(path)) {
 			const std::string next_path = entry.path();
 			const std::string curr_fdir_name = &next_path.substr(next_path.find_last_of('/'))[1];
 			if (curr_fdir_name[0] == '.')
@@ -409,7 +422,7 @@ public:
 	void write_file_content(const std::string &path) {
 		const std::string buff = return_file_info(path);
 
-		for (const auto &item: buff)
+		for (const auto &item : buff)
 			write_bytes(m_char_huffbits[(uint8_t) item]);
 	}
 
@@ -417,7 +430,7 @@ public:
 	///
 	/// \param for_write - string that will be written
 	void write_bytes(std::string_view for_write) {
-		for (const auto &item: for_write) {
+		for (const auto &item : for_write) {
 			if (m_current_bit_count == CHAR_BIT) {
 				fwrite(&m_current_byte, 1, 1, m_compressed_fp);
 				m_current_bit_count = 0;
@@ -431,8 +444,9 @@ public:
 				m_current_bit_count++;
 				break;
 
-				//  TODO:                                logger case
-			default: continue;
+			default:
+				Logger::the().log(spdlog::level::err,
+				                  "Compressor: Function write_bytes incorrect configuration!");
 			}
 		}
 	}
@@ -443,7 +457,7 @@ public:
 	/// \param file_name - name of the file
 	void write_file_name(std::string_view file_name) {
 		write_from_ch(file_name.size());
-		for (const auto &item: file_name)
+		for (const auto &item : file_name)
 			write_bytes(m_char_huffbits[(uint8_t) item]);
 	}
 
@@ -459,7 +473,8 @@ public:
 		}
 	}
 
-	/// \brief This function is writing number of m_files we re going to translate inside current folder to compressed file's 2 bytes
+	/// \brief This function is writing number of m_files we re going to translate inside current
+	/// folder to compressed file's 2 bytes.
 	/// It is done like this to make sure that it can work on little, big or middle-endian systems
 	/// (Manages third of part 2)
 	///
@@ -497,8 +512,8 @@ public:
 	explicit Compressor(const std::vector<std::string> &args, std::string_view compressed_name = "") {
 		std::string new_compressed_name;
 
-		//                if (args.empty())
-		//                        TODO: Logger task
+		if (args.empty())
+			Logger::the().log(spdlog::level::err, "Compressor: No files provided!");
 		if (!compressed_name.empty())
 			new_compressed_name = compressed_name;
 		else if (args.size() == 1)
@@ -515,5 +530,3 @@ public:
 	}
 };
 }// namespace compression
-
-#endif
