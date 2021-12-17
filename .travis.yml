@@ -3,8 +3,8 @@ language: cpp
 install:
   # Pip cannot install Conan without these upgrades
   - python3 -m pip install --upgrade pip setuptools
-  # Install Conan and CMake >= 3.15
-  - python3 -m pip install conan cmake
+
+  - python3 -m pip install --upgrade conan cmake
 
   # Fail if we can't run Conan.
   - conan --version
@@ -13,42 +13,31 @@ jobs:
   include:
     - os: osx
       compiler: gcc
-      osx_image: xcode11.2    # includes gcc-9 by default
+      osx_image: xcode13.1
       env:
-        - GCC_VER="9"
-        - MATRIX_EVAL="CC=gcc-${GCC_VER} && CXX=g++-${GCC_VER}"
-    - os: osx
-      compiler: clang
-      osx_image: xcode11.2
-      env:
-        - MATRIX_EVAL=""
+        - GCC_VER="11"
+        - MATRIX_EVAL="CC=gcc-${GCC_VER} && CXX=g++-${GCC_VER}
+          conan install . --profile .github/eu_conan_profile.toml --build=missing"
+
     - os: linux
       dist: bionic
       compiler: gcc
       env:
-        - GCC_VER="9"
-        - MATRIX_EVAL="CC=gcc-${GCC_VER} && CXX=g++-${GCC_VER}"
-
+        - GCC_VER="11"
+        - MATRIX_EVAL="CC=gcc-${GCC_VER} && CXX=g++-${GCC_VER}
+          conan install . --profile .github/eu_conan_profile.toml --build=missing"
       addons:
         apt:
           sources:
             - ubuntu-toolchain-r-test
           packages:
-            - gcc-9
-            - g++-9
+            - g++-11
+            - gcc-11
             - python3-pip
-    - os: linux
-      dist: bionic
-      compiler: clang
-      env:
-        - MATRIX_EVAL="CC=clang && CXX=clang++"
-      addons: { apt: { packages: ['python3-pip'] } }
-
 
 before_script:
   - eval "${MATRIX_EVAL}"
 
 script:
-  - cmake -S . -B ./build -D ENABLE_COVERAGE:BOOL=ON ../
-  - cmake --build ./build -- -j2
-  - cd build && ctest -j2
+  - export EUGENE_BUILD_TESTS=1
+  - cmake cmake -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11 .
