@@ -1,12 +1,9 @@
 #pragma once
 
-#include <sys/stat.h>
-
 #include <core/Logger.h>
 
 static constexpr uint8_t Check = 0b10000000;
 static constexpr int Symbols = 256;
-static constexpr int MkdirPermission = 0755;
 
 /// Decompression algorithm is based on
 /// <a href="https://en.wikipedia.org/wiki/Huffman_coding#Basic_technique">huffman coding</a>
@@ -256,7 +253,7 @@ public:
 				}
 				translate_file(new_path, size);
 			} else {
-				mkdir(new_path.c_str(), MkdirPermission);
+				fs::create_directory(new_path);
 				translation(new_path, true);
 			}
 		}
