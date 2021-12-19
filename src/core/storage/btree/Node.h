@@ -35,8 +35,6 @@ class Node {
 	using Key = typename Config::Key;
 	using Ref = typename Config::Ref;
 
-	static constexpr int PIVOT = Config::BTREE_NODE_BREAK_POINT;
-
 public:
 	struct Branch {
 		std::vector<Self::Ref> m_refs;
@@ -81,8 +79,8 @@ public:
 
 	[[nodiscard]] long num_filled() const noexcept { return is_leaf() ? leaf().m_keys.size() : branch().m_refs.size(); }
 
-	[[nodiscard]] bool is_full(long n) const noexcept { return num_filled() == 2 * n - 1 && !m_is_root; }
-	[[nodiscard]] bool is_under(long n) const noexcept { return num_filled() < n - 1 && !m_is_root; }
+	[[nodiscard]] bool is_full(long m) const noexcept { return num_filled() >= m; }
+	[[nodiscard]] bool is_under(long m) const noexcept { return num_filled() < m / 2 && !m_is_root; }
 
 public:
 	Node() : m_metadata{} {}
@@ -121,49 +119,54 @@ public:
 	static Self from_page(const Page &p) {
 		nop::Deserializer<nop::BufferReader> deserializer{p.raw(), Page::size()};
 		Node node;
-		deserializer.Read(&node) || nop::Die(std::cerr);
+		deserializer.Read(&node);
 		return node;
 	}
 
 	[[nodiscard]] Page make_page() const noexcept {
 		auto p = Page::empty();
 		nop::Serializer<nop::BufferWriter> serializer{p.raw(), Page::size()};
-		serializer.Write(*this) || nop::Die(std::cerr);
+		serializer.Write(*this);
+		p.mark_dirty();
 		return p;
 	}
 
-	std::pair<Self::Key, Self> split() {
+	std::pair<Self::Key, Self> split(const std::size_t m) {
+		const std::size_t pivot = (m + 1) / 2;
 		if (is_branch()) {
 			auto &b = branch();
 			Node sibling{meta_of<Branch>(
-			                     break_at_index(b.m_refs, PIVOT),
-			                     break_at_index(b.m_links, PIVOT)),
-			             parent()};
-			Self::Key midkey = b.m_refs[PIVOT];
-			b.m_refs.resize(PIVOT);
+			                     break_at_index(b.m_refs, pivot),
+			                     break_at_index(b.m_links, pivot)), parent()};
+			b.m_refs.shrink_to_fit();
+			b.m_links.shrink_to_fit();
+			Self::Key midkey = b.m_refs[pivot - 1];
 			return std::make_pair<Self::Key, Self>(std::move(midkey), std::move(sibling));
 		} else {
 			auto &l = leaf();
 			Node sibling{meta_of<Leaf>(
-			                     break_at_index(l.m_keys, PIVOT),
-			                     break_at_index(l.m_vals, PIVOT)),
-			             parent()};
-			Self::Key midkey = l.m_keys[PIVOT];
-			l.m_keys.resize(PIVOT);
+			                     break_at_index(l.m_keys, pivot),
+			                     break_at_index(l.m_vals, pivot)), parent()};
+			l.m_keys.shrink_to_fit();
+			l.m_vals.shrink_to_fit();
+			Self::Key midkey = l.m_keys[pivot - 1];
 			return std::make_pair<Self::Key, Self>(std::move(midkey), std::move(sibling));
 		}
 	}
 
 private:
-	// Return (pivot; target.size()) and leave at original vector [0; pivot)
+	// Leaves elements [0; pivot] and returns a vector with (pivot; target.size())
 	template<typename T>
 	std::vector<T> break_at_index(std::vector<T> &target, uint32_t pivot) {
+		assert(target.size() >= 2);
+
 		std::vector<T> second;
-		second.reserve(target.size() - pivot - 1);
-		std::move(target.begin() + pivot + 1,
+		second.reserve(target.size() - pivot);
+
+		std::move(target.begin() + pivot,
 		          target.end(),
 		          std::back_inserter(second));
-		target.resize(pivot + 1);
+		target.resize(pivot);
 		return second;
 	}
 
@@ -173,7 +176,6 @@ public:
 	void set_root(bool flag = true) noexcept { m_is_root = flag; }
 
 	void set_parent(Position pos) noexcept { m_parent_pos = pos; }
-
 private:
 	Metadata m_metadata;
 	bool m_is_root{false};

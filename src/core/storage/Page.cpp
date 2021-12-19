@@ -2,12 +2,16 @@
 
 #include "catch2/catch.hpp"
 
-
 #include <core/storage/Page.h>
+
+void truncate_file(std::string_view fname) {
+	std::ofstream of{std::string{fname}, std::ios::trunc};
+}
 
 using namespace internal::storage;
 
 TEST_CASE("Page", "[page]") {
+	truncate_file("/tmp/eu-pager");
 	Pager pr("/tmp/eu-pager");
 
 	std::array<uint8_t, Page::size()> p1_data;
@@ -21,7 +25,7 @@ TEST_CASE("Page", "[page]") {
 	std::array<uint8_t, Page::size()> p3_data;
 	std::iota(p3_data.begin(), p3_data.end(), 3);
 	Page p3(std::move(p3_data));
-	REQUIRE(pr.sync(p3) == 2l * Page::size());
+	REQUIRE(pr.sync(p3) == Position(2l * Page::size()));
 
 	std::array<uint8_t, Page::size()> p2_data;
 	std::iota(p2_data.begin(), p2_data.end(), 2);

@@ -1,19 +1,17 @@
-#include "core/storage/Position.h"
-#include <iostream>
-#include <random>
 #include <map>
+#include <random>
 #include <string>
 #include <vector>
 
 #include <catch2/catch.hpp>
-
 #include <fmt/core.h>
 #include <fmt/format.h>
-
 #include <nop/structure.h>
 
-#include <core/storage/Storage.h>
+#include <core/storage/Position.h>
 #include <core/storage/btree/Btree.h>
+#include <core/storage/btree/BtreePrinter.h>
+
 using namespace internal::storage::btree;
 using internal::storage::Position;
 
@@ -29,8 +27,17 @@ int item<int>() {
 }
 
 template<>
-double item<double>() {
-	return static_cast<double>(item<int>()) / static_cast<double>(item<int>());
+float item<float>() {
+	return static_cast<float>(item<int>()) / static_cast<float>(item<int>());
+}
+
+template<>
+bool item<bool>() {
+	return item<int>() % 2 == 0;
+}
+
+void truncate_file(std::string_view fname) {
+	std::ofstream of{std::string{fname}, std::ios::trunc};
 }
 
 template<>
@@ -51,37 +58,43 @@ std::string item<std::string>() {
 }
 
 TEST_CASE("Btree operations", "[btree]") {
-	Btree bpt("/tmp/eu-btree-pgcache_name");
+	truncate_file("/tmp/eu-btree-ops");
+	Btree bpt("/tmp/eu-btree-ops");
 	REQUIRE(bpt.contains(42) == false);
 	REQUIRE(bpt.get(42).has_value() == false);
 
-	bpt.put(42, 1);
-	REQUIRE(bpt.root().leaf().m_keys[0] == 42);
-	REQUIRE(bpt.root().leaf().m_vals[0] == 1);
+	fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
+	fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
 
-	REQUIRE(bpt.get(42).value() == 1);
+	static const std::size_t limit = 1000000;
 
 	std::map<Config::Key, Config::Val> backup;
-	while (backup.size() != 200000) {
+	while (backup.size() != limit) {
 		auto key = item<int>();
-		auto val = key;//item();
+		auto val = item<int>();
 		bpt.put(key, val);
 		backup.emplace(key, val);
 	}
 
-	// int i = 1;
+	util::BtreePrinter{bpt, "/tmp/eu-btree-ops-printed"}();
+
+	REQUIRE(bpt.size() == limit);
+
+	std::size_t i = 1;
 	for (const auto &[key, val] : backup) {
+		fmt::print(" [{}]: '{}' => '{}'\n", i++, key, val);
 		REQUIRE(bpt.get(key).value() == val);
-		// fmt::print("-- {} -> Key '{}' found mapped to '{}'\n", i++, key, val);
 	}
 }
 
 TEST_CASE("Header operations", "[btree]") {
+	truncate_file("/tmp/eu-headerops");
+	truncate_file("/tmp/eu-headerops-header");
 	Btree bpt("/tmp/eu-headerops", "/tmp/eu-headerops-header");
 	bpt.save_header();
 
 	Btree bpt2("/tmp/eu-headerops", "/tmp/eu-headerops-header");
-	bpt2.header().m_numrecords = 1;
+	bpt2.header().m_size = 100;
 
 	REQUIRE(bpt2.load_header());
 
@@ -89,13 +102,16 @@ TEST_CASE("Header operations", "[btree]") {
 }
 
 TEST_CASE("Persistent Btree", "[btree]") {
+	truncate_file("/tmp/eu-persistent-btree");
+	truncate_file("/tmp/eu-persistent-btree-header");
+
 	std::map<uint32_t, uint32_t> backup;
 
 	Position rootpos;
 	{
-		// fmt::print("V1 ---\n");
+		fmt::print("V1 ---\n");
 		Btree bpt("/tmp/eu-persistent-btree", "/tmp/eu-persistent-btree-header");
-		while (backup.size() != 10000) {
+		while (backup.size() != 1000) {
 			auto key = item<int>();
 			auto val = item<int>();
 			bpt.put(key, val);
@@ -103,25 +119,25 @@ TEST_CASE("Persistent Btree", "[btree]") {
 		}
 
 		for (auto &[key, val] : backup) {
-			REQUIRE(bpt.get(key).value().get() == val);
-			// fmt::print("-- '{}' => '{}'\n", key, val);
+			REQUIRE(bpt.get(key).value() == val);
+			fmt::print("-- '{}' => '{}'\n", key, val);
 		}
 
 		rootpos = bpt.rootpos();
-		// fmt::print("Root pos: {}\n", rootpos);
+		fmt::print("Root pos: {}\n", rootpos);
 		bpt.save();
-		// fmt::print("Btree V1 Saved\n");
+		fmt::print("Btree V1 Saved\n");
 	}
 
 	{
 		// fmt::print("\nV2 ---\n");
-		Btree bpt("/tmp/eu-persistent-btree", "/tmp/eu-persistent-btree-header", true);
+		// Btree bpt("/tmp/eu-persistent-btree", "/tmp/eu-persistent-btree-header", true);
 
-		REQUIRE(bpt.rootpos() == rootpos);
+		// REQUIRE(bpt.rootpos() == rootpos);
 
 		/*
 		for (auto &[key, val] : backup) {
-			REQUIRE(bpt.get(key).value().get() == val);
+			REQUIRE(bpt.get(key).value() == val);
 			fmt::print("-- '{}' => '{}'\n", key, val);
 		}
 		*/
@@ -141,29 +157,36 @@ TEST_CASE("Persistent Btree", "[btree]") {
 }
 
 struct CustomConfigPrimitives : DefaultConfig {
-	using Key = std::string;
-	using Val = double;
-	using Ref = std::string;
-
-	static inline constexpr int NUM_RECORDS = 256;
-	static inline constexpr int BTREE_NODE_BREAK_POINT = (NUM_RECORDS - 1) / 2;
+	using Key = char;
+	using Val = char;
+	using Ref = char;
 };
 
-TEST_CASE("Custom Config Btree Primitive Types", "[btree]") {
-	Btree<CustomConfigPrimitives> btr{"/tmp/eu-btree-custom-config"};
-	std::map<std::string, double> backup;
+TEST_CASE("Custom Config Btree Primitive Type", "[btree]") {
+	truncate_file("/tmp/eu-btree-ops-custom-types");
+	Btree<CustomConfigPrimitives> bpt("/tmp/eu-btree-ops-custom-types");
+	static const std::size_t limit = 255;
 
-	while (backup.size() != 1000) {
-		auto key = item<std::string>();
-		auto val = item<double>();
-		btr.put(key, val);
-		backup[key] = val;
+	fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
+	fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
+
+	std::map<CustomConfigPrimitives::Key, CustomConfigPrimitives::Val> backup;
+	char f = 0;
+	while (backup.size() != limit) {
+		auto key = f;  //item<float>();
+		auto val = f++;//item<float>();
+		bpt.put(key, val);
+		backup.emplace(key, val);
 	}
 
-	int i = 0;
-	for (auto &[key, val] : backup) {
-		REQUIRE(btr.get(key).value().get() == val);
-		fmt::print("-- {} -> Key '{}' found mapped to '{}'\n", i++, key, val);
+	util::BtreePrinter{bpt, "/tmp/eu-btree-ops-custom-types-printed"}();
+
+	REQUIRE(bpt.size() == limit);
+
+	std::size_t i = 1;
+	for (const auto &[key, val] : backup) {
+		fmt::print(" [{}]: '{}' => '{}'\n", i++, key, val);
+		REQUIRE(bpt.get(key).value() == val);
 	}
 }
 
@@ -206,19 +229,22 @@ struct CustomConfigAggregate : DefaultConfig {
 };
 
 TEST_CASE("Custom Config Btree Aggregate Types", "[btree]") {
+	truncate_file("/tmp/eu-btree-custom-config");
 	Btree<CustomConfigAggregate> btr{"/tmp/eu-btree-custom-config"};
 	std::map<std::string, Person> backup;
 
-	while (backup.size() != 10000) {
+	static const std::size_t limit = 100;
+
+	while (backup.size() != limit) {
 		auto key = item<std::string>();
 		auto val = item<Person>();
 		btr.put(key, val);
 		backup[key] = val;
 	}
 
-	int i = 0;
+	std::size_t i = 0;
 	for (auto &[key, val] : backup) {
-		REQUIRE(btr.get(key).value().get() == val);
+		REQUIRE(btr.get(key).value() == val);
 		fmt::print("-- {} -> Key '{}' found mapped to '{}'\n", i++, key, val);
 	}
 }

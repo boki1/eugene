@@ -9,6 +9,7 @@
 
 #include <fmt/format.h>
 
+#include <core/SizeMetrics.h>
 #include <core/storage/Position.h>
 
 namespace internal::storage {
@@ -19,7 +20,7 @@ class Pager;
 //! Single "addressable" unit used by the Pager
 //!
 class Page {
-	static inline constexpr int32_t SIZE = 1 << 14;
+	static inline constexpr int32_t SIZE = 4_KB;
 
 	friend Pager;
 
@@ -48,7 +49,7 @@ public:
 
 	void write(Position pos, data_citerator data_begin, data_citerator data_end) noexcept {
 		auto numbytes = std::distance(data_begin, data_end);
-		if (pos + numbytes > size())
+		if (pos + numbytes > Position(size()))
 			return;
 		for (unsigned i = 0; i < numbytes; ++i)
 			*(raw() + pos + i) = *(data_begin + i);
@@ -62,7 +63,7 @@ public:
 	}
 
 	std::optional<std::pair<data_citerator, data_citerator>> read(Position pos, uint32_t numbytes) noexcept {
-		if (pos + numbytes > size())
+		if (pos + numbytes > Position(size()))
 			return std::nullopt;
 		auto it_begin = m_data.cbegin() + pos;
 		auto it_end = m_data.cbegin() + pos + numbytes;
@@ -82,8 +83,9 @@ public:
 
 	[[nodiscard]] bool dirty() const noexcept { return m_dirty; }
 
-	[[nodiscard]] static constexpr uint32_t size() noexcept { return Page::SIZE; }
+	[[nodiscard]] static constexpr std::size_t size() noexcept { return Page::SIZE; }
 
+	void mark_dirty() noexcept { m_dirty = true; }
 private:
 	std::array<uint8_t, Page::SIZE> m_data;
 	bool m_used = false;
@@ -98,7 +100,7 @@ class Pager {
 public:
 	explicit Pager(std::string_view fname)
 	    : m_cursor{0},
-	      m_file{fname.data(), std::ios::in | std::ios::out},
+	      m_file{fname.data()},
 	      m_filename{fname} {
 		assert(m_file);
 	}

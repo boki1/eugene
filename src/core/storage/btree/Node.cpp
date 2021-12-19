@@ -7,6 +7,9 @@
 
 #include "catch2/catch.hpp"
 
+#include <fmt/core.h>
+#include <fmt/ranges.h>
+
 #include <core/storage/Page.h>
 #include <core/storage/Position.h>
 #include <core/storage/btree/Btree.h>
@@ -48,6 +51,10 @@ static Nod make_node() {
 	return Node(std::move(metadata), p, dist128(rng) % 2);
 }
 
+void truncate_file(std::string_view fname) {
+	std::ofstream of{std::string{fname}, std::ios::trunc};
+}
+
 template <typename T, typename V>
 bool contains(const T& collection, V item) {
 	return std::find(collection.cbegin(), collection.cend(), item) != collection.cend();
@@ -67,7 +74,8 @@ TEST_CASE("Node serialization", "[btree]") {
 	REQUIRE(node2_from_page == node2);
 }
 
-TEST_CASE("Persitent nodes", "[btree]") {
+TEST_CASE("Persistent nodes", "[btree]") {
+	truncate_file("/tmp/eu-persistent-nodes-pager");
 	Pager pr("/tmp/eu-persistent-nodes-pager");
 	Page page;
 
@@ -91,6 +99,7 @@ TEST_CASE("Persitent nodes", "[btree]") {
 }
 
 TEST_CASE("Paging with many random nodes", "[btree]") {
+	truncate_file("/tmp/eu-many-persistent-nodes-pager");
 	Pager pr("/tmp/eu-many-persistent-nodes-pager");
 	Page page;
 
@@ -122,52 +131,67 @@ TEST_CASE("Paging with many random nodes", "[btree]") {
 }
 
 TEST_CASE("Split full nodes", "[btree]") {
-	auto b = Nod(Metadata(Branch({}, {})), {}, false);
-	auto l = Nod(Metadata(Leaf({}, {})), 13, true);
+	auto bn = Nod(Metadata(Branch({}, {})), {}, false); auto &b = bn.branch();
+	auto ln = Nod(Metadata(Leaf({}, {})), 13, true); auto &l = ln.leaf();
 
-	const auto limit = DefaultConfig::NUM_RECORDS;
-	const auto pivot = DefaultConfig::BTREE_NODE_BREAK_POINT;
+	constexpr auto limit_branch = 512;
+	constexpr auto limit_leaf = 512;
 
-	for (uint32_t i = 0; i < limit; ++i) {
-		b.branch().m_refs.push_back(i);
-		b.branch().m_links.push_back(Position(i));
+	// Fill
+	for (uint32_t i = 0; i < limit_branch; ++i) {
+		b.m_refs.push_back(i);
+		b.m_links.push_back(Position(i));
+	}
+	b.m_links.push_back(Position(limit_branch));
 
-		l.leaf().m_keys.push_back(i);
-		l.leaf().m_vals.push_back(i);
+	for (uint32_t i = 0; i < limit_leaf; ++i) {
+		l.m_keys.push_back(i);
+		l.m_vals.push_back(i);
 	}
 
-	uint32_t broken_off = pivot;
-	auto [bkey, bsib] = b.split();
-	REQUIRE(bkey == broken_off);
-	auto [lkey, lsib] = l.split();
-	REQUIRE(lkey == broken_off);
+	// Break apart
+	auto [branch_midkey, branch_sib_node] = bn.split(limit_branch);
+	auto [leaf_midkey, leaf_sib_node] = ln.split(limit_leaf);
+	REQUIRE(branch_midkey == limit_branch / 2 - 1);
+	REQUIRE(leaf_midkey == limit_leaf / 2 - 1);
 
-	auto &brefs = bsib.branch().m_refs;
-	auto &blinks = bsib.branch().m_links;
-	auto &lkeys = lsib.leaf().m_keys;
-	auto &lvals = lsib.leaf().m_vals;
+	auto &branch_sib = branch_sib_node.branch();
+	auto &leaf_sib = leaf_sib_node.leaf();
 
-	for (uint32_t i = 1; i < pivot; ++i) {
-		REQUIRE(contains(b.branch().m_refs, i));
-		REQUIRE(contains(b.branch().m_links, static_cast<long>(i)));
-		REQUIRE(contains(l.leaf().m_keys, i));
-		REQUIRE(contains(l.leaf().m_vals, i));
+	for (uint32_t i = 0; i < branch_midkey; ++i) {
+		REQUIRE(contains(b.m_refs, i));
+		REQUIRE(contains(b.m_links, static_cast<long>(i)));
+		REQUIRE(!contains(branch_sib.m_refs, i));
+		REQUIRE(!contains(branch_sib.m_links, static_cast<long>(i)));
+	}
+	REQUIRE(contains(b.m_links, static_cast<long>(branch_midkey)));
+	REQUIRE(!contains(branch_sib.m_links, static_cast<long>(branch_midkey)));
 
-		REQUIRE(!contains(brefs, i));
-		REQUIRE(!contains(blinks, static_cast<long>(i)));
-		REQUIRE(!contains(lkeys, i));
-		REQUIRE(!contains(lvals, i));
+	for (uint32_t i = 0; i <= leaf_midkey; ++i) {
+		REQUIRE(contains(l.m_keys, i));
+		REQUIRE(contains(l.m_vals, i));
+		REQUIRE(!contains(leaf_sib.m_keys, i));
+		REQUIRE(!contains(leaf_sib.m_vals, i));
 	}
 
-	for (uint32_t i = broken_off + 1; i < limit; ++i) {
-		REQUIRE(!contains(b.branch().m_refs, i));
-		REQUIRE(!contains(b.branch().m_links, static_cast<long>(i)));
-		REQUIRE(!contains(l.leaf().m_keys, i));
-		REQUIRE(!contains(l.leaf().m_vals, i));
+	// The middle key should remain in the "left" leaf although it is suppossed to get a
+	// ref inside the new parent, this is the actual spot where the val is stored.
+	REQUIRE(contains(leaf_sib.m_keys, (limit_leaf + 1) / 2));
+	REQUIRE(contains(leaf_sib.m_vals, (limit_leaf + 1) / 2));
 
-		REQUIRE(contains(brefs, i));
-		REQUIRE(contains(blinks, static_cast<long>(i)));
-		REQUIRE(contains(lkeys, i));
-		REQUIRE(contains(lvals, i));
+	for (uint32_t i = branch_midkey + 1; i < limit_branch; ++i) {
+		REQUIRE(!contains(b.m_refs, i));
+		REQUIRE(!contains(b.m_links, static_cast<long>(i)));
+		REQUIRE(contains(branch_sib.m_refs, i));
+		REQUIRE(contains(branch_sib.m_links, static_cast<long>(i)));
+	}
+	REQUIRE(!contains(b.m_links, static_cast<long>(limit_branch)));
+	REQUIRE(contains(branch_sib.m_links, static_cast<long>(limit_branch)));
+
+	for (uint32_t i = leaf_midkey + 1; i < limit_leaf; ++i) {
+		REQUIRE(!contains(l.m_keys, i));
+		REQUIRE(!contains(l.m_vals, i));
+		REQUIRE(contains(leaf_sib.m_keys, i));
+		REQUIRE(contains(leaf_sib.m_vals, i));
 	}
 }
