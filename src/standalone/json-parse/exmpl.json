@@ -1,0 +1,14 @@
+{
+  "users": {
+    "id1": {
+      "name": "TJ",
+      "age": 23,
+      "location": "San Francisco"
+    },
+    "id2": {
+      "name": "TJ",
+      "age": 23,
+      "location": "San Francisco"
+    }
+  }
+}
