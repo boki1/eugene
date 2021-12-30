@@ -123,6 +123,10 @@ def do_config():
         if not do_config_cmd(('gcc', 'g++')):
             sys.exit(-1)
 
+    # Cannot pass -f is using os.symlink()
+    os.system('ln -sf build/compile_commands.json compile_commands.json')
+    print("-- Initialized compile db")
+
 def do_build(test=False, doc=False):
     do_config()
     ninja_command="ninja -Cbuild -j4"
@@ -141,7 +145,8 @@ def do_run():
 
 def do_run_test():
     print_style("Running tests")
-    runtest_cmd = "ctest --rerun-failed --output-on-failure --test-dir build/".split()
+    # runtest_cmd = "ctest --rerun-failed --output-on-failure --test-dir build/".split()
+    runtest_cmd ="ctest -VV --no-tests=error --rerun-failed --output-on-failure --test-dir build/".split()
     sp.run(runtest_cmd)
 
 

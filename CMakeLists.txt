@@ -12,8 +12,7 @@ add_compile_options(
         -Werror
         -pedantic
         -ggdb3
-        -fdiagnostics-color
-        -fconcepts-diagnostics-depth=2)
+        -fdiagnostics-color)
 
 enable_testing()
 include(FetchContent)
@@ -21,16 +20,32 @@ include(FetchContent)
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup(TARGETS)
 
-# #############################################################################
-# Storage setup
-set(EUGENE_STORAGE src/core/storage)
+set(LibEugeneBtree_SRC
+	storage/btree/Btree.h
+	storage/btree/Btree.cpp
+	storage/btree/Bench.cpp
+	storage/btree/Node.h
+	storage/btree/BtreePrinter.h
+	storage/btree/Config.h)
+
+set (LibEugenePager_SRC
+	storage/Position.h
+	storage/PageCache.h
+	storage/PageCache.cpp
+	storage/Page.h
+	storage/Page.cpp)
+
+set(LibEugeneCompression_SRC
+	storage/compression/Compressor.h
+	storage/compression/Decompressor.h
+	storage/compression/Compression.cpp)
+
 set(LibEugeneCore_SRC
-        Position.h PageCache.h Page.h PageCache.cpp Page.cpp Storage.h
-        btree/Btree.h btree/BtreePrinter.h btree/Btree.cpp
-        compression/Compressor.h compression/Decompressor.h
-        compression/TestCompression.cpp
-        ../Logger.h)
-list(TRANSFORM LibEugeneCore_SRC PREPEND "${EUGENE_STORAGE}/")
+		Util.h SizeMetrics.h Logger.h
+		${LibEugeneBtree_SRC}
+		${LibEugenePager_SRC}
+		${LibEugeneCompression_SRC})
+list(TRANSFORM LibEugeneCore_SRC PREPEND "src/core/")
 
 add_library(LibEugeneCore "${LibEugeneCore_SRC}")
 set_target_properties(LibEugeneCore PROPERTIES LINKER_LANGUAGE CXX)
@@ -41,15 +56,19 @@ target_link_libraries(LibEugeneCore
         CONAN_PKG::outcome
         CONAN_PKG::catch2
         CONAN_PKG::spdlog
+        CONAN_PKG::libnop
+		    CONAN_PKG::benchmark
+        CONAN_PKG::catch2)
         CONAN_PKG::cppbenchmark)
 
+add_executable(BtreeBench src/core/storage/btree/Bench.cpp)
+target_link_libraries(BtreeBench LibEugeneCore)
 
 if (DEFINED ENV{EUGENE_BUILD_TESTS})
     macro(eugene_test component path_prefix)
         add_executable(Test${component} ${path_prefix}/${component}.cpp)
-        target_link_libraries(Test${component} TestMain LibEugeneCore)
-        add_test(NAME Test${component}
-                COMMAND Test${component})
+		    target_link_libraries(Test${component} TestMain LibEugeneCore)
+        add_test(NAME Test${component} COMMAND Test${component})
         message("   -- Test about '${component}' component added from \"${path_prefix}/${component}.cpp\"")
     endmacro()
 
@@ -58,12 +77,16 @@ if (DEFINED ENV{EUGENE_BUILD_TESTS})
     add_library(TestMain src/core/Main.cpp)
     target_link_libraries(TestMain CONAN_PKG::catch2)
 
-    eugene_test(TestCompression ${EUGENE_STORAGE}/compression)
-    eugene_test(Btree ${EUGENE_STORAGE}/btree)
-    eugene_test(Page ${EUGENE_STORAGE})
-    eugene_test(PageCache ${EUGENE_STORAGE})
+    eugene_test(Compression src/core/storage/compression)
+    eugene_test(Btree src/core/storage/btree)
+	  eugene_test(Node src/core/storage/btree)
+    eugene_test(Page src/core/storage)
+    eugene_test(PageCache src/core/storage) 
+endif()
 
-    # add executable for compression/BenchmarkCompressor.cpp
-    add_executable(benchmark ${EUGENE_STORAGE}/compression/BenchmarkCompression.cpp)
+if (DEFINED ENV{EUGENE_BUILD_BENCHMARKS})
+    add_executable(benchmark src/core/storage/compression/BenchmarkCompression.cpp)
     target_link_libraries(benchmark PUBLIC LibEugeneCore)
-endif ()
+    
+    message("-- Building benchmarks")
+endif()

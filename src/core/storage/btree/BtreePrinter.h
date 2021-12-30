@@ -7,14 +7,19 @@
 #include <utility>
 #include <vector>
 
+#include <core/storage/PageCache.h>
+#include <core/storage/Position.h>
 #include <core/storage/btree/Btree.h>
+#include <core/storage/btree/Config.h>
+#include <core/storage/btree/Node.h>
 
-namespace internal::btree::util {
+namespace internal::storage::btree::util {
 
-template<typename InputIt>
-std::string join(InputIt begin, const InputIt end,
-                 std::string_view delim) {
+template<typename Collection>
+static std::string join(const Collection& collection, std::string_view delim) {
 	std::stringstream ss;
+	auto begin = std::cbegin(collection);
+	const auto end = std::cend(collection);
 	while (begin < end - 1)
 		ss << *begin++ << delim;
 	ss << *begin;
@@ -22,47 +27,51 @@ std::string join(InputIt begin, const InputIt end,
 }
 
 template<BtreeConfig Config>
-class BtreeYAMLPrinter {
+class BtreePrinter {
 	using Bt = Btree<Config>;
-	using Node = typename Bt::Node;
+	using Nod = Node<Config>;
 
 public:
-	explicit BtreeYAMLPrinter(const Bt &bt, std::string ofname = "bpt.yml")
-	    : m_ofname{std::move(ofname)}, m_btree{bt}, m_out{m_ofname,
-	                                                      std::ios::out} {}
+	explicit BtreePrinter(const Bt &bt, std::string_view ofname = "/tmp/bpt_view")
+	    : m_ofname{ofname},
+	      m_btree{bt},
+	      m_out{m_ofname, std::ios::out | std::ios::trunc} {}
 
 	void operator()() noexcept { print(); }
 
-	void print_node(const Node *node, unsigned level = 1) noexcept {
+	Nod node_at(Position pos) {
+		return Nod::from_page(m_btree.m_pgcache.get_page(pos));
+	}
+
+	void print_node(const Nod node, unsigned level = 1) noexcept {
 		const std::string indentation(level * 2, ' ');
 		m_out << indentation;
 		if (level > 1)
 			m_out << "- ";
-		if (node->is_branch() || level == 1)
+		if (node.is_branch() || level == 1)
 			m_out << "keys: ";
-		auto [beginning, _] = node->range();
-		const auto actual_end = beginning + node->numfilled();
-		m_out << '[' << join(beginning, actual_end, ", ") << "]\n";
-		if (node->is_branch()) {
-			m_out << indentation << (level > 1 ? "  " : "") << "children: \n";
-			auto links = node->branch().links_;
-			for (auto it = links.begin(); it != links.end() && *it != Position::poison(); ++it) {
-				print_node(&Node::Cache::the().fetch(*it), level + 1);
-			}
+		if (node.is_leaf()) {
+			m_out << '(' << node.leaf().m_keys.size() << ") [" << join(node.leaf().m_keys, ", ") << "]\n";
+			return;
 		}
+
+		m_out << '[' << join(node.branch().m_refs, ", ") << "]\n";
+		m_out << indentation << (level > 1 ? "  " : "") << "children: \n";
+		for (const auto pos : node.branch().m_links)
+			print_node(node_at(pos), level + 1);
 	}
 
 	void print() noexcept {
-		m_out << "keys_per_block: " << Node::num_records_per_node() - 1 << '\n';
+		m_out << "keys_per_block: " << Bt::NUM_RECORDS_LEAF << '\n';
 		m_out << "tree:\n";
 
-		print_node(m_btree.m_root);
+		print_node(node_at(m_btree.rootpos()));
 	}
 
 private:
 	std::string m_ofname;
-	const Btree<Config> &m_btree;
+	const Bt &m_btree;
 	std::ofstream m_out;
 };
 
-}// namespace internal::btree::util
+}// namespace internal::storage::btree::util

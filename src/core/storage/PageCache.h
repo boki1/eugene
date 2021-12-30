@@ -1,15 +1,15 @@
 #pragma once
 
+#include <concepts>
 #include <list>
 #include <unordered_map>
 #include <utility>
 
+#include <fmt/format.h>
+
+#include <core/SizeMetrics.h>
 #include <core/storage/Page.h>
 #include <core/storage/Position.h>
-
-static constexpr uint32_t operator""_MB(const unsigned long long x) {
-	return x * 1 << 20;
-}
 
 namespace internal::storage {
 
@@ -17,27 +17,26 @@ namespace internal::storage {
 //! Implemented as a write-behind LRU cache.
 //! Controls access to pages using an internal pager.
 class PageCache {
-	using PosPage = std::pair<Position, Page>;
 
-private:
-	void evict_lru() {
-		// This cache implementation is write-behind so this is the stage at which
-		// dirty pages are synced with the disc
-		auto &[pos, page] = m_pool.back();
+	struct CacheEntry {
+		Page m_page;
+		std::list<Position>::const_iterator m_cit;
+	};
+
+	void evict() {
+		const auto &pos = m_tracker.back();
+		const auto &page = m_index.at(pos).m_page;
 		if (page.dirty())
 			m_pager.sync(page, pos);
-
 		m_index.erase(pos);
-		m_pool.pop_back();
+		m_tracker.pop_back();
 	}
 
 public:
 	template<typename String>
 	explicit PageCache(String &&pager_fname, uint32_t size = 1_MB)
-	    : m_size{size},
-	      m_limit{size / sizeof(PosPage)},
+	    : m_limit{size / Page::size()},
 	      m_pager{std::forward<String>(pager_fname)} {
-		assert(size >= sizeof(PosPage));
 		assert(m_limit > 0);
 	}
 
@@ -47,15 +46,16 @@ public:
 	 * it is added using the put_page() mechanism.
 	 */
 	Page &get_page(Position page_pos) {
-		auto it = m_index.find(page_pos);
-		if (it == m_index.end()) {
-			Page tmp_clone = m_pager.fetch(m_tmp, page_pos);
-			put_page(page_pos, std::move(tmp_clone));
-			it = m_index.find(page_pos);
-			assert(it != m_index.end());
+		if (!m_index.contains(page_pos)) {
+			static auto p = Page();
+			put_page(page_pos, std::move(m_pager.fetch(p, page_pos)));
 		}
-		m_pool.splice(m_pool.begin(), m_pool, it->second);
-		return it->second->second;
+
+		auto it = m_index.find(page_pos);
+		assert(it != m_index.end());
+
+		m_tracker.splice(m_tracker.cend(), m_tracker, it->second.m_cit);
+		return it->second.m_page;
 	}
 
 	/*
@@ -64,41 +64,50 @@ public:
 	 * least recently used page is evicted.
 	 */
 	void put_page(Position page_pos, Page &&page) {
-		if (auto it = m_index.find(page_pos); it != m_index.end()) {
-			m_index[page_pos]->second = std::move(page);
-			return;
+		assert(m_index.size() <= m_limit);
+
+		const auto it = m_index.find(page_pos);
+		if (it == m_index.cend()) {
+			// Page is not present in cache.
+			if (full())
+				evict();
+			m_tracker.push_back(page_pos);
+		} else {
+			// Page is present.
+			// Move it to the end of `m_tracker`.
+			m_tracker.splice(m_tracker.cend(), m_tracker, it->second.m_cit);
 		}
 
-		if (full())
-			evict_lru();
-
-		// From this point on the cache *owns* this page
-		m_pool.emplace_front(page_pos, std::move(page));
-		m_index.emplace(page_pos, m_pool.begin());
+		m_index[page_pos] = CacheEntry{
+			.m_page = page,
+			.m_cit = m_tracker.cend()
+		};
 	}
 
 	void flush_all() {
 		while (!empty())
-			evict_lru();
+			evict();
 	}
 
 	[[nodiscard]] Position get_new_pos() noexcept { return m_pager.alloc(); }
 
-	[[nodiscard]] bool full() const noexcept { return m_index.size() == m_limit; }
+	[[nodiscard]] bool full() const noexcept { return m_index.size() >= m_limit; }
 
-	[[nodiscard]] bool empty() const noexcept { return m_index.size() == 0; }
+	[[nodiscard]] bool empty() const noexcept { return m_index.empty(); }
 
-	[[nodiscard]] uint32_t static constexpr min_size() noexcept { return sizeof(PosPage); }
+	[[nodiscard]] uint32_t static constexpr min_size() noexcept { return Page::size(); }
 
 private:
-	const std::size_t m_size;
+	//! Maximum number of elements that may be stored in the cache at once
 	const std::size_t m_limit;
 
-	std::list<PosPage> m_pool;
-	std::unordered_map<Position, decltype(m_pool)::iterator> m_index;
+	//! Position-to-Page mapping
+	std::unordered_map<Position, CacheEntry> m_index;
 
-	Page m_tmp{{0}};
+	//! Usage tracker of the entries inside `m_index`
+	std::list<Position> m_tracker;
 
+	//!
 	Pager m_pager;
 };
 
