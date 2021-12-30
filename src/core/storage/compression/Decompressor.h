@@ -1,21 +1,9 @@
-#ifndef STORAGE_DECOMPRESSOR_INCLUDED
-#define STORAGE_DECOMPRESSOR_INCLUDED
+#pragma once
 
-#include <climits>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <dirent.h>
-#include <iostream>
-#include <memory>
-#include <string>
-#include <sys/stat.h>
-#include <fstream>
-#include <filesystem>
+#include <core/Logger.h>
 
-static constexpr unsigned char Check = 0b10000000;
+static constexpr uint8_t Check = 0b10000000;
 static constexpr int Symbols = 256;
-static constexpr int MkdirPermission = 0755;
 
 /// Decompression algorithm is based on
 /// <a href="https://en.wikipedia.org/wiki/Huffman_coding#Basic_technique">huffman coding</a>
@@ -63,14 +51,19 @@ public:
 		for (unsigned long i = 0; i < m_symbols; i++)
 			process_n_bits_to_string(m_trie_root);
 
-		if (folder_name.empty())
+		if (folder_name.empty()) {
+			Logger::the().log(spdlog::level::info, "Decompressor: Decompressing all files...");
 			translation("", false);
-		else
+		} else {
+			Logger::the().log(spdlog::level::info,
+			                  R"(Decompressor: Decompressing files in file/folder: "{}")",
+			                  folder_name);
 			translation_search("", folder_name, false);
+		}
 
 		fclose(m_compressed);
 		deallocate_trie(m_trie_root);
-		std::cout << "Decompression is complete" << std::endl;
+		Logger::the().log(spdlog::level::info, "Decompressor: Decompression is completed\n");
 	}
 
 	/// \brief This structure will be used to represent the trie
@@ -84,25 +77,9 @@ public:
 	FILE *m_compressed = nullptr;//!< file pinter to the compressed file
 	unsigned long m_symbols = 0; //!< count of the file or folder m_symbols
 
-	unsigned char m_current_byte = '\0';//!< unsigned char value
+	uint8_t m_current_byte = '\0';//!< uint8_t value
 	//!< that represents the current byte
 	int m_current_bit_count = 0;        //!< integer value of current bits count
-
-	/// \brief Creating a file, when the parent directories might not exist
-	///
-	/// \param path - path to the file
-//	TODO: use boost instead
-	static void create_desired_dirs(std::string_view path) {
-		std::size_t founded = 0;
-
-		for (int i = 0; i < std::count(path.begin(), path.end(), '/'); ++i) {
-			founded = path.find('/', founded + 1);
-			std::string_view curr_path = path.substr(0, founded);
-
-			if (!std::filesystem::exists(curr_path))
-				std::filesystem::create_directory(curr_path);
-		}
-	}
 
 	/// \brief Reads how many folders/files the program is going to create inside
 	/// the main folder. File count was written to the compressed file from least significant byte
@@ -135,9 +112,10 @@ public:
 	/// \brief process_byte_number reads 8 successive bits from compressed file
 	/// (does not have to be in the same byte)
 	///
-	/// \return the latter 8 successive bits in unsigned char form
-	unsigned char process_byte_number() {
-		unsigned char val, temp_byte;
+	/// \return the latter 8 successive bits in uint8_t form
+	uint8_t process_byte_number() {
+		uint8_t val;
+		uint8_t temp_byte;
 		fread(&temp_byte, 1, 1, m_compressed);
 		val = (m_current_byte | (temp_byte >> m_current_bit_count));
 		m_current_byte = temp_byte << (CHAR_BIT - m_current_bit_count);
@@ -217,7 +195,9 @@ public:
 	void translate_file(const std::string &path, long int size) {
 		huff_trie *node;
 
-		create_desired_dirs(path);
+		if (path.find('/') != std::string::npos) {
+			std::filesystem::create_directories(path.substr(0, path.find_last_of('/')));
+		}
 		std::ofstream new_file(path, std::ios::binary);
 		for (long int i = 0; i < size; i++) {
 			node = m_trie_root;
@@ -266,9 +246,14 @@ public:
 				new_path.insert(0, path + "/");
 
 			if (file) {
+				if (size == 0) {
+					Logger::the().log(spdlog::level::err, "Size cannot be "
+					                                      "fetched from compressed file");
+					return;
+				}
 				translate_file(new_path, size);
 			} else {
-				mkdir(new_path.c_str(), MkdirPermission);
+				fs::create_directory(new_path);
 				translation(new_path, true);
 			}
 		}
@@ -297,6 +282,11 @@ public:
 
 			if (file) {
 				if (curr_file == for_decompress) {
+					if (size == 0) {
+						Logger::the().log(spdlog::level::err, "Size cannot be "
+						                                      "fetched from compressed file");
+						return;
+					}
 					translate_file(new_path, size);
 					break;
 				}
@@ -313,7 +303,7 @@ public:
 				translation_search(new_path, for_decompress, true);
 			}
 		}
-//		TODO: logger task - didn't find the file or folder
+		Logger::the().log(spdlog::level::debug, R"(Decompressor: File "{}" skipped)", path);
 	}
 
 private:
@@ -339,12 +329,11 @@ public:
 	/// \brief Constructor of the decompression class with which you can detail provided file
 	///
 	/// \param path - path to the file for detail
-	explicit Decompressor(const std::string &path) {
+	explicit Decompressor(std::string_view path) {
 		FILE *path_to_compressed;
-		path_to_compressed = fopen(path.c_str(), "rb");
+		path_to_compressed = fopen(path.begin(), "rb");
 		if (!path_to_compressed) {
-			//                        TODO: task for the logger
-			std::cout << "Please provide valid file name" << std::endl;
+			Logger::the().log(spdlog::level::err, R"(Decompressor: File not found: "{}")", path);
 			return;
 		}
 		decompressor_impl = std::make_unique<pimpl>(path_to_compressed);
@@ -356,5 +345,3 @@ public:
 	}
 };
 }// namespace decompression
-
-#endif

@@ -1,0 +1,43 @@
+language: cpp
+
+install:
+  # Pip cannot install Conan without these upgrades
+  - python3 -m pip install --upgrade pip setuptools
+
+  - python3 -m pip install --upgrade conan cmake
+
+  # Fail if we can't run Conan.
+  - conan --version
+
+jobs:
+  include:
+    - os: osx
+      compiler: gcc
+      osx_image: xcode13.1
+      env:
+        - GCC_VER="11"
+        - MATRIX_EVAL="CC=gcc-${GCC_VER} && CXX=g++-${GCC_VER}
+          conan install . --profile .github/eu_conan_profile.toml --build=missing"
+
+    - os: linux
+      dist: bionic
+      compiler: gcc
+      env:
+        - GCC_VER="11"
+        - MATRIX_EVAL="CC=gcc-${GCC_VER} && CXX=g++-${GCC_VER}
+          conan install . --profile .github/eu_conan_profile.toml --build=missing"
+      addons:
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+          packages:
+            - g++-11
+            - gcc-11
+            - python3-pip
+
+before_script:
+  - eval "${MATRIX_EVAL}"
+
+script:
+  - export EUGENE_BUILD_TESTS=1
+  - cmake cmake -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11 .
