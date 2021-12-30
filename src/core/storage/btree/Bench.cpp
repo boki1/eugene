@@ -2,7 +2,6 @@
 
 #include <benchmark/benchmark.h>
 
-#include <core/storage/Storage.h>
 #include <core/storage/btree/Btree.h>
 using namespace internal::storage::btree;
 

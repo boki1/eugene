@@ -140,9 +140,9 @@ TEST_CASE("Split full nodes", "[btree]") {
 	// Fill
 	for (uint32_t i = 0; i < limit_branch; ++i) {
 		b.m_refs.push_back(i);
-		b.m_links.push_back(Position(i));
+		b.m_links.emplace_back(i);
 	}
-	b.m_links.push_back(Position(limit_branch));
+	b.m_links.emplace_back(limit_branch);
 
 	for (uint32_t i = 0; i < limit_leaf; ++i) {
 		l.m_keys.push_back(i);

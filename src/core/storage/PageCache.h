@@ -93,7 +93,7 @@ public:
 
 	[[nodiscard]] bool full() const noexcept { return m_index.size() >= m_limit; }
 
-	[[nodiscard]] bool empty() const noexcept { return m_index.size() == 0; }
+	[[nodiscard]] bool empty() const noexcept { return m_index.empty(); }
 
 	[[nodiscard]] uint32_t static constexpr min_size() noexcept { return Page::size(); }
 
