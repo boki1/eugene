@@ -15,30 +15,30 @@ class Position {
 	friend std::hash<Position>;
 
 public:
-	Position() = default;
-	Position(const Position &) = default;
+	constexpr Position() = default;
+	constexpr Position(const Position &) = default;
 
-	Position &operator=(const Position &) = default;
+	constexpr Position &operator=(const Position &) = default;
 
 	/*
 	 * Intentionally implicit
 	 */
-	Position(long pos) : m_pos{pos}, m_isset{true} {}
-	operator long() { return m_pos; }
+	constexpr Position(long pos) : m_pos{pos}, m_isset{true} {}
+	constexpr operator long() { return m_pos; }
 
-	static auto poison() { return Position(); }
+	constexpr static auto poison() { return Position(); }
 
-	[[nodiscard]] auto get() const noexcept { return m_pos; }
-	[[nodiscard]] bool is_set() const noexcept { return m_isset; }
+	[[nodiscard]] constexpr auto get() const noexcept { return m_pos; }
+	[[nodiscard]] constexpr bool is_set() const noexcept { return m_isset; }
 
-	void set(long pos) noexcept {
+	constexpr void set(long pos) noexcept {
 		m_pos = pos;
 		m_isset = true;
 	}
 
-	bool operator==(const Position &rhs) const noexcept { return m_pos == rhs.m_pos; }
-	bool operator!=(const Position &rhs) const noexcept { return m_pos != rhs.m_pos; }
-	bool operator==(long rhs) const noexcept { return m_pos == rhs; }
+	constexpr bool operator==(const Position &rhs) const noexcept { return m_pos == rhs.m_pos; }
+	constexpr bool operator!=(const Position &rhs) const noexcept { return m_pos != rhs.m_pos; }
+	constexpr bool operator==(long rhs) const noexcept { return m_pos == rhs; }
 
 	friend std::ostream &operator<<(std::ostream &os, const Position &pos) {
 		os << "Position { .pos = " << pos.get() << ", .is_set = " << std::boolalpha << pos.is_set() << " }";

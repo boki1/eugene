@@ -41,17 +41,70 @@ class Btree final {
 
 	friend util::BtreePrinter<Config>;
 
-	//! Reserved a random size for now. Seems to me that this would be enough :)
-	static inline constexpr int BTREE_HEADER_SIZE = 128;
+	static auto _calc_num_records_leaf() {
+		std::size_t low = 2;
+		std::size_t high = Page::size() / sizeof(uint8_t);
 
-	static inline constexpr int BTREE_NODE_SIZE = Page::size() - BTREE_HEADER_SIZE;
+		int mid = 0;
+		std::size_t size;
+		std::pair<int, std::size_t> last_valid;
+		while (low <= high) {
+			mid = ((unsigned int) low + (unsigned int) high) >> 1;
+			size = nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Leaf(std::vector<Key>(mid), std::vector<Val>(mid))), {}, true});
 
-	//! Equivalent to `m` in Knuth's definition
-	static inline constexpr int NUM_RECORDS_LEAF = BTREE_NODE_SIZE / (sizeof(Key) + sizeof(Val));
+			if (size < Page::size()) {
+				low = mid + 1;
+				last_valid = {mid, size};
+			}
+			else if (size > Page::size())
+				high = mid - 1;
+			else
+				break;
+		}
+		if (size > Page::size()) {
+			assert(last_valid.second <= Page::size());
+			return last_valid.first;
+		}
+		return mid;
+	}
+
+	static auto _calc_num_links_branch() {
+		std::size_t low = 2;
+		std::size_t high = Page::size() / sizeof(uint8_t);
+
+		int mid = 0;
+		std::size_t size;
+		std::pair<int, std::size_t> last_valid;
+		while (low <= high) {
+			mid = ((unsigned int) low + (unsigned int) high) >> 1;
+			size = nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Branch(std::vector<Ref>(mid), std::vector<Position>(mid))), {}, true});
+
+			if (size < Page::size()) {
+				low = mid + 1;
+				last_valid = {mid, size};
+			}
+			else if (size > Page::size())
+				high = mid - 1;
+			else
+				break;
+		}
+		if (size > Page::size()) {
+			assert(last_valid.second <= Page::size());
+			return last_valid.first;
+		}
+		return mid;
+	}
 
 	//! Number of entries in branch and leaf nodes may differ
-	static inline constexpr int NUM_LINKS_BRANCH = BTREE_NODE_SIZE / (sizeof(Position) + sizeof(Ref));
-	static inline constexpr int NUM_RECORDS_BRANCH = NUM_LINKS_BRANCH - 1;
+	int NUM_LINKS_BRANCH = _calc_num_links_branch();
+	int NUM_RECORDS_BRANCH = NUM_LINKS_BRANCH - 1;
+
+	//! Equivalent to `m` in Knuth's definition
+	//! Make sure that when a leaf is split, its contents could be distributed among the two branch nodes.
+	int _NUM_RECORDS_LEAF = _calc_num_records_leaf();
+	int NUM_RECORDS_LEAF = _NUM_RECORDS_LEAF - 1 >= NUM_RECORDS_BRANCH * 2
+	        ? NUM_RECORDS_BRANCH * 2 - 1
+	        : _NUM_RECORDS_LEAF;
 
 	static inline constexpr bool APPLY_COMPRESSION = Config::APPLY_COMPRESSION;
 	static inline constexpr int PAGE_CACHE_SIZE = Config::PAGE_CACHE_SIZE;
@@ -61,10 +114,10 @@ class Btree final {
 public:
 	struct Header {
 		Position m_rootpos;
-		std::size_t m_size;
+		std::size_t m_size{};
+		std::size_t m_depth{};
 		uint32_t m_magic{MAGIC};
 		uint32_t m_pgcache_size{PAGE_CACHE_SIZE};
-		uint32_t m_btree_node_size{BTREE_NODE_SIZE};
 		uint8_t m_apply_compression{APPLY_COMPRESSION};
 
 		/*
@@ -82,24 +135,28 @@ public:
 		bool m_dirty{false};
 
 		Header() = default;
-		explicit Header(Position rootpos, std::size_t size, std::string_view content_file)
+		explicit Header(Position rootpos, std::size_t size, std::size_t depth, std::string_view content_file)
 		    : m_rootpos{rootpos},
 		      m_size{size},
+		      m_depth{depth},
 		      m_content_file{std::string{content_file}} {}
 
-		void set_rootpos(Position rootpos) noexcept { m_rootpos = rootpos; }
-		void set_size(std::size_t size) noexcept { m_size = size; }
-		bool &dirty() noexcept { return m_dirty; }
+		[[nodiscard]] auto &rootpos() noexcept { return m_rootpos; }
+
+		[[nodiscard]] auto &size() noexcept { return m_size; }
+
+		[[nodiscard]] auto &depth() noexcept { return m_depth; }
+
+		[[nodiscard]] auto &dirty() noexcept { return m_dirty; }
 
 		auto operator<=>(const Header &) const noexcept = default;
 
 		friend std::ostream &operator<<(std::ostream &os, const Header &h) {
-			os << "Header { .rootpos = " << h.m_rootpos << ", .size =" << h.m_size << " }";
+			os << "Header { .rootpos = " << h.m_rootpos << ", .size =" << h.m_size << ", .depth =" << h.m_depth << " }";
 			return os;
 		}
 
-		NOP_STRUCTURE(Header, m_rootpos, m_size, m_magic, m_pgcache_size,
-		              m_btree_node_size, m_apply_compression, m_content_file);
+		NOP_STRUCTURE(Header, m_rootpos, m_size, m_depth, m_magic, m_pgcache_size, m_apply_compression, m_content_file);
 	};
 
 private:
@@ -134,32 +191,25 @@ private:
 	}
 
 	Nod make_new_root() {
-		fmt::print("Making new root node\n");
-
 		auto old_root = root();
 		auto old_pos = m_rootpos;
-		fmt::print("Old is @{}\n", old_pos);
 
 		auto new_pos = m_pgcache.get_new_pos();
-		fmt::print("New is @{}\n", new_pos);
 
 		old_root.set_parent(new_pos);
 		old_root.set_root(false);
 
 		auto [midkey, sibling] = node_split(old_root);
 		auto sibling_pos = m_pgcache.get_new_pos();
-		fmt::print("Sibling is @{}\n", sibling_pos);
 
 		Nod new_root{typename Nod::Metadata(typename Nod::Branch({midkey}, {old_pos, sibling_pos})), new_pos, true};
 
 		m_pgcache.put_page(new_pos, new_root.make_page());
 		m_pgcache.put_page(old_pos, old_root.make_page());
 		m_pgcache.put_page(sibling_pos, sibling.make_page());
-		fmt::print("Stored the 3 nodes\n");
 
 		m_rootpos = new_pos;
-		fmt::print("Updated m_rootpos to match new_pos (@{})\n", new_pos);
-		fmt::print("\n");
+		++m_depth;
 		m_header.m_dirty = true;
 
 		return new_root;
@@ -176,9 +226,12 @@ public:
 
 	[[nodiscard]] std::size_t size() { return m_size; }
 
+	[[nodiscard]] std::size_t depth() { return m_depth; }
+
 	[[nodiscard]] auto num_records_leaf() const noexcept { return NUM_RECORDS_LEAF; }
 
 	[[nodiscard]] auto num_records_branch() const noexcept { return NUM_RECORDS_BRANCH; }
+
 public:
 	/*
 	 *  Operations API
@@ -208,11 +261,12 @@ public:
 				break;
 			}
 
-			/* fmt::print(" -- Searching in branch ... \n"); */
 			auto &refs = curr.branch().m_refs;
 			auto &links = curr.branch().m_links;
+
 			const std::size_t index = std::lower_bound(refs.cbegin(), refs.cend(), key) - refs.cbegin();
-			const Position child_pos = links[index];
+			const Position &child_pos = links[index];
+			assert(child_pos.is_set());
 			auto child = Nod::from_page(m_pgcache.get_page(child_pos));
 
 			if (!is_node_full(child)) {
@@ -221,27 +275,15 @@ public:
 				continue;
 			}
 
-			fmt::print("Splitting non-root node.\n");
-
-			fmt::print("Node @{}\n", child_pos);
 			auto [midkey, sibling] = node_split(child);
-			fmt::print("Midkey = {}\n", midkey);
-
-			auto child_page = child.make_page();
-			assert(child == Nod::from_page(child_page));
-			m_pgcache.put_page(child_pos, std::move(child_page));
-			fmt::print("Child node @{}\n", child_pos);
 			auto sibling_pos = m_pgcache.get_new_pos();
-			auto sibling_page = sibling.make_page();
-			m_pgcache.put_page(sibling_pos, std::move(sibling_page));
-			assert(sibling == Nod::from_page(sibling_page));
-			fmt::print("Sibling node @{}\n", sibling_pos);
 
 			refs.insert(refs.begin() + index, midkey);
 			links.insert(links.begin() + index + 1, sibling_pos);
-			m_pgcache.put_page(currpos, curr.make_page());
-			fmt::print("Stored midkey and sibling_pos in parent.\n");
-			fmt::print("\n");
+
+			m_pgcache.put_page(sibling_pos, std::move(sibling.make_page()));
+			m_pgcache.put_page(child_pos, std::move(child.make_page()));
+			m_pgcache.put_page(currpos, std::move(curr.make_page()));
 
 			if (key < midkey) {
 				curr = std::move(child);
@@ -261,38 +303,48 @@ public:
 		return search_subtree(root(), key).has_value();
 	}
 
-public:
-	/*
-	 *  Persistence API
-	 */
-
+private:
 	void save_header() const noexcept {
 		if (m_header.dirty()) {
-			/* fmt::print("Dirty header. Still at rootpos = {}, setting to {}\n", m_header.m_rootpos, m_rootpos); */
-			m_header.set_rootpos(m_rootpos);
-			m_header.set_size(m_size);
+			m_header.rootpos() = m_rootpos;
+			m_header.size() = m_size;
 			m_header.dirty() = false;
 		}
 
 		nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{m_header_name.data(), std::ios::trunc};
 		serializer.Write(m_header) || nop::Die(std::cerr);
-		/* fmt::print("Stored btree header\n"); */
-		std::cout << m_header << "\n";
 	}
 
 	bool load_header() {
 		nop::Deserializer<nop::StreamReader<std::ifstream>> deserializer{m_header_name.data()};
 		deserializer.Read(&m_header) || nop::Die(std::cerr);
-		/* fmt::print("Loaded btree header\n"); */
 		std::cout << m_header << "\n";
 		return true;
 	}
 
-	void load_root() {
-		if (load_header()) {
-			m_rootpos = m_header.m_rootpos;
-			m_size = m_header.m_size;
-		}
+	void bare_init() noexcept {
+		m_rootpos = m_pgcache.get_new_pos();
+		Nod root_initial{typename Nod::Metadata(typename Nod::Leaf({}, {})), m_rootpos, true};
+		m_pgcache.put_page(m_rootpos, std::move(root_initial.make_page()));
+
+		// Fill in initial header
+		m_header.rootpos() = m_rootpos;
+		m_header.size() = m_size;
+		m_header.depth() = m_depth;
+	}
+
+public:
+	/*
+	 *  Persistence API
+	 */
+
+	void load() {
+		auto ok = load_header();
+		assert(ok);
+
+		m_rootpos = m_header.m_rootpos;
+		m_size = m_header.m_size;
+		m_depth = m_header.m_depth;
 	}
 
 	void save() const {
@@ -303,21 +355,17 @@ public:
 public:
 	explicit Btree(std::string_view pgcache_name,
 	               std::string_view btree_header_name = "/tmp/eu-btree-header",
-	               bool load = false)
+	               bool should_load = false)
 	    : m_pgcache{pgcache_name, PAGE_CACHE_SIZE},
-	      m_header{m_pgcache.get_new_pos(), 0, pgcache_name},
 	      m_header_name{btree_header_name} {
 
-		/* fmt::print("Constructing btree\n"); */
+		assert(NUM_RECORDS_BRANCH > 1);
+		assert(NUM_RECORDS_LEAF > 1);
 
-		if (load) {
-			load_root();
-		} else {
-			m_rootpos = m_header.m_rootpos;
-			m_pgcache.put_page(m_rootpos,
-			                   Nod{typename Nod::Metadata(typename Nod::Leaf({}, {})), rootpos(), true}.make_page());
-			m_size = 0;
-		}
+		if (should_load)
+			load();
+		else
+			bare_init();
 	}
 
 private:
@@ -328,7 +376,9 @@ private:
 
 	Position m_rootpos;
 
-	std::size_t m_size;
+	std::size_t m_size{0};
+
+	std::size_t m_depth{0};
 };
 
 }// namespace internal::storage::btree

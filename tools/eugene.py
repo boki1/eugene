@@ -128,7 +128,6 @@ def do_config():
     print("-- Initialized compile db")
 
 def do_build(test=False, doc=False):
-    do_config()
     ninja_command="ninja -Cbuild -j4"
     if test:
         os.environ["EUGENE_BUILD_TESTS"] = "1"
@@ -146,7 +145,7 @@ def do_run():
 def do_run_test():
     print_style("Running tests")
     # runtest_cmd = "ctest --rerun-failed --output-on-failure --test-dir build/".split()
-    runtest_cmd ="ctest -VV --no-tests=error --rerun-failed --output-on-failure --test-dir build/".split()
+    runtest_cmd ="ctest --no-tests=error --rerun-failed --output-on-failure --test-dir build/".split()
     sp.run(runtest_cmd)
 
 
@@ -193,7 +192,7 @@ def parse(cmd_line, cmd, cmd_args, cmd_argc):
     elif cmd == 'config':
         assert cmd_argc == 0
         do_config()
-    
+
     elif cmd == 'test':
         do_build(test=True, doc=False)
         if cmd_argc == 1 and 'run' in cmd_args[0]:

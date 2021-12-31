@@ -66,7 +66,7 @@ TEST_CASE("Btree operations", "[btree]") {
 	fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
 	fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
 
-	static const std::size_t limit = 1000000;
+	static const std::size_t limit = 10000;
 
 	std::map<Config::Key, Config::Val> backup;
 	while (backup.size() != limit) {
@@ -91,12 +91,13 @@ TEST_CASE("Header operations", "[btree]") {
 	truncate_file("/tmp/eu-headerops");
 	truncate_file("/tmp/eu-headerops-header");
 	Btree bpt("/tmp/eu-headerops", "/tmp/eu-headerops-header");
-	bpt.save_header();
+	bpt.save();
 
 	Btree bpt2("/tmp/eu-headerops", "/tmp/eu-headerops-header");
-	bpt2.header().m_size = 100;
+	bpt2.header().size() = 100;
+	bpt2.header().depth() = 1;
 
-	REQUIRE(bpt2.load_header());
+	bpt2.load();
 
 	REQUIRE(bpt.header() == bpt2.header());
 }
@@ -130,20 +131,17 @@ TEST_CASE("Persistent Btree", "[btree]") {
 	}
 
 	{
-		// fmt::print("\nV2 ---\n");
-		// Btree bpt("/tmp/eu-persistent-btree", "/tmp/eu-persistent-btree-header", true);
+		 fmt::print("\nV2 ---\n");
+		 Btree bpt("/tmp/eu-persistent-btree", "/tmp/eu-persistent-btree-header", true);
 
-		// REQUIRE(bpt.rootpos() == rootpos);
+		 REQUIRE(bpt.rootpos() == rootpos);
 
-		/*
 		for (auto &[key, val] : backup) {
 			REQUIRE(bpt.get(key).value() == val);
 			fmt::print("-- '{}' => '{}'\n", key, val);
 		}
-		*/
 	}
 
-	/*
 	{
 		Btree bpt("/tmp/eu-persistent-btree", "/tmp/eu-persistent-btree-header", false);
 
@@ -153,28 +151,26 @@ TEST_CASE("Persistent Btree", "[btree]") {
 			fmt::print("-- {} -> Key '{}' found mapped to '{}'\n", i++, key, val);
 		}
 	}
-	*/
 }
 
 struct CustomConfigPrimitives : DefaultConfig {
-	using Key = char;
-	using Val = char;
-	using Ref = char;
+	using Key = double;
+	using Val = long long;
+	using Ref = double;
 };
 
 TEST_CASE("Custom Config Btree Primitive Type", "[btree]") {
 	truncate_file("/tmp/eu-btree-ops-custom-types");
 	Btree<CustomConfigPrimitives> bpt("/tmp/eu-btree-ops-custom-types");
-	static const std::size_t limit = 255;
+	static const std::size_t limit = 10000;
 
 	fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
 	fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
 
 	std::map<CustomConfigPrimitives::Key, CustomConfigPrimitives::Val> backup;
-	char f = 0;
 	while (backup.size() != limit) {
-		auto key = f;  //item<float>();
-		auto val = f++;//item<float>();
+		double key = item<float>();
+		long long val = item<int>();
 		bpt.put(key, val);
 		backup.emplace(key, val);
 	}
@@ -192,7 +188,7 @@ TEST_CASE("Custom Config Btree Primitive Type", "[btree]") {
 
 struct Person {
 	std::string name;
-	int age;
+	int age{};
 	std::string email;
 
 	auto operator<=>(const Person &) const noexcept = default;

@@ -46,6 +46,8 @@ public:
 	 * it is added using the put_page() mechanism.
 	 */
 	Page &get_page(Position page_pos) {
+		assert(page_pos.is_set());
+
 		if (!m_index.contains(page_pos)) {
 			static auto p = Page();
 			put_page(page_pos, std::move(m_pager.fetch(p, page_pos)));
@@ -64,6 +66,7 @@ public:
 	 * least recently used page is evicted.
 	 */
 	void put_page(Position page_pos, Page &&page) {
+		assert(page_pos.is_set());
 		assert(m_index.size() <= m_limit);
 
 		const auto it = m_index.find(page_pos);
