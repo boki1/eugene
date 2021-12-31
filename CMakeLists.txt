@@ -61,8 +61,6 @@ target_link_libraries(LibEugeneCore
         CONAN_PKG::catch2
         CONAN_PKG::cppbenchmark)
 
-add_executable(BtreeBench src/core/storage/btree/Bench.cpp)
-target_link_libraries(BtreeBench LibEugeneCore)
 
 if (DEFINED ENV{EUGENE_BUILD_TESTS})
     macro(eugene_test component path_prefix)
@@ -84,9 +82,13 @@ if (DEFINED ENV{EUGENE_BUILD_TESTS})
     eugene_test(PageCache src/core/storage)
 endif ()
 
+
 if (DEFINED ENV{EUGENE_BUILD_BENCHMARKS})
     add_executable(benchmark src/core/storage/compression/BenchmarkCompression.cpp)
     target_link_libraries(benchmark PUBLIC LibEugeneCore)
+
+    add_executable(BtreeBench src/core/storage/btree/Bench.cpp)
+    target_link_libraries(BtreeBench PUBLIC LibEugeneCore)
 
     message("-- Building benchmarks")
 endif ()
