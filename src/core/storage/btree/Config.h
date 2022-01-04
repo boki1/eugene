@@ -10,9 +10,9 @@
 namespace internal::storage::btree {
 
 struct Config {
-	using Key = uint32_t;
-	using Val = uint32_t;
-	using Ref = uint32_t;
+	using Key = int;
+	using Val = int;
+	using Ref = int;
 
 	static inline constexpr int PAGE_CACHE_SIZE = 1_MB;
 	static inline constexpr bool APPLY_COMPRESSION = true;

@@ -31,7 +31,7 @@ static Nod make_node() {
 	std::uniform_int_distribution<std::mt19937::result_type> dist128(1, 128);
 
 	std::vector<Position> a;
-	std::vector<uint32_t> b;
+	std::vector<DefaultConfig::Key> b;
 	for (std::size_t i = 0; i < dist128(rng); ++i)
 		if (dist128(rng) % 2)
 			a.push_back(dist128(rng));
@@ -158,7 +158,7 @@ TEST_CASE("Split full nodes", "[btree]") {
 	auto &branch_sib = branch_sib_node.branch();
 	auto &leaf_sib = leaf_sib_node.leaf();
 
-	for (uint32_t i = 0; i < branch_midkey; ++i) {
+	for (decltype(branch_midkey) i = 0; i < branch_midkey; ++i) {
 		REQUIRE(contains(b.m_refs, i));
 		REQUIRE(contains(b.m_links, static_cast<long>(i)));
 		REQUIRE(!contains(branch_sib.m_refs, i));
@@ -167,7 +167,7 @@ TEST_CASE("Split full nodes", "[btree]") {
 	REQUIRE(contains(b.m_links, static_cast<long>(branch_midkey)));
 	REQUIRE(!contains(branch_sib.m_links, static_cast<long>(branch_midkey)));
 
-	for (uint32_t i = 0; i <= leaf_midkey; ++i) {
+	for (decltype(leaf_midkey) i = 0; i <= leaf_midkey; ++i) {
 		REQUIRE(contains(l.m_keys, i));
 		REQUIRE(contains(l.m_vals, i));
 		REQUIRE(!contains(leaf_sib.m_keys, i));

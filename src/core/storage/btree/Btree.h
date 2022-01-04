@@ -95,6 +95,7 @@ class Btree final {
 		return mid;
 	}
 
+public:
 	//! Number of entries in branch and leaf nodes may differ
 	int NUM_LINKS_BRANCH = _calc_num_links_branch();
 	int NUM_RECORDS_BRANCH = NUM_LINKS_BRANCH - 1;
@@ -106,6 +107,7 @@ class Btree final {
 	        ? NUM_RECORDS_BRANCH * 2 - 1
 	        : _NUM_RECORDS_LEAF;
 
+private:
 	static inline constexpr bool APPLY_COMPRESSION = Config::APPLY_COMPRESSION;
 	static inline constexpr int PAGE_CACHE_SIZE = Config::PAGE_CACHE_SIZE;
 
@@ -224,7 +226,13 @@ public:
 
 	[[nodiscard]] const auto &rootpos() const noexcept { return m_rootpos; }
 
-	[[nodiscard]] std::size_t size() { return m_size; }
+	[[nodiscard]] std::size_t size() noexcept { return m_size; }
+
+	[[nodiscard]] std::size_t size() const noexcept { return m_size; }
+
+	[[nodiscard]] bool empty() const noexcept { return size() == 0; }
+
+	[[nodiscard]] bool empty() noexcept { return size() == 0; }
 
 	[[nodiscard]] std::size_t depth() { return m_depth; }
 
@@ -238,8 +246,8 @@ public:
 	 */
 
 	void put(const Self::Key &key, const Self::Val &val) {
-		auto currpos{rootpos()};
-		auto curr{root()};
+		Position currpos{rootpos()};
+		Nod curr{root()};
 
 		if (is_node_full(curr))
 			curr = make_new_root();
@@ -265,18 +273,21 @@ public:
 			auto &links = curr.branch().m_links;
 
 			const std::size_t index = std::lower_bound(refs.cbegin(), refs.cend(), key) - refs.cbegin();
-			const Position &child_pos = links[index];
+			const Position child_pos = links[index];
 			assert(child_pos.is_set());
 			auto child = Nod::from_page(m_pgcache.get_page(child_pos));
 
 			if (!is_node_full(child)) {
-				curr = std::move(child);
 				currpos = child_pos;
+				curr = std::move(child);
 				continue;
 			}
 
 			auto [midkey, sibling] = node_split(child);
 			auto sibling_pos = m_pgcache.get_new_pos();
+
+			assert(std::find(refs.cbegin(), refs.cend(), midkey) == refs.cend());
+			assert(std::find(links.cbegin(), links.cend(), sibling_pos) == links.cend());
 
 			refs.insert(refs.begin() + index, midkey);
 			links.insert(links.begin() + index + 1, sibling_pos);
@@ -286,11 +297,11 @@ public:
 			m_pgcache.put_page(currpos, std::move(curr.make_page()));
 
 			if (key < midkey) {
-				curr = std::move(child);
 				currpos = child_pos;
+				curr = std::move(child);
 			} else if (key > midkey) {
-				curr = std::move(sibling);
 				currpos = sibling_pos;
+				curr = std::move(sibling);
 			}
 		}
 	}
@@ -382,22 +393,3 @@ private:
 };
 
 }// namespace internal::storage::btree
-
-/*
- * Why doesn't this work??
- *
-template<>
-template<internal::storage::btree::BtreeConfig Conf>
-struct fmt::formatter<internal::storage::btree::Btree<Conf>::Header> {
-
-	template<typename ParseContext>
-	constexpr auto parse(ParseContext &ctx) {
-		return ctx.begin();
-	}
-
-	template<typename FormatContext>
-	auto format(const internal::storage::btree::Btree<Conf>::Header &h, FormatContext &ctx) {
-		return fmt::format_to(ctx.out(), "Header {{ .rootpos='{}', .dirty={}, .records='{}' }}", h.m_rootpos, h.m_dirty, h.m_numrecords);
-	}
-};
-*/
