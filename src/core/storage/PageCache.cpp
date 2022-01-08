@@ -3,8 +3,7 @@
 #include <fstream>
 #include <filesystem>
 
-#include "catch2/catch.hpp"
-
+#include <catch2/catch.hpp>
 
 #include <core/storage/PageCache.h>
 #include <core/storage/Page.h>
@@ -15,7 +14,12 @@ using namespace internal::storage;
 static constexpr std::string_view test_output_fname = "/tmp/eu-bufpool-test1";
 static constexpr std::size_t test_num_pages = 3;
 
+void truncate_file(std::string_view fname) {
+	std::ofstream of{std::string{fname}, std::ios::trunc};
+}
+
 TEST_CASE("buffer-pool-ops", "[bufpool]") {
+	truncate_file(test_output_fname);
 	PageCache pgcache(test_output_fname, PageCache::min_size());
 	REQUIRE(!pgcache.full());
 
