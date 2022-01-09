@@ -85,8 +85,11 @@ if (DEFINED ENV{EUGENE_BUILD_BENCHMARKS})
     add_executable(BtreeBench src/core/storage/btree/Bench.cpp)
     target_link_libraries(BtreeBench LibEugeneCore)
 
-    add_executable(benchmark src/core/storage/compression/BenchmarkCompression.cpp)
-    target_link_libraries(benchmark PUBLIC LibEugeneCore)
+    add_executable(bench_comp src/core/storage/compression/BenchCompressor.cpp)
+    target_link_libraries(bench_comp PUBLIC LibEugeneCore)
+
+	add_executable(bench_decomp src/core/storage/compression/BenchDecompressor.cpp)
+	target_link_libraries(bench_decomp PUBLIC LibEugeneCore)
 
     message("-- Building benchmarks")
 endif()

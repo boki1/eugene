@@ -5,8 +5,8 @@ fmt/8.0.1
 spdlog/1.9.2
 ms-gsl/3.1.0
 libnop/cci.20200728
-cppbenchmark/cci.20201029
 nlohmann_json/3.10.4
+benchmark/1.6.0
 
 [generators]
 cmake
