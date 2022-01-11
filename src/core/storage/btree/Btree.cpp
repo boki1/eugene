@@ -137,7 +137,7 @@ TEST_CASE("Btree operations", "[btree]") {
 	fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
 	fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
 
-	static const std::size_t limit = 100000;
+	static const std::size_t limit = 1000;
 	auto backup = fill_tree(bpt, limit);
 
 	util::BtreePrinter{bpt, "/tmp/eu-btree-ops-printed"}();
@@ -202,7 +202,7 @@ struct CustomConfigPrimitives : DefaultConfig {
 TEST_CASE("Custom Config Btree Primitive Type", "[btree]") {
 	truncate_file("/tmp/eu-btree-ops-custom-types");
 	Btree<CustomConfigPrimitives> bpt("/tmp/eu-btree-ops-custom-types");
-	static const std::size_t limit = 10000;
+	static const std::size_t limit = 1000;
 
 	fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
 	fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
@@ -285,7 +285,7 @@ TEST_CASE("Custom Config Btree Aggregate Type", "[btree]") {
 	fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
 	fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
 
-	static const std::size_t limit = 100000;
+	static const std::size_t limit = 1000;
 	auto backup = fill_tree(bpt, limit);
 
 	util::BtreePrinter{bpt, "/tmp/eu-btree-aggregatetype-printed"}();

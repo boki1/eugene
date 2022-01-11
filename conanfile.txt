@@ -1,5 +1,4 @@
 [requires]
-outcome/2.2.1
 catch2/2.13.7
 fmt/8.0.1
 spdlog/1.9.2

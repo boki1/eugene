@@ -53,7 +53,6 @@ target_include_directories(LibEugeneCore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src
 target_link_libraries(LibEugeneCore
         CONAN_PKG::fmt
         CONAN_PKG::ms-gsl
-        CONAN_PKG::outcome
         CONAN_PKG::catch2
         CONAN_PKG::spdlog
         CONAN_PKG::libnop
