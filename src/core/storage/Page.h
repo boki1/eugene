@@ -49,7 +49,7 @@ public:
 
 	void write(Position pos, data_citerator data_begin, data_citerator data_end) noexcept {
 		auto numbytes = std::distance(data_begin, data_end);
-		if (pos + numbytes > Position(size()))
+		if (pos + numbytes > size())
 			return;
 		for (unsigned i = 0; i < numbytes; ++i)
 			*(raw() + pos + i) = *(data_begin + i);
@@ -63,7 +63,7 @@ public:
 	}
 
 	std::optional<std::pair<data_citerator, data_citerator>> read(Position pos, uint32_t numbytes) noexcept {
-		if (pos + numbytes > Position(size()))
+		if (pos + numbytes > size())
 			return std::nullopt;
 		auto it_begin = m_data.cbegin() + pos;
 		auto it_end = m_data.cbegin() + pos + numbytes;
@@ -83,7 +83,7 @@ public:
 
 	[[nodiscard]] bool dirty() const noexcept { return m_dirty; }
 
-	[[nodiscard]] static constexpr std::size_t size() noexcept { return Page::SIZE; }
+	[[nodiscard]] static constexpr long size() noexcept { return Page::SIZE; }
 
 	void mark_dirty() noexcept { m_dirty = true; }
 private:

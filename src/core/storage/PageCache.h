@@ -35,7 +35,7 @@ class PageCache {
 public:
 	template<typename String>
 	explicit PageCache(String &&pager_fname, uint32_t size = 1_MB)
-	    : m_limit{size / Page::size()},
+	    : m_limit{static_cast<std::size_t>(size / Page::size())},
 	      m_pager{std::forward<String>(pager_fname)} {
 		assert(m_limit > 0);
 	}
@@ -82,9 +82,8 @@ public:
 		}
 
 		m_index[page_pos] = CacheEntry{
-			.m_page = page,
-			.m_cit = m_tracker.cend()
-		};
+		        .m_page = page,
+		        .m_cit = m_tracker.cend()};
 	}
 
 	void flush_all() {

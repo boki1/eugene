@@ -23,8 +23,8 @@ public:
 	/*
 	 * Intentionally implicit
 	 */
-	constexpr Position(long pos) : m_pos{pos}, m_isset{true} {}
-	constexpr operator long() { return m_pos; }
+	constexpr Position(int pos) : m_pos{pos}, m_isset{true} {}
+	constexpr operator int() { return m_pos; }
 
 	constexpr static auto poison() { return Position(); }
 

@@ -41,68 +41,20 @@ class Btree final {
 
 	friend util::BtreePrinter<Config>;
 
-	static auto _calc_num_records_leaf() {
-		std::size_t low = 2;
-		std::size_t high = Page::size() / sizeof(uint8_t);
-
-		int mid = 0;
-		std::size_t size;
-		std::pair<int, std::size_t> last_valid;
-		while (low <= high) {
-			mid = ((unsigned int) low + (unsigned int) high) >> 1;
-			size = nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Leaf(std::vector<Key>(mid), std::vector<Val>(mid))), {}, true});
-
-			if (size < Page::size()) {
-				low = mid + 1;
-				last_valid = {mid, size};
-			}
-			else if (size > Page::size())
-				high = mid - 1;
-			else
-				break;
-		}
-		if (size > Page::size()) {
-			assert(last_valid.second <= Page::size());
-			return last_valid.first;
-		}
-		return mid;
-	}
-
-	static auto _calc_num_links_branch() {
-		std::size_t low = 2;
-		std::size_t high = Page::size() / sizeof(uint8_t);
-
-		int mid = 0;
-		std::size_t size;
-		std::pair<int, std::size_t> last_valid;
-		while (low <= high) {
-			mid = ((unsigned int) low + (unsigned int) high) >> 1;
-			size = nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Branch(std::vector<Ref>(mid), std::vector<Position>(mid))), {}, true});
-
-			if (size < Page::size()) {
-				low = mid + 1;
-				last_valid = {mid, size};
-			}
-			else if (size > Page::size())
-				high = mid - 1;
-			else
-				break;
-		}
-		if (size > Page::size()) {
-			assert(last_valid.second <= Page::size());
-			return last_valid.first;
-		}
-		return mid;
-	}
-
 public:
 	//! Number of entries in branch and leaf nodes may differ
-	int NUM_LINKS_BRANCH = _calc_num_links_branch();
+	//! Directly unwrap with `.value()` since we _want to fail at compile time_ in case their is no value which
+	//! satisfies the predicates
+	int NUM_LINKS_BRANCH = ::internal::binsearch_primitive(2l, Page::size(), [](long current, long, long)
+			{ return nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Branch(std::vector<Ref>(current), std::vector<Position>(current))), {}, true}) - Page::size(); }).value();
 	int NUM_RECORDS_BRANCH = NUM_LINKS_BRANCH - 1;
 
 	//! Equivalent to `m` in Knuth's definition
 	//! Make sure that when a leaf is split, its contents could be distributed among the two branch nodes.
-	int _NUM_RECORDS_LEAF = _calc_num_records_leaf();
+	//! Directly unwrap with `.value()` since we _want to fail at compile time_ in case their is no value which
+	//! satisfies the predicates
+	int _NUM_RECORDS_LEAF = ::internal::binsearch_primitive(2l, Page::size(), [](long current, long, long)
+			{ return nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Leaf(std::vector<Key>(current), std::vector<Val>(current))), {}, true}) - Page::size(); }).value();
 	int NUM_RECORDS_LEAF = _NUM_RECORDS_LEAF - 1 >= NUM_RECORDS_BRANCH * 2
 	        ? NUM_RECORDS_BRANCH * 2 - 1
 	        : _NUM_RECORDS_LEAF;

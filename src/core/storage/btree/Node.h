@@ -22,7 +22,7 @@
 
 namespace internal::storage::btree {
 
-template<BtreeConfig Config>
+template<BtreeConfig aonfig>
 class Btree;
 
 template<BtreeConfig Config = DefaultConfig>
