@@ -41,3 +41,5 @@ before_script:
 script:
   - export EUGENE_BUILD_TESTS=1
   - cmake cmake -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11 .
+  - cmake --build . --config RelWithDebInfo
+  - ctest -VV -C RelWithDebInfo --no-tests=error --rerun-failed --output-on-failure

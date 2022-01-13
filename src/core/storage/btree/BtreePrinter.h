@@ -62,7 +62,7 @@ public:
 	}
 
 	void print() noexcept {
-		m_out << "keys_per_block: " << Bt::NUM_RECORDS_LEAF << '\n';
+		m_out << "keys_per_block: " << m_btree.num_records_leaf() << '\n';
 		m_out << "tree:\n";
 
 		print_node(node_at(m_btree.rootpos()));

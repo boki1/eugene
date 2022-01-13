@@ -22,7 +22,7 @@
 
 namespace internal::storage::btree {
 
-template<BtreeConfig Config>
+template<BtreeConfig aonfig>
 class Btree;
 
 template<BtreeConfig Config = DefaultConfig>
@@ -83,9 +83,9 @@ public:
 	[[nodiscard]] bool is_under(long m) const noexcept { return num_filled() < m / 2 && !m_is_root; }
 
 public:
-	Node() : m_metadata{} {}
+	constexpr Node() : m_metadata{} {}
 
-	Node(Metadata &&metadata, Position parent_pos, bool is_root = false)
+	constexpr Node(Metadata &&metadata, Position parent_pos, bool is_root = false)
 	    : m_metadata{std::move(metadata)},
 	      m_is_root{is_root},
 	      m_parent_pos{parent_pos} {}
@@ -126,7 +126,7 @@ public:
 	[[nodiscard]] Page make_page() const noexcept {
 		auto p = Page::empty();
 		nop::Serializer<nop::BufferWriter> serializer{p.raw(), Page::size()};
-		serializer.Write(*this);
+		serializer.Write(*this) || nop::Die(std::cout);
 		p.mark_dirty();
 		return p;
 	}
