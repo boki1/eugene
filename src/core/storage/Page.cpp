@@ -30,7 +30,7 @@ TEST_CASE("Page", "[page]") {
 	std::array<uint8_t, Page::size()> p2_data;
 	std::iota(p2_data.begin(), p2_data.end(), 2);
 	Page p2(std::move(p2_data));
-	REQUIRE(pr.sync(p2, p2_pos) == (long) p2_pos);
+	REQUIRE(pr.sync(p2, p2_pos) == p2_pos);
 
 	pr.fetch(p3, 0);
 	REQUIRE(p3 == p1);

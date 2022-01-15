@@ -29,8 +29,8 @@ public:
 
 	static Page empty() noexcept { return Page(); }
 
-	explicit Page(std::array<uint8_t, Page::SIZE> &&data, bool used = true)
-	    : m_data{std::move(data)}, m_used{used} {}
+	explicit Page(std::array<uint8_t, Page::SIZE> &&data)
+	    : m_data{std::move(data)}  {}
 
 	Page(const Page &) = default;
 	Page(Page &&) = default;
@@ -41,7 +41,7 @@ public:
 	using data_citerator = std::array<uint8_t, Page::SIZE>::const_iterator;
 
 	void write(Position pos, int8_t d) noexcept {
-		if (pos + 1 > (long) size())
+		if (pos + 1 > size())
 			return;
 		*(raw() + pos) = d;
 		m_dirty = true;
@@ -57,7 +57,7 @@ public:
 	}
 
 	std::optional<uint8_t> read(Position pos) noexcept {
-		if (pos + 1 > (long) size())
+		if (pos + 1 > size())
 			return {};
 		return *(raw() + pos);
 	}
@@ -79,16 +79,13 @@ public:
 
 	[[nodiscard]] std::array<uint8_t, Page::SIZE> &get() noexcept { return m_data; }
 
-	[[nodiscard]] bool used() const noexcept { return m_used; }
-
 	[[nodiscard]] bool dirty() const noexcept { return m_dirty; }
 
-	[[nodiscard]] static constexpr long size() noexcept { return Page::SIZE; }
+	[[nodiscard]] static constexpr std::size_t size() noexcept { return Page::SIZE; }
 
 	void mark_dirty() noexcept { m_dirty = true; }
 private:
 	std::array<uint8_t, Page::SIZE> m_data;
-	bool m_used = false;
 	bool m_dirty = false;
 };
 
@@ -107,7 +104,7 @@ public:
 
 	Position sync(const Page &page, std::optional<Position> pos_opt = {}) noexcept {
 		Position sync_pos = pos_opt.value_or(m_cursor);
-		m_file.seekp((long) sync_pos);
+		m_file.seekp(sync_pos);
 		m_file.write(reinterpret_cast<const char *>(page.raw()), Page::size());
 		if (!pos_opt)
 			m_cursor += Page::size();
@@ -115,7 +112,7 @@ public:
 	}
 
 	Page &fetch(Page &page, Position pos) noexcept {
-		m_file.seekp((long) pos);
+		m_file.seekp(pos);
 		m_file.read(reinterpret_cast<char *>(&page), Page::size());
 		return page;
 	}
@@ -127,7 +124,7 @@ public:
 	}
 
 private:
-	long m_cursor;
+	Position m_cursor;
 	std::fstream m_file;
 	std::string_view m_filename;
 };

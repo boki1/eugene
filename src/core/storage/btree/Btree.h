@@ -1,4 +1,5 @@
 #pragma once
+#include <cassert>
 #include <fstream>
 #include <memory>
 #include <optional>
@@ -45,19 +46,22 @@ public:
 	//! Number of entries in branch and leaf nodes may differ
 	//! Directly unwrap with `.value()` since we _want to fail at compile time_ in case their is no value which
 	//! satisfies the predicates
-	int NUM_LINKS_BRANCH = ::internal::binsearch_primitive(2l, Page::size(), [](long current, long, long)
-			{ return nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Branch(std::vector<Ref>(current), std::vector<Position>(current))), {}, true}) - Page::size(); }).value();
+	int NUM_LINKS_BRANCH = ::internal::binsearch_primitive(2ul, Page::size() / 2, [](auto current, auto, auto) {
+		                       auto sz = nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Branch(std::vector<Ref>(current), std::vector<Position>(current))), 10, true});
+		                       return sz - Page::size();
+	                       }).value_or(0);
 	int NUM_RECORDS_BRANCH = NUM_LINKS_BRANCH - 1;
 
 	//! Equivalent to `m` in Knuth's definition
 	//! Make sure that when a leaf is split, its contents could be distributed among the two branch nodes.
 	//! Directly unwrap with `.value()` since we _want to fail at compile time_ in case their is no value which
 	//! satisfies the predicates
-	int _NUM_RECORDS_LEAF = ::internal::binsearch_primitive(2l, Page::size(), [](long current, long, long)
-			{ return nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Leaf(std::vector<Key>(current), std::vector<Val>(current))), {}, true}) - Page::size(); }).value();
+	int _NUM_RECORDS_LEAF = ::internal::binsearch_primitive(1ul, Page::size() / 2, [](auto current, auto, auto) {
+		                        return nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Leaf(std::vector<Key>(current), std::vector<Val>(current))), 10, true}) - Page::size();
+	                        }).value_or(0);
 	int NUM_RECORDS_LEAF = _NUM_RECORDS_LEAF - 1 >= NUM_RECORDS_BRANCH * 2
 	        ? NUM_RECORDS_BRANCH * 2 - 1
-	        : _NUM_RECORDS_LEAF;
+	        : _NUM_RECORDS_LEAF - 1;
 
 private:
 	static inline constexpr bool APPLY_COMPRESSION = Config::APPLY_COMPRESSION;
@@ -226,7 +230,6 @@ public:
 
 			const std::size_t index = std::lower_bound(refs.cbegin(), refs.cend(), key) - refs.cbegin();
 			const Position child_pos = links[index];
-			assert(child_pos.is_set());
 			auto child = Nod::from_page(m_pgcache.get_page(child_pos));
 
 			if (!is_node_full(child)) {
@@ -275,7 +278,8 @@ private:
 		}
 
 		nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{m_header_name.data(), std::ios::trunc};
-		serializer.Write(m_header) || nop::Die(std::cerr);
+		if (!serializer.Write(m_header))
+			nop::Die(std::cerr);
 	}
 
 	bool load_header() {
@@ -322,6 +326,7 @@ public:
 	    : m_pgcache{pgcache_name, PAGE_CACHE_SIZE},
 	      m_header_name{btree_header_name} {
 
+		assert(NUM_LINKS_BRANCH >= 2);
 		assert(NUM_RECORDS_BRANCH > 1);
 		assert(NUM_RECORDS_LEAF > 1);
 

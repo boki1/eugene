@@ -25,25 +25,22 @@ template<typename T, typename F>
 constexpr std::optional<T> binsearch_primitive(T low, T high, F fun) {
 	std::optional<T> best;
 	T curr;
+	const T initial = low;
 
 	while (low <= high) {
 		curr = low + ((high - low) / 2);
 
 		if (int rc = fun(curr, low, high); rc <= 0) {
 			low = curr + 1;
-			best = curr;
+			if (best.value_or(initial) < curr)
+				best = curr;
 		} else if (rc > 0) {
 			high = curr - 1;
 		} else
 			return curr;
 	}
 
-	if (best) {
-		assert(best.value() > std::numeric_limits<T>::min());
-		return std::make_optional(best.value());
-	}
-
-	return {};
+	return best;
 }
 
 }// namespace internal
