@@ -15,6 +15,8 @@
 using namespace internal::storage::btree;
 using internal::storage::Position;
 
+#undef EU_PRINTING_TESTS
+
 template<typename T>
 T item();
 
@@ -41,7 +43,9 @@ auto fill_tree(Btree<Config> &bpt, std::size_t limit = 1000) {
 	using Key = typename Config::Key;
 	using Val = typename Config::Val;
 	std::map<Key, Val> backup;
-	// int i = 0;
+#ifdef EU_PRINTING_TESTS
+	int i = 0;
+#endif
 
 	while (backup.size() != limit) {
 		auto key = item<Key>();
@@ -51,7 +55,9 @@ auto fill_tree(Btree<Config> &bpt, std::size_t limit = 1000) {
 			continue;
 		}
 
-		// fmt::print("Element #{} inserted.\n", ++i);
+#ifdef EU_PRINTING_TESTS
+		fmt::print("Element #{} inserted.\n", ++i);
+#endif
 
 		bpt.put(key, val);
 		backup.emplace(key, val);
@@ -64,9 +70,13 @@ auto fill_tree(Btree<Config> &bpt, std::size_t limit = 1000) {
 template<BtreeConfig Config>
 void valid_tree(const Btree<Config> &bpt, const std::map<typename Config::Key, typename Config::Val> &backup) {
 	REQUIRE(bpt.size() == backup.size());
+#ifdef EU_PRINTING_TESTS
 	std::size_t i = 1;
+#endif
 	for (const auto &[key, val] : backup) {
+#ifdef EU_PRINTING_TESTS
 		fmt::print(" [{}]: '{}' => '{}'\n", i++, key, val);
+#endif
 		REQUIRE(bpt.get(key).value() == val);
 	}
 }
@@ -134,8 +144,10 @@ TEST_CASE("Btree operations", "[btree]") {
 	REQUIRE(bpt.contains(42) == false);
 	REQUIRE(bpt.get(42).has_value() == false);
 
+#ifdef EU_PRINTING_TESTS
 	fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
 	fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
+#endif
 
 	static const std::size_t limit = 1000;
 	auto backup = fill_tree(bpt, limit);
@@ -166,8 +178,10 @@ TEST_CASE("Persistent tree", "[btree]") {
 	std::map<typename DefaultConfig::Key, typename DefaultConfig::Val> backup;
 	Position rootpos;
 	{
-		fmt::print(" --- Btree #1\n");
+		fmt::print(" --- Btree #1 start\n");
 		Btree bpt("/tmp/eu-persistent-btree", "/tmp/eu-persistent-btree-header");
+		fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
+		fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
 		backup = fill_tree(bpt, 1000);
 		valid_tree(bpt, backup);
 
@@ -177,19 +191,21 @@ TEST_CASE("Persistent tree", "[btree]") {
 	}
 
 	{
-		fmt::print(" --- Btree #2\n");
+		fmt::print(" --- Btree #2 start\n");
 		Btree bpt("/tmp/eu-persistent-btree", "/tmp/eu-persistent-btree-header", true);
 
 		REQUIRE(bpt.rootpos() == rootpos);
 		valid_tree(bpt, backup);
+		fmt::print(" --- Btree #2 end (no save)\n");
 	}
 
 	{
-		fmt::print(" --- Btree #3\n");
+		fmt::print(" --- Btree #3 start\n");
 		Btree bpt("/tmp/eu-persistent-btree", "/tmp/eu-persistent-btree-header", false);
 		REQUIRE(bpt.size() == 0);
 		for (auto &[key, _] : backup)
 			REQUIRE(!bpt.contains(key));
+		fmt::print(" --- Btree #3 end (no save)\n");
 	}
 }
 
@@ -204,8 +220,10 @@ TEST_CASE("Custom Config Btree Primitive Type", "[btree]") {
 	Btree<CustomConfigPrimitives> bpt("/tmp/eu-btree-ops-custom-types");
 	static const std::size_t limit = 1000;
 
+#ifdef EU_PRINTING_TESTS
 	fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
 	fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
+#endif
 
 	std::map<CustomConfigPrimitives::Key, CustomConfigPrimitives::Val> backup;
 	while (backup.size() != limit) {
@@ -219,9 +237,14 @@ TEST_CASE("Custom Config Btree Primitive Type", "[btree]") {
 
 	REQUIRE(bpt.size() == limit);
 
+#ifdef EU_PRINTING_TESTS
 	std::size_t i = 1;
+#endif
+
 	for (const auto &[key, val] : backup) {
+#ifdef EU_PRINTING_TESTS
 		fmt::print(" [{}]: '{}' => '{}'\n", i++, key, val);
+#endif
 		REQUIRE(bpt.get(key).value() == val);
 	}
 }
@@ -282,8 +305,10 @@ TEST_CASE("Custom Config Btree Aggregate Type", "[btree]") {
 	Btree<CustomConfigAggregate> bpt{"/tmp/eu-btree-custom-config"};
 	bpt.NUM_RECORDS_LEAF = 83;
 
+#ifdef EU_PRINTING_TESTS
 	fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
 	fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
+#endif
 
 	static const std::size_t limit = 1000;
 	auto backup = fill_tree(bpt, limit);

@@ -22,7 +22,7 @@
 
 namespace internal::storage::btree {
 
-template<BtreeConfig aonfig>
+template<BtreeConfig Config>
 class Btree;
 
 template<BtreeConfig Config = DefaultConfig>
@@ -125,9 +125,14 @@ public:
 
 	[[nodiscard]] Page make_page() const noexcept {
 		auto p = Page::empty();
+		if (is_branch())
+			fmt::print("Writing node with {} refs and {} links ...", branch().m_refs.size(), branch().m_links.size());
+		else
+			fmt::print("Writing node with {} keys and {} vals ...", leaf().m_keys.size(), leaf().m_vals.size());
 		nop::Serializer<nop::BufferWriter> serializer{p.raw(), Page::size()};
 		serializer.Write(*this) || nop::Die(std::cout);
 		p.mark_dirty();
+		fmt::print("Done.\n");
 		return p;
 	}
 

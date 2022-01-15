@@ -46,7 +46,7 @@ static Nod make_node() {
 
 	Position p;
 	if (auto pp = dist128(rng); pp < 75)
-		p.set(pp);
+		p = pp;
 
 	return Node(std::move(metadata), p, dist128(rng) % 2);
 }
@@ -86,7 +86,6 @@ TEST_CASE("Persistent nodes", "[btree]") {
 	auto node1_from_page = Nod::from_page(pr.fetch(page, node1_pos));
 	REQUIRE(node1_from_page == node1);
 	REQUIRE(node1_from_page.is_root() == false);
-	REQUIRE(node1_from_page.parent().is_set() == false);
 
 	auto node2_pos = pr.alloc();
 	auto node2 = Nod(Metadata(Leaf({2}, {2})), 13, true);
