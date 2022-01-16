@@ -6,6 +6,7 @@ ms-gsl/3.1.0
 libnop/cci.20200728
 cppbenchmark/cci.20201029
 benchmark/1.6.0
+andreasbuhr-cppcoro/cci.20210113
 
 [generators]
 cmake

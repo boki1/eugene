@@ -8,7 +8,6 @@
 #include <fmt/format.h>
 #include <nop/structure.h>
 
-#include <core/storage/Position.h>
 #include <core/storage/btree/Btree.h>
 #include <core/storage/btree/BtreePrinter.h>
 
@@ -68,7 +67,7 @@ auto fill_tree(Btree<Config> &bpt, std::size_t limit = 1000) {
 }
 
 template<BtreeConfig Config>
-void valid_tree(const Btree<Config> &bpt, const std::map<typename Config::Key, typename Config::Val> &backup) {
+void valid_tree(Btree<Config> &bpt, const std::map<typename Config::Key, typename Config::Val> &backup) {
 	REQUIRE(bpt.size() == backup.size());
 #ifdef EU_PRINTING_TESTS
 	std::size_t i = 1;
@@ -159,10 +158,10 @@ TEST_CASE("Btree operations", "[btree]") {
 TEST_CASE("Header operations", "[btree]") {
 	truncate_file("/tmp/eu-headerops");
 	truncate_file("/tmp/eu-headerops-header");
-	Btree bpt("/tmp/eu-headerops", "/tmp/eu-headerops-header");
+	Btree bpt("/tmp/eu-headerops");
 	bpt.save();
 
-	Btree bpt2("/tmp/eu-headerops", "/tmp/eu-headerops-header");
+	Btree bpt2("/tmp/eu-headerops");
 	bpt2.header().size() = 100;
 	bpt2.header().depth() = 1;
 
@@ -179,7 +178,7 @@ TEST_CASE("Persistent tree", "[btree]") {
 	Position rootpos;
 	{
 		fmt::print(" --- Btree #1 start\n");
-		Btree bpt("/tmp/eu-persistent-btree", "/tmp/eu-persistent-btree-header");
+		Btree bpt("/tmp/eu-persistent-btree");
 		fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
 		fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
 		backup = fill_tree(bpt, 1000);
@@ -192,7 +191,7 @@ TEST_CASE("Persistent tree", "[btree]") {
 
 	{
 		fmt::print(" --- Btree #2 start\n");
-		Btree bpt("/tmp/eu-persistent-btree", "/tmp/eu-persistent-btree-header", true);
+		Btree bpt("/tmp/eu-persistent-btree", true);
 
 		REQUIRE(bpt.rootpos() == rootpos);
 		valid_tree(bpt, backup);
@@ -201,7 +200,7 @@ TEST_CASE("Persistent tree", "[btree]") {
 
 	{
 		fmt::print(" --- Btree #3 start\n");
-		Btree bpt("/tmp/eu-persistent-btree", "/tmp/eu-persistent-btree-header", false);
+		Btree bpt("/tmp/eu-persistent-btree");
 		REQUIRE(bpt.size() == 0);
 		for (auto &[key, _] : backup)
 			REQUIRE(!bpt.contains(key));

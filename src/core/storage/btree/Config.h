@@ -3,9 +3,8 @@
 #include <concepts>
 #include <cstdint>
 
-#include <core/storage/Page.h>
-#include <core/storage/Position.h>
 #include <core/SizeMetrics.h>
+#include <core/storage/Pager.h>
 
 namespace internal::storage::btree {
 
