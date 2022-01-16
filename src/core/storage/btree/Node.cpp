@@ -10,8 +10,7 @@
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 
-#include <core/storage/Page.h>
-#include <core/storage/Position.h>
+#include <core/storage/Pager.h>
 #include <core/storage/btree/Btree.h>
 
 using namespace std::ranges::views;
@@ -77,21 +76,20 @@ TEST_CASE("Node serialization", "[btree]") {
 TEST_CASE("Persistent nodes", "[btree]") {
 	truncate_file("/tmp/eu-persistent-nodes-pager");
 	Pager pr("/tmp/eu-persistent-nodes-pager");
-	Page page;
 
 	auto node1_pos = pr.alloc();
 	auto node1 = Nod(Metadata(Branch({1}, {1})), {}, false);
 	auto node1_as_page = node1.make_page();
-	pr.sync(node1_as_page, node1_pos);
-	auto node1_from_page = Nod::from_page(pr.fetch(page, node1_pos));
+	pr.place(node1_pos, std::move(node1_as_page));
+	auto node1_from_page = Nod::from_page(pr.get(node1_pos));
 	REQUIRE(node1_from_page == node1);
 	REQUIRE(node1_from_page.is_root() == false);
 
 	auto node2_pos = pr.alloc();
 	auto node2 = Nod(Metadata(Leaf({2}, {2})), 13, true);
 	auto node2_as_page = node2.make_page();
-	pr.sync(node2_as_page, node2_pos);
-	auto node2_from_page = Nod::from_page(pr.fetch(page, node2_pos));
+	pr.place(node2_pos, std::move(node2_as_page));
+	auto node2_from_page = Nod::from_page(pr.get(node2_pos));
 	REQUIRE(node2_from_page == node2);
 	REQUIRE(node2_from_page.is_root() == true);
 	REQUIRE(node2_from_page.parent() == Position(13));
@@ -100,7 +98,6 @@ TEST_CASE("Persistent nodes", "[btree]") {
 TEST_CASE("Paging with many random nodes", "[btree]") {
 	truncate_file("/tmp/eu-many-persistent-nodes-pager");
 	Pager pr("/tmp/eu-many-persistent-nodes-pager");
-	Page page;
 
 	std::unordered_map<Position, Nod> nodes;
 	for (std::size_t i = 0; i < 128; ++i) {
@@ -108,8 +105,8 @@ TEST_CASE("Paging with many random nodes", "[btree]") {
 		auto node_pos = pr.alloc();
 		nodes[node_pos] = node.clone();
 		auto node_as_page = node.make_page();
-		pr.sync(node_as_page, node_pos);
-		auto node_from_page = Nod::from_page(pr.fetch(page, node_pos));
+		pr.place(node_pos, std::move(node_as_page));
+		auto node_from_page = Nod::from_page(pr.get(node_pos));
 		REQUIRE(node_from_page == node);
 	}
 
@@ -124,7 +121,7 @@ TEST_CASE("Paging with many random nodes", "[btree]") {
 
 	for (std::size_t i = 0; i < nodes.size(); ++i) {
 		auto [pos, node] = random_node();
-		auto node_from_page = Nod::from_page(pr.fetch(page, pos));
+		auto node_from_page = Nod::from_page(pr.get(pos));
 		REQUIRE(node_from_page == node);
 	}
 }

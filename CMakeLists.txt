@@ -29,11 +29,8 @@ set(LibEugeneBtree_SRC
         storage/btree/Config.h)
 
 set(LibEugenePager_SRC
-        storage/Position.h
-        storage/PageCache.h
-        storage/PageCache.cpp
-        storage/Page.h
-        storage/Page.cpp)
+        storage/Pager.h
+        storage/Pager.cpp)
 
 set(LibEugeneCompression_SRC
         storage/compression/Compressor.h
@@ -56,6 +53,7 @@ target_link_libraries(LibEugeneCore
         CONAN_PKG::catch2
         CONAN_PKG::spdlog
         CONAN_PKG::libnop
+		CONAN_PKG::andreasbuhr-cppcoro
         CONAN_PKG::benchmark
         CONAN_PKG::catch2
         CONAN_PKG::cppbenchmark)
@@ -77,8 +75,7 @@ if (DEFINED ENV{EUGENE_BUILD_TESTS})
     eugene_test(Compression src/core/storage/compression)
     eugene_test(Btree src/core/storage/btree)
     eugene_test(Node src/core/storage/btree)
-    eugene_test(Page src/core/storage)
-    eugene_test(PageCache src/core/storage)
+    eugene_test(Pager src/core/storage)
     eugene_test(Util src/core)
 endif ()
 
