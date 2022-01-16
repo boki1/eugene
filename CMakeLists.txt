@@ -38,8 +38,7 @@ set (LibEugenePager_SRC
 
 set(LibEugeneCompression_SRC
 	storage/compression/Compressor.h
-	storage/compression/Decompressor.h
-	storage/compression/Compression.cpp)
+	storage/compression/Decompressor.h)
 
 set(LibEugeneCore_SRC
 		Util.h SizeMetrics.h Logger.h
