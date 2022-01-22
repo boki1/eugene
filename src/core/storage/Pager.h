@@ -9,6 +9,7 @@
 #include <optional>
 #include <string_view>
 #include <unordered_map>
+#include <deque>
 
 #include <cppcoro/generator.hpp>
 
@@ -16,6 +17,7 @@
 #include <nop/status.h>
 #include <nop/structure.h>
 #include <nop/types/variant.h>
+#include <nop/base/vector.h>
 #include <nop/utility/die.h>
 #include <nop/utility/stream_reader.h>
 #include <nop/utility/stream_writer.h>
@@ -50,36 +52,38 @@ enum class ActionOnConstruction : uint8_t {
 /// Bad allocation
 /// This could be the result of 1) incorrectly executed allocation algorithm, 2) calling alloc/free on allocators which
 /// do not support the specific operation.
-struct BadAlloc : std::exception {
-	virtual const char* what() const noexcept { return "Eugene: Bad allocation"; }
+struct BadAlloc : std::runtime_error {
+	explicit BadAlloc() : std::runtime_error{"Eugene: Bad allocation"} {}
 };
 
 /// Bad position
 /// This error implies that the position passed as an argument to one of the methods was _invalid_. The vailidity of a
 /// position is specific to the execution context, but it general it signals that the position is out the operating
 /// range of the pager/cache/allocator or it does not point to a page boundary.
-struct BadPosition : std::exception {
-	virtual const char* what() const noexcept { return "Eugene: Bad position"; }
+struct BadPosition : std::runtime_error {
+	explicit BadPosition(const Position pos) : std::runtime_error{fmt::format("Eugene: Bad position {:#04x}", pos)} {}
 };
 
 /// Bad read
 /// The read operation failed.
-struct BadRead : std::exception {
-	virtual const char* what() const noexcept { return "Eugene: Bad read"; }
+struct BadRead : std::runtime_error {
+	explicit BadRead() : std::runtime_error{"Eugene: Bad read"} {}
 };
 
 /// Bad write
 /// The write operation failed.
-struct BadWrite : std::exception {
-	virtual const char* what() const noexcept { return "Eugene: Bad write"; }
+struct BadWrite : std::runtime_error {
+	explicit BadWrite() : std::runtime_error{"Eugene: Bad write"} {}
 };
 
 /// Stack-based allocator
 /// The operating range grows based on a cursor position which points to the next free page.
 /// This allocator does not support freeing of pages. It is perfect for a tree in which only insertions and lookups will
 /// be performed, since it does not come with any overhead.
+/// Allocation is Θ(1). Freeing is not supported. Checking whether a page has been allocated is Θ(1).
 class StackSpaceAllocator {
 	Position m_cursor = 0;
+	NOP_STRUCTURE(StackSpaceAllocator, m_cursor);
 
 public:
 	[[nodiscard]] constexpr Position alloc() {
@@ -99,23 +103,46 @@ public:
 		return pos < m_cursor;
 	}
 
-	template<typename... IsArgs>
-	void load(IsArgs &&...args) {
-		nop::Deserializer<nop::StreamReader<std::ifstream>> deserializer{std::forward<IsArgs>(args)...};
-		if (!deserializer.Read(this))
-			throw BadRead();
-	}
-
-	template<typename... OsArgs>
-	void save(OsArgs &&...args) {
-		nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{std::forward<OsArgs>(args)...};
-		if (!serializer.Write(*this))
-			throw BadWrite();
-	}
-
 	[[nodiscard]] constexpr Position cursor() const noexcept { return m_cursor; }
+};
 
-	NOP_STRUCTURE(StackSpaceAllocator, m_cursor);
+/// Free list allocator
+/// Contains a list filled with the positions which are currently available.
+/// Allocation in performed in Θ(1) - just peek at the first entry and remove it.
+/// Freeing in Θ(n), where n is the number of items currently stored in the freelist. This is due to the fact that all
+/// positions are stored sorted.
+/// Checking whether a page has been allocated is Θ(n).
+/// The drawbacks of this method is the space it uses.
+///
+/// TODO: Optimize space usage. Maybe something like a range selector: From 0x0 to 0x100000 is free, rather than keeping
+/// every page in this range.
+class FreeListAllocator {
+    std::vector<Position> m_freelist;
+	NOP_STRUCTURE(FreeListAllocator, m_freelist);
+
+public:
+    explicit FreeListAllocator(std::size_t num_pages = 256) {
+        std::generate_n(std::back_inserter(m_freelist), num_pages, [pg = num_pages - 1]() mutable { return pg-- * PAGE_SIZE; });
+    }
+
+    [[nodiscard]] Position alloc() {
+        const Position pos = m_freelist.back();
+        m_freelist.pop_back();
+        return pos;
+    }
+
+    void free(const Position pos) {
+        if (pos % PAGE_SIZE != 0)
+            throw BadPosition(pos);
+		const auto it = std::find_if(m_freelist.begin(), m_freelist.end(), [&](const Position curr) {
+			return curr <= pos;
+		});
+        if (*it == pos && it < m_freelist.end())
+            throw BadPosition(pos);
+        m_freelist.insert(m_freelist.begin() + std::distance(m_freelist.begin(), it), pos);
+    }
+
+    [[nodiscard]] const auto &freelist() const noexcept { return m_freelist; }
 };
 
 using CacheEvictionResult = std::optional<PagePos>;
@@ -243,10 +270,11 @@ private:
 public:
 	/// The Pager class conforms to the Rule of Three
 
-	explicit Pager(std::string_view identifier, const ActionOnConstruction action = ActionOnConstruction::DoNotLoad)
-	    : m_identifier{identifier},
+	template <typename ...Args>
+	explicit Pager(std::string_view identifier, const ActionOnConstruction action = ActionOnConstruction::DoNotLoad, Args&& ...args)
+	    : m_allocator{std::forward<Args>(args)...},
+		  m_identifier{identifier},
 	      m_disk{identifier.data()} {
-
 		using enum ActionOnConstruction;
 		if (action == Load)
 			load();
@@ -290,7 +318,9 @@ public:
 
 	void save() {
 		// Store allocator state
-		m_allocator.save(fmt::format("{}-alloc", m_identifier.data()), std::ios::trunc | std::ios::out);
+		nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{fmt::format("{}-alloc", m_identifier.data()), std::ios::trunc | std::ios::out};
+		if (!serializer.Write(m_allocator))
+			throw BadWrite();
 
 		// Flush cache
 		for (auto evict_res : m_cache.flush())
@@ -300,7 +330,9 @@ public:
 
 	void load() {
 		// Load allocator state
-		m_allocator.load(fmt::format("{}-alloc", m_identifier.data()));
+		nop::Deserializer<nop::StreamReader<std::ifstream>> deserializer{fmt::format("{}-alloc", m_identifier.data())};
+		if (!deserializer.Read(&m_allocator))
+			throw BadRead();
 	}
 
 private:

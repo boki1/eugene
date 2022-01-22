@@ -37,6 +37,9 @@ class Btree final {
 	using Ref = typename Config::Ref;
 	using Nod = Node<Config>;
 
+	using PagerAllocatorPolicy = typename Config::PageAllocatorPolicy;
+	using PagerEvictionPolicy = typename Config::PageEvictionPolicy;
+
 	friend util::BtreePrinter<Config>;
 
 public:
@@ -289,11 +292,13 @@ public:
 	constexpr void load() {
 		nop::Deserializer<nop::StreamReader<std::ifstream>> deserializer{header_name()};
 		if (!deserializer.Read(&m_header))
-		{}
+			throw BadRead();
 
 		m_rootpos = m_header.m_rootpos;
 		m_size = m_header.m_size;
 		m_depth = m_header.m_depth;
+
+		m_pager.load();
 	}
 
 	constexpr void save() {
@@ -305,13 +310,13 @@ public:
 
 		nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{header_name(), std::ios::trunc};
 		if (!serializer.Write(m_header))
-		{}
+			throw BadWrite();
 
-		m_pager.flush_cache();
+		m_pager.save();
 	}
 
 public:
-	explicit constexpr Btree(std::string_view identifier, bool load_from_header = false)
+	explicit Btree(std::string_view identifier, bool load_from_header = false)
 	    : m_pager{identifier},
 	      m_identifier{identifier} {
 
@@ -323,7 +328,7 @@ public:
 	}
 
 private:
-	Pager m_pager;
+	Pager<PagerAllocatorPolicy, PagerEvictionPolicy> m_pager;
 
 	const std::string_view m_identifier;
 
