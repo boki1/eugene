@@ -28,6 +28,24 @@ TEST_CASE("Page", "[pager]") {
 	REQUIRE(q == pr.get(PAGE_SIZE));
 }
 
+TEST_CASE("Persistent pager", "[pager]") {
+	truncate_file("/tmp/eu-persistent-pager-stackallocater");
+	Pager pr_stack1("/tmp/eu-persistent-pager-stackallocater");
+
+	for (int i = 0; i < 10; ++i)
+		[[maybe_unused]] Position p = pr_stack1.alloc();
+	REQUIRE(pr_stack1.allocator().cursor() == 10 * PAGE_SIZE);
+	pr_stack1.save();
+
+	Pager pr_stack2("/tmp/eu-persistent-pager-stackallocater", ActionOnConstruction::Load);
+	REQUIRE(pr_stack2.allocator().cursor() == 10 * PAGE_SIZE);
+
+	Pager pr_stack3("/tmp/eu-persistent-pager-stackallocater", ActionOnConstruction::DoNotLoad);
+	REQUIRE(pr_stack3.allocator().cursor() == 0);
+	pr_stack3.load();
+	REQUIRE(pr_stack3.allocator().cursor() == 10 * PAGE_SIZE);
+}
+
 TEST_CASE("Page stack allocator", "[pager]") {
 	Pager pr("/tmp/eu-pager-stack-alloc");
 	for (int i = 0; i < 11; ++i) {

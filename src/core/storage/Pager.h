@@ -12,6 +12,14 @@
 
 #include <cppcoro/generator.hpp>
 
+#include <nop/serializer.h>
+#include <nop/status.h>
+#include <nop/structure.h>
+#include <nop/types/variant.h>
+#include <nop/utility/die.h>
+#include <nop/utility/stream_reader.h>
+#include <nop/utility/stream_writer.h>
+
 #include <core/SizeMetrics.h>
 #include <core/Util.h>
 
@@ -27,6 +35,12 @@ using Page = std::array<std::uint8_t, PAGE_SIZE>;
 struct PagePos {
 	Page page;
 	Position pos;
+};
+
+/// Marks whether any additional action should be performed when constructing a Pager instance
+enum class ActionOnConstruction : uint8_t {
+	Load,
+	DoNotLoad
 };
 
 //!
@@ -81,16 +95,27 @@ public:
 	/// If the page is below the cursor, it is considered as allocated since there is no "official" way of freeing
 	/// pages using this allocator.
 	/// Note: The implementation does track whether the pos is actually identifing a valid page.
-	constexpr bool has_allocated(const Position) const noexcept {
-		// The following line is the desired implementation. However, since the Pager so far was stateless, there is no
-		// information kept between "sessions". If, as in the "Persistent tree" test in Btree.cpp, the btree is already
-		// generated, there is no retrieval of the pager's metadata, thus the cursor is outdated. Therefore, until the
-		// pager's state is not stored, there is no way that any implementation of `has_allocated` behavious correctly.
-		//
-		// return pos < m_cursor;
-
-		return true;
+	constexpr bool has_allocated(const Position pos) const noexcept {
+		return pos < m_cursor;
 	}
+
+	template<typename... IsArgs>
+	void load(IsArgs &&...args) {
+		nop::Deserializer<nop::StreamReader<std::ifstream>> deserializer{std::forward<IsArgs>(args)...};
+		if (!deserializer.Read(this))
+			throw BadRead();
+	}
+
+	template<typename... OsArgs>
+	void save(OsArgs &&...args) {
+		nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{std::forward<OsArgs>(args)...};
+		if (!serializer.Write(*this))
+			throw BadWrite();
+	}
+
+	[[nodiscard]] constexpr Position cursor() const noexcept { return m_cursor; }
+
+	NOP_STRUCTURE(StackSpaceAllocator, m_cursor);
 };
 
 using CacheEvictionResult = std::optional<PagePos>;
@@ -218,9 +243,14 @@ private:
 public:
 	/// The Pager class conforms to the Rule of Three
 
-	constexpr explicit Pager(std::string_view identifier)
+	explicit Pager(std::string_view identifier, const ActionOnConstruction action = ActionOnConstruction::DoNotLoad)
 	    : m_identifier{identifier},
-	      m_disk{identifier.data()} {}
+	      m_disk{identifier.data()} {
+
+		using enum ActionOnConstruction;
+		if (action == Load)
+			load();
+	}
 
 	constexpr Pager(const Pager &pager) = default;
 
@@ -258,12 +288,19 @@ public:
 			write(evict_res->page, evict_res->pos);
 	}
 
-	/// Flush the cache's contents to disk.
-	/// May fail if `write` throws an error.
-	void flush_cache() {
+	void save() {
+		// Store allocator state
+		m_allocator.save(fmt::format("{}-alloc", m_identifier.data()), std::ios::trunc | std::ios::out);
+
+		// Flush cache
 		for (auto evict_res : m_cache.flush())
 			if (evict_res)
 				write(evict_res->page, evict_res->pos);
+	}
+
+	void load() {
+		// Load allocator state
+		m_allocator.load(fmt::format("{}-alloc", m_identifier.data()));
 	}
 
 private:
