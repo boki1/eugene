@@ -35,7 +35,7 @@ static Nod make_node() {
 		if (dist128(rng) % 2)
 			a.push_back(dist128(rng));
 		else
-			b.push_back(Position(dist128(rng)));
+			b.push_back((int)Position(dist128(rng)));
 
 	Metadata metadata;
 	if (dist128(rng) % 2)
@@ -134,13 +134,13 @@ TEST_CASE("Split full nodes", "[btree]") {
 	constexpr auto limit_leaf = 512;
 
 	// Fill
-	for (uint32_t i = 0; i < limit_branch; ++i) {
+	for (int i = 0; i < limit_branch; ++i) {
 		b.m_refs.push_back(i);
 		b.m_links.emplace_back(i);
 	}
 	b.m_links.emplace_back(limit_branch);
 
-	for (uint32_t i = 0; i < limit_leaf; ++i) {
+	for (int i = 0; i < limit_leaf; ++i) {
 		l.m_keys.push_back(i);
 		l.m_vals.push_back(i);
 	}
