@@ -30,8 +30,10 @@ TEST_CASE("Page", "[pager]") {
 
 TEST_CASE("Page stack allocator", "[pager]") {
 	Pager pr("/tmp/eu-pager-stack-alloc");
-	for (int i = 0; i < 11; ++i)
+	for (int i = 0; i < 11; ++i) {
 		REQUIRE(pr.alloc() == i * PAGE_SIZE);
+		REQUIRE_THROWS_AS(pr.free(0), BadAlloc);
+	}
 }
 
 TEST_CASE("Page cache with LRU policy", "[pager]") {
