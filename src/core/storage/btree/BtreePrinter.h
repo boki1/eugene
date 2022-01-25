@@ -7,8 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include <core/storage/PageCache.h>
-#include <core/storage/Position.h>
+#include <core/storage/Pager.h>
 #include <core/storage/btree/Btree.h>
 #include <core/storage/btree/Config.h>
 #include <core/storage/btree/Node.h>
@@ -32,7 +31,7 @@ class BtreePrinter {
 	using Nod = Node<Config>;
 
 public:
-	explicit BtreePrinter(const Bt &bt, std::string_view ofname = "/tmp/bpt_view")
+	explicit BtreePrinter(Bt &bt, std::string_view ofname = "/tmp/bpt_view")
 	    : m_ofname{ofname},
 	      m_btree{bt},
 	      m_out{m_ofname, std::ios::out | std::ios::trunc} {}
@@ -40,7 +39,7 @@ public:
 	void operator()() noexcept { print(); }
 
 	Nod node_at(Position pos) {
-		return Nod::from_page(m_btree.m_pgcache.get_page(pos));
+		return Nod::from_page(m_btree.m_pager.get(pos));
 	}
 
 	void print_node(const Nod node, unsigned level = 1) noexcept {
@@ -62,7 +61,7 @@ public:
 	}
 
 	void print() noexcept {
-		m_out << "keys_per_block: " << Bt::NUM_RECORDS_LEAF << '\n';
+		m_out << "keys_per_block: " << m_btree.num_records_leaf() << '\n';
 		m_out << "tree:\n";
 
 		print_node(node_at(m_btree.rootpos()));
@@ -70,7 +69,7 @@ public:
 
 private:
 	std::string m_ofname;
-	const Bt &m_btree;
+	Bt &m_btree;
 	std::ofstream m_out;
 };
 

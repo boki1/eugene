@@ -3,16 +3,18 @@
 #include <concepts>
 #include <cstdint>
 
-#include <core/storage/Page.h>
-#include <core/storage/Position.h>
 #include <core/SizeMetrics.h>
+#include <core/storage/Pager.h>
 
 namespace internal::storage::btree {
 
 struct Config {
-	using Key = uint32_t;
-	using Val = uint32_t;
-	using Ref = uint32_t;
+	using Key = int;
+	using Val = int;
+	using Ref = int;
+
+	using PageAllocatorPolicy = StackSpaceAllocator;
+	using PageEvictionPolicy = LRUCache;
 
 	static inline constexpr int PAGE_CACHE_SIZE = 1_MB;
 	static inline constexpr bool APPLY_COMPRESSION = true;

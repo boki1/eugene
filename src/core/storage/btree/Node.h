@@ -16,8 +16,7 @@
 #include <nop/utility/buffer_reader.h>
 #include <nop/utility/buffer_writer.h>
 
-#include <core/storage/Page.h>
-#include <core/storage/Position.h>
+#include <core/storage/Pager.h>
 #include <core/storage/btree/Config.h>
 
 namespace internal::storage::btree {
@@ -40,8 +39,8 @@ public:
 		std::vector<Self::Ref> m_refs;
 		std::vector<Position> m_links;
 
-		Branch() = default;
-		Branch(std::vector<Self::Ref> &&refs, std::vector<Position> &&links)
+		constexpr Branch() = default;
+		constexpr Branch(std::vector<Self::Ref> &&refs, std::vector<Position> &&links)
 		    : m_refs{std::move(refs)}, m_links{std::move(links)} {}
 
 		auto operator<=>(const Branch &) const noexcept = default;
@@ -52,8 +51,8 @@ public:
 		std::vector<Self::Key> m_keys;
 		std::vector<Self::Val> m_vals;
 
-		Leaf() = default;
-		Leaf(std::vector<Self::Key> &&keys, std::vector<Self::Val> &&vals)
+		constexpr Leaf() = default;
+		constexpr Leaf(std::vector<Self::Key> &&keys, std::vector<Self::Val> &&vals)
 		    : m_keys{std::move(keys)}, m_vals{std::move(vals)} {}
 
 		auto operator<=>(const Leaf &) const noexcept = default;
@@ -63,75 +62,74 @@ public:
 	using Metadata = nop::Variant<Branch, Leaf>;
 
 public:
-	[[nodiscard]] bool is_leaf() const noexcept { return m_metadata.template is<Leaf>(); }
-	[[nodiscard]] bool is_branch() const noexcept { return m_metadata.template is<Branch>(); }
+	[[nodiscard]] constexpr bool is_leaf() const noexcept { return m_metadata.template is<Leaf>(); }
+	[[nodiscard]] constexpr bool is_branch() const noexcept { return m_metadata.template is<Branch>(); }
 
 	// TODO:
 	// Consider adding some error handling here. As of now calling `leaf()` or `branch()` in either of their const
 	// variants _REQUIRES_ that the value inside is actually the one which we ask for.
-	[[nodiscard]] Leaf &leaf() { return *m_metadata.template get<Leaf>(); }
-	[[nodiscard]] Branch &branch() { return *m_metadata.template get<Branch>(); }
-	[[nodiscard]] const Leaf &leaf() const { return *m_metadata.template get<Leaf>(); }
-	[[nodiscard]] const Branch &branch() const { return *m_metadata.template get<Branch>(); }
+	[[nodiscard]] constexpr Leaf &leaf() { return *m_metadata.template get<Leaf>(); }
+	[[nodiscard]] constexpr Branch &branch() { return *m_metadata.template get<Branch>(); }
+	[[nodiscard]] constexpr const Leaf &leaf() const { return *m_metadata.template get<Leaf>(); }
+	[[nodiscard]] constexpr const Branch &branch() const { return *m_metadata.template get<Branch>(); }
 
-	[[nodiscard]] Position parent() const noexcept { return m_parent_pos; }
-	[[nodiscard]] bool is_root() const noexcept { return m_is_root; }
+	[[nodiscard]] constexpr Position parent() const noexcept { return m_parent_pos; }
+	[[nodiscard]] constexpr bool is_root() const noexcept { return m_is_root; }
 
-	[[nodiscard]] long num_filled() const noexcept { return is_leaf() ? leaf().m_keys.size() : branch().m_refs.size(); }
+	[[nodiscard]] constexpr long num_filled() const noexcept { return is_leaf() ? leaf().m_keys.size() : branch().m_refs.size(); }
 
-	[[nodiscard]] bool is_full(long m) const noexcept { return num_filled() >= m; }
-	[[nodiscard]] bool is_under(long m) const noexcept { return num_filled() < m / 2 && !m_is_root; }
+	[[nodiscard]] constexpr bool is_full(long m) const noexcept { return num_filled() >= m; }
+	[[nodiscard]] constexpr bool is_under(long m) const noexcept { return num_filled() < m / 2 && !m_is_root; }
 
 public:
-	Node() : m_metadata{} {}
+	constexpr Node() : m_metadata{} {}
 
-	Node(Metadata &&metadata, Position parent_pos, bool is_root = false)
+	constexpr Node(Metadata &&metadata, Position parent_pos, bool is_root = false)
 	    : m_metadata{std::move(metadata)},
 	      m_is_root{is_root},
 	      m_parent_pos{parent_pos} {}
 
 private:
-	Node(const Node &) = default;
+	constexpr Node(const Node &) = default;
 
 public:
-	Node &operator=(const Node &) = delete;
+	constexpr Node &operator=(const Node &) = delete;
 
-	Node(Node &&) noexcept = default;
-	Node &operator=(Node &&) noexcept = default;
+	constexpr Node(Node &&) noexcept = default;
+	constexpr Node &operator=(Node &&) noexcept = default;
 
-	Node clone() const noexcept {
+	constexpr Node clone() const noexcept {
 		return Node{*this};
 	}
 
 	template<typename NodeType, typename... T>
-	static auto meta_of(T &&...ctor_args) {
+	constexpr static auto meta_of(T &&...ctor_args) {
 		return Metadata(NodeType{std::forward<T>(ctor_args)...});
 	}
 
-	auto operator==(const Node &rhs) const noexcept {
+	constexpr auto operator==(const Node &rhs) const noexcept {
 		if (is_leaf() ^ rhs.is_leaf())
 			return false;
 		return is_leaf() ? leaf() == rhs.leaf() : branch() == rhs.branch() && std::tie(m_is_root, m_parent_pos) == std::tie(rhs.m_is_root, rhs.m_parent_pos);
 	}
 
-	auto operator!=(const Node &rhs) const noexcept { return !operator==(rhs); }
+	constexpr auto operator!=(const Node &rhs) const noexcept { return !operator==(rhs); }
 
-	static Self from_page(const Page &p) {
-		nop::Deserializer<nop::BufferReader> deserializer{p.raw(), Page::size()};
+	constexpr static Self from_page(const Page &p) {
+		nop::Deserializer<nop::BufferReader> deserializer{p.data(), PAGE_SIZE};
 		Node node;
 		deserializer.Read(&node);
 		return node;
 	}
 
-	[[nodiscard]] Page make_page() const noexcept {
-		auto p = Page::empty();
-		nop::Serializer<nop::BufferWriter> serializer{p.raw(), Page::size()};
+	[[nodiscard]] constexpr Page make_page() const noexcept {
+		Page p;
+		nop::Serializer<nop::BufferWriter> serializer{p.data(), PAGE_SIZE};
 		serializer.Write(*this);
-		p.mark_dirty();
 		return p;
 	}
 
-	std::pair<Self::Key, Self> split(const std::size_t m) {
+	constexpr std::pair<Self::Key, Self> split(const std::size_t m) {
 		const std::size_t pivot = (m + 1) / 2;
 		if (is_branch()) {
 			auto &b = branch();
@@ -157,7 +155,7 @@ public:
 private:
 	// Leaves elements [0; pivot] and returns a vector with (pivot; target.size())
 	template<typename T>
-	std::vector<T> break_at_index(std::vector<T> &target, uint32_t pivot) {
+	constexpr std::vector<T> break_at_index(std::vector<T> &target, uint32_t pivot) {
 		assert(target.size() >= 2);
 
 		std::vector<T> second;
