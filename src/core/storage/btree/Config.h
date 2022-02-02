@@ -18,6 +18,9 @@ struct Config {
 
 	static inline constexpr int PAGE_CACHE_SIZE = 1_MB;
 	static inline constexpr bool APPLY_COMPRESSION = true;
+
+	static inline constexpr int BRANCHING_FACTOR_LEAF = 0;
+	static inline constexpr int BRANCHING_FACTOR_BRANCH = 0;
 };
 
 template<typename C>

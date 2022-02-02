@@ -46,7 +46,7 @@ public:
 	//! Number of entries in branch and leaf nodes may differ
 	//! Directly unwrap with `.value()` since we _want to fail at compile time_ in case their is no value which
 	//! satisfies the predicates
-	int NUM_LINKS_BRANCH = ::internal::binsearch_primitive(2ul, PAGE_SIZE / 2, [](auto current, auto, auto) {
+	int NUM_LINKS_BRANCH = BRANCHING_FACTOR_BRANCH > 0 ? BRANCHING_FACTOR_BRANCH : ::internal::binsearch_primitive(2ul, PAGE_SIZE / 2, [](auto current, auto, auto) {
 		                       auto sz = nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Branch(std::vector<Ref>(current), std::vector<Position>(current))), 10, true});
 		                       return sz - PAGE_SIZE;
 	                       }).value_or(0);
@@ -56,7 +56,7 @@ public:
 	//! Make sure that when a leaf is split, its contents could be distributed among the two branch nodes.
 	//! Directly unwrap with `.value()` since we _want to fail at compile time_ in case their is no value which
 	//! satisfies the predicates
-	int _NUM_RECORDS_LEAF = ::internal::binsearch_primitive(1ul, PAGE_SIZE / 2, [](auto current, auto, auto) {
+	int _NUM_RECORDS_LEAF = BRANCHING_FACTOR_LEAF > 0 ? BRANCHING_FACTOR_LEAF : ::internal::binsearch_primitive(1ul, PAGE_SIZE / 2, [](auto current, auto, auto) {
 		                        return nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Leaf(std::vector<Key>(current), std::vector<Val>(current))), 10, true}) - PAGE_SIZE;
 	                        }).value_or(0);
 	int NUM_RECORDS_LEAF = _NUM_RECORDS_LEAF - 1 >= NUM_RECORDS_BRANCH * 2
@@ -66,6 +66,8 @@ public:
 private:
 	static inline constexpr bool APPLY_COMPRESSION = Config::APPLY_COMPRESSION;
 	static inline constexpr int PAGE_CACHE_SIZE = Config::PAGE_CACHE_SIZE;
+	static inline constexpr int BRANCHING_FACTOR_LEAF = 0;
+	static inline constexpr int BRANCHING_FACTOR_BRANCH = 0;
 
 	static inline constexpr uint32_t MAGIC = 0xB75EEA41;
 
