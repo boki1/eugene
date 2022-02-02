@@ -58,7 +58,7 @@ auto fill_tree(Btree<Config> &bpt, std::size_t limit = 1000) {
 		fmt::print("Element #{} inserted.\n", ++i);
 #endif
 
-		bpt.put(key, val);
+		bpt.insert(key, val);
 		backup.emplace(key, val);
 	}
 
@@ -228,7 +228,7 @@ TEST_CASE("Custom Config Btree Primitive Type", "[btree]") {
 	while (backup.size() != limit) {
 		double key = item<float>();
 		long long val = item<int>();
-		bpt.put(key, val);
+		bpt.insert(key, val);
 		backup.emplace(key, val);
 	}
 

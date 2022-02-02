@@ -202,7 +202,7 @@ public:
 	 *  Operations API
 	 */
 
-	void put(const Self::Key &key, const Self::Val &val) {
+	void insert(const Self::Key &key, const Self::Val &val) {
 		Position currpos{rootpos()};
 		Nod curr{root()};
 

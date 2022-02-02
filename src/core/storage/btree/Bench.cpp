@@ -19,7 +19,7 @@ static void BM_BtreeInsertion(benchmark::State &state) {
 	for (auto i : state) {
 		(void) i;
 		for (std::size_t j = 0; j < num_insertions; ++j) {
-			bpt.put(item(), item());
+			bpt.insert(item(), item());
 		}
 	}
 }
