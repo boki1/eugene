@@ -143,11 +143,6 @@ TEST_CASE("Btree operations", "[btree]") {
 	REQUIRE(bpt.contains(42) == false);
 	REQUIRE(bpt.get(42).has_value() == false);
 
-#ifdef EU_PRINTING_TESTS
-	fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
-	fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
-#endif
-
 	static const std::size_t limit = 1000;
 	auto backup = fill_tree(bpt, limit);
 
@@ -179,8 +174,6 @@ TEST_CASE("Persistent tree", "[btree]") {
 	{
 		fmt::print(" --- Btree #1 start\n");
 		Btree bpt("/tmp/eu-persistent-btree");
-		fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
-		fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
 		backup = fill_tree(bpt, 1000);
 		valid_tree(bpt, backup);
 
@@ -218,11 +211,6 @@ TEST_CASE("Custom Config Btree Primitive Type", "[btree]") {
 	truncate_file("/tmp/eu-btree-ops-custom-types");
 	Btree<CustomConfigPrimitives> bpt("/tmp/eu-btree-ops-custom-types");
 	static const std::size_t limit = 1000;
-
-#ifdef EU_PRINTING_TESTS
-	fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
-	fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
-#endif
 
 	std::map<CustomConfigPrimitives::Key, CustomConfigPrimitives::Val> backup;
 	while (backup.size() != limit) {
@@ -303,11 +291,6 @@ TEST_CASE("Custom Config Btree Aggregate Type", "[btree]") {
 	truncate_file("/tmp/eu-btree-custom-config");
 	Btree<CustomConfigAggregate> bpt{"/tmp/eu-btree-custom-config"};
 	bpt.NUM_RECORDS_LEAF = 83;
-
-#ifdef EU_PRINTING_TESTS
-	fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
-	fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
-#endif
 
 	static const std::size_t limit = 1000;
 	auto backup = fill_tree(bpt, limit);

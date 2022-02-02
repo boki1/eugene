@@ -47,9 +47,9 @@ public:
 	//! Directly unwrap with `.value()` since we _want to fail at compile time_ in case their is no value which
 	//! satisfies the predicates
 	int NUM_LINKS_BRANCH = BRANCHING_FACTOR_BRANCH > 0 ? BRANCHING_FACTOR_BRANCH : ::internal::binsearch_primitive(2ul, PAGE_SIZE / 2, [](auto current, auto, auto) {
-		                       auto sz = nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Branch(std::vector<Ref>(current), std::vector<Position>(current))), 10, true});
-		                       return sz - PAGE_SIZE;
-	                       }).value_or(0);
+		                                                                               auto sz = nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Branch(std::vector<Ref>(current), std::vector<Position>(current))), 10, true});
+		                                                                               return sz - PAGE_SIZE;
+	                                                                               }).value_or(0);
 	int NUM_RECORDS_BRANCH = NUM_LINKS_BRANCH - 1;
 
 	//! Equivalent to `m` in Knuth's definition
@@ -57,8 +57,8 @@ public:
 	//! Directly unwrap with `.value()` since we _want to fail at compile time_ in case their is no value which
 	//! satisfies the predicates
 	int _NUM_RECORDS_LEAF = BRANCHING_FACTOR_LEAF > 0 ? BRANCHING_FACTOR_LEAF : ::internal::binsearch_primitive(1ul, PAGE_SIZE / 2, [](auto current, auto, auto) {
-		                        return nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Leaf(std::vector<Key>(current), std::vector<Val>(current))), 10, true}) - PAGE_SIZE;
-	                        }).value_or(0);
+		                                                                            return nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Leaf(std::vector<Key>(current), std::vector<Val>(current))), 10, true}) - PAGE_SIZE;
+	                                                                            }).value_or(0);
 	int NUM_RECORDS_LEAF = _NUM_RECORDS_LEAF - 1 >= NUM_RECORDS_BRANCH * 2
 	        ? NUM_RECORDS_BRANCH * 2 - 1
 	        : _NUM_RECORDS_LEAF - 1;
@@ -122,14 +122,14 @@ public:
 private:
 	[[nodiscard]] constexpr bool is_node_full(const Self::Nod &node) {
 		if (node.is_branch())
-			return node.is_full(NUM_RECORDS_BRANCH);
-		return node.is_full(NUM_RECORDS_LEAF);
+			return node.is_full(max_num_records_branch());
+		return node.is_full(max_num_records_leaf());
 	}
 
 	[[nodiscard]] constexpr auto node_split(Self::Nod &node) {
 		if (node.is_branch())
-			return node.split(NUM_RECORDS_BRANCH);
-		return node.split(NUM_RECORDS_LEAF);
+			return node.split(max_num_records_branch());
+		return node.split(max_num_records_leaf());
 	}
 
 	[[nodiscard]] constexpr std::optional<Val> search_subtree(const Self::Nod &node, const Self::Key &target_key) {
@@ -195,9 +195,11 @@ public:
 
 	[[nodiscard]] std::size_t depth() { return m_depth; }
 
-	[[nodiscard]] auto num_records_leaf() const noexcept { return NUM_RECORDS_LEAF; }
+	[[nodiscard]] auto min_num_records_leaf() const noexcept { return (NUM_RECORDS_LEAF + 1) / 2; }
+	[[nodiscard]] auto max_num_records_leaf() const noexcept { return NUM_RECORDS_LEAF; }
 
-	[[nodiscard]] auto num_records_branch() const noexcept { return NUM_RECORDS_BRANCH; }
+	[[nodiscard]] auto min_num_records_branch() const noexcept { return (NUM_RECORDS_BRANCH + 1) / 2; }
+	[[nodiscard]] auto max_num_records_branch() const noexcept { return NUM_RECORDS_BRANCH; }
 
 public:
 	/*
@@ -273,7 +275,6 @@ public:
 	}
 
 private:
-
 	/// Bare intialize an empty tree
 	constexpr void bare() noexcept {
 		m_rootpos = m_pager.alloc();
