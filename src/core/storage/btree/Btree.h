@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <utility>
 #include <variant>
 
@@ -61,6 +62,10 @@ struct RemovedNothing {
 template<typename Val>
 using RemovalReturnMark = std::variant<RemovedVal<Val>, RemovedNothing>;
 
+struct BadTreeSearch : std::runtime_error {
+	explicit BadTreeSearch(std::string_view msg) : std::runtime_error{fmt::format("Eugene: Bad tree search {}", msg.data())} {}
+};
+
 template<BtreeConfig Config = DefaultConfig>
 class Btree final {
 	using Self = Btree<Config>;
@@ -80,7 +85,7 @@ public:
 	//! Directly unwrap with `.value()` since we _want to fail at compile time_ in case their is no value which
 	//! satisfies the predicates
 	int NUM_LINKS_BRANCH = BRANCHING_FACTOR_BRANCH > 0 ? BRANCHING_FACTOR_BRANCH : ::internal::binsearch_primitive(2ul, PAGE_SIZE / 2, [](auto current, auto, auto) {
-		                                                                               auto sz = nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Branch(std::vector<Ref>(current), std::vector<Position>(current))), 10, true});
+		                                                                               auto sz = nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Branch(std::vector<Ref>(current), std::vector<Position>(current), std::vector<LinkStatus>(current))), 10, true});
 		                                                                               return sz - PAGE_SIZE;
 	                                                                               }).value_or(0);
 	int NUM_RECORDS_BRANCH = NUM_LINKS_BRANCH - 1;
@@ -171,16 +176,18 @@ private:
 		return node.split(max_num_records_leaf());
 	}
 
-	[[nodiscard]] constexpr std::optional<Val> search_subtree(const Self::Nod &node, const Self::Key &target_key) {
+	[[nodiscard]] std::optional<Val> search_subtree(const Self::Nod &node, const Self::Key &target_key) {
 		if (node.is_branch()) {
 			const auto &refs = node.branch().m_refs;
 			const std::size_t index = std::lower_bound(refs.cbegin(), refs.cend(), target_key) - refs.cbegin();
+			if (node.branch().m_link_status[index] == LinkStatus::Inval)
+				throw BadTreeSearch(fmt::format(" - invalid link w/ index={} pointing to pos={} in branch node\n", index, node.branch().m_links[index]));
 			const Position pos = node.branch().m_links[index];
 			const auto other = Nod::from_page(m_pager.get(pos));
 			return search_subtree(other, target_key);
 		}
 
-		// assert(node.is_leaf());
+		assert(node.is_leaf());
 
 		const auto &keys = node.leaf().m_keys;
 		const auto &vals = node.leaf().m_vals;
@@ -202,7 +209,7 @@ private:
 		auto [midkey, sibling] = node_split(old_root);
 		auto sibling_pos = m_pager.alloc();
 
-		Nod new_root{typename Nod::Metadata(typename Nod::Branch({midkey}, {old_pos, sibling_pos})), new_pos, true};
+		Nod new_root{typename Nod::Metadata(typename Nod::Branch({midkey}, {old_pos, sibling_pos}, {LinkStatus::Valid, LinkStatus::Valid})), new_pos, true};
 
 		m_pager.place(new_pos, new_root.make_page());
 		m_pager.place(old_pos, old_root.make_page());
@@ -225,22 +232,24 @@ private:
 		/// 'node.parent()' contains a valid Position.
 		Nod parent = Nod::from_page(m_pager.get(node.parent()));
 
-		const auto &parent_links = parent.branch().m_links;
+		auto &parent_links = parent.branch().m_links;
+		auto &parent_link_status = parent.branch().m_link_status;
+
 		if (!node_idx_in_parent)
 			node_idx_in_parent.emplace(std::find(parent_links.cbegin(), parent_links.cend(), node_pos) - parent_links.cbegin());
 		if (*node_idx_in_parent >= parent_links.size())
 			throw BadTreeRemove(fmt::format(" - [remove_rebalance] node_idx_in_parent (={}) is out of bounds for parent (@{}) and node (@{})", *node_idx_in_parent, node.parent(), node_pos));
 
-		/* TODO: Link value 0 as of now is a valid link position.
-		   This means that if a node is deleted and the link is replaced by 0, it will seem as if the link is valid. */
-		const bool has_left_sibling = *node_idx_in_parent > 0;
-		const bool has_right_sibling = *node_idx_in_parent < parent.branch().m_links.size() - 1;
+		const bool has_left_sibling = *node_idx_in_parent > 0 && parent_link_status[*node_idx_in_parent - 1] == LinkStatus::Valid;
+		const bool has_right_sibling = *node_idx_in_parent < parent.branch().m_links.size() - 1 && parent_link_status[*node_idx_in_parent + 1] == LinkStatus::Valid;
 
 		enum class RelativeSibling { Left,
 			                     Right };
 		auto borrow_from_sibling = [&](RelativeSibling sibling_rel) {
 			const auto sibling_idx = sibling_rel == RelativeSibling::Left ? *node_idx_in_parent - 1 : *node_idx_in_parent + 1;
-			const Position sibling_pos = parent.branch().m_links[sibling_idx];
+			const Position sibling_pos = parent_links[sibling_idx];
+			if (parent_link_status[sibling_idx] == LinkStatus::Valid)
+				throw BadTreeRemove(fmt::format(" - link status of pos={} marks it as invalid\n", sibling_pos));
 			Nod sibling = Nod::from_page(m_pager.get(sibling_pos));
 
 			if ((sibling.is_branch() && sibling.num_filled() <= min_num_records_branch())
@@ -297,10 +306,15 @@ private:
 		auto make_merged_node_from = [&](const Nod &left, const Nod &right) {
 			if (auto maybe_merged_node = left.merge_with(right); maybe_merged_node) {
 				const auto merged_node_pos = m_pager.alloc();
+
 				// Replace previous 'left' link with new merged node
-				parent.branch().m_links[*node_idx_in_parent - 1] = merged_node_pos;
+				parent_links[*node_idx_in_parent - 1] = merged_node_pos;
+				parent_link_status[*node_idx_in_parent - 1] = LinkStatus::Valid;
+
 				// Remove trailing link of previous 'right'. Expected the rest of the links to shift-left due to 'erase()'.
-				parent.branch().m_links.erase(parent.branch().m_links.cbegin() + *node_idx_in_parent);
+				parent_links.erase(parent_links.cbegin() + *node_idx_in_parent);
+				parent_link_status.erase(parent_link_status.cbegin() + *node_idx_in_parent);
+
 				parent.branch().m_refs[*node_idx_in_parent - 1] = maybe_merged_node->leaf().m_keys.back();
 				m_pager.place(merged_node_pos, maybe_merged_node->make_page());
 			}
@@ -370,9 +384,13 @@ public:
 
 			auto &refs = curr.branch().m_refs;
 			auto &links = curr.branch().m_links;
+			auto &link_status = curr.branch().m_link_status;
 
 			const std::size_t index = std::lower_bound(refs.cbegin(), refs.cend(), key) - refs.cbegin();
 			const Position child_pos = links[index];
+			if (link_status[index] == LinkStatus::Inval)
+				throw BadTreeRemove(fmt::format(" - link status of pos={} marks it as invalid\n", child_pos));
+
 			auto child = Nod::from_page(m_pager.get(child_pos));
 
 			if (!is_node_full(child)) {
@@ -389,6 +407,7 @@ public:
 
 			refs.insert(refs.begin() + index, midkey);
 			links.insert(links.begin() + index + 1, sibling_pos);
+			link_status.insert(link_status.begin() + index + 1, LinkStatus::Valid);
 
 			m_pager.place(sibling_pos, std::move(sibling.make_page()));
 			m_pager.place(child_pos, std::move(child.make_page()));
@@ -412,11 +431,14 @@ public:
 		std::optional<Val> removed;
 		while (true) {
 			if (curr.is_branch()) {
-				auto &refs = curr.branch().m_refs;
-				auto &links = curr.branch().m_links;
+				const auto &refs = curr.branch().m_refs;
+				const auto &links = curr.branch().m_links;
+				const auto &link_status = curr.branch().m_link_status;
 
 				curr_idx_in_parent = std::lower_bound(refs.cbegin(), refs.cend(), key) - refs.cbegin();
 				const Position child_pos = links[curr_idx_in_parent];
+				if (link_status[curr_idx_in_parent] == LinkStatus::Inval)
+					throw BadTreeRemove(fmt::format(" - link status of pos={} marks it as invalid\n", child_pos));
 
 				curr = Nod::from_page(m_pager.get(child_pos));
 				currpos = child_pos;

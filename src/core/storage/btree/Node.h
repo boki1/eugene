@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
 #include <optional>
 #include <tuple>
 #include <utility>
@@ -24,6 +25,8 @@ namespace internal::storage::btree {
 template<BtreeConfig Config>
 class Btree;
 
+enum class LinkStatus : uint8_t { Valid, Inval };
+
 template<BtreeConfig Config = DefaultConfig>
 class Node {
 	friend Btree<Config>;
@@ -38,13 +41,14 @@ public:
 	struct Branch {
 		std::vector<Self::Ref> m_refs;
 		std::vector<Position> m_links;
+		std::vector<LinkStatus> m_link_status;
 
 		constexpr Branch() = default;
-		constexpr Branch(std::vector<Self::Ref> &&refs, std::vector<Position> &&links)
-		    : m_refs{std::move(refs)}, m_links{std::move(links)} {}
+		constexpr Branch(std::vector<Self::Ref> &&refs, std::vector<Position> &&links, std::vector<LinkStatus> &&link_status)
+		    : m_refs{std::move(refs)}, m_links{std::move(links)}, m_link_status{std::move(link_status)} {}
 
 		auto operator<=>(const Branch &) const noexcept = default;
-		NOP_STRUCTURE(Branch, m_refs, m_links);
+		NOP_STRUCTURE(Branch, m_refs, m_links, m_link_status);
 	};
 
 	struct Leaf {
@@ -137,9 +141,11 @@ public:
 			auto &b = branch();
 			Node sibling{meta_of<Branch>(
 			                     break_at_index(b.m_refs, pivot),
-			                     break_at_index(b.m_links, pivot)), parent()};
+			                     break_at_index(b.m_links, pivot),
+								 break_at_index(b.m_link_status, pivot)), parent()};
 			b.m_refs.shrink_to_fit();
 			b.m_links.shrink_to_fit();
+			b.m_link_status.shrink_to_fit();
 			Self::Key midkey = b.m_refs[pivot - 1];
 			return std::make_pair<Self::Key, Self>(std::move(midkey), std::move(sibling));
 		} else {
@@ -193,10 +199,8 @@ private:
 		} else {
 			vec_extend(merged.branch().m_refs, other.branch().m_refs);
 			vec_extend(merged.branch().m_links, other.branch().m_links);
+			vec_extend(merged.branch().m_link_status, other.branch().m_link_status);
 		}
-
-		// Ensure that the node is valid when returned.
-		// assert(!is_full(merged) && !is_underfull(merged));
 
 		return std::make_optional<Node>(std::move(merged));
 	}

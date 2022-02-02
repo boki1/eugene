@@ -56,8 +56,11 @@ public:
 
 		m_out << '[' << join(node.branch().m_refs, ", ") << "]\n";
 		m_out << indentation << (level > 1 ? "  " : "") << "children: \n";
-		for (const auto pos : node.branch().m_links)
-			print_node(node_at(pos), level + 1);
+		for (std::size_t i = 0; i < node.branch().m_links.size(); ++i)
+			if (node.branch().m_link_status[i] == LinkStatus::Inval)
+				fmt::print("- Empty\n");
+			else
+				print_node(node_at(node.branch().m_links[i]), level + 1);
 	}
 
 	void print() noexcept {

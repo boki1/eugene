@@ -39,7 +39,7 @@ static Nod make_node() {
 
 	Metadata metadata;
 	if (dist128(rng) % 2)
-		metadata = Metadata(Branch(std::move(b), std::move(a)));
+		metadata = Metadata(Branch(std::move(b), std::move(a), {}));
 	else
 		metadata = Metadata(Leaf(std::move(b), std::move(b)));
 
@@ -60,7 +60,7 @@ bool contains(const T& collection, V item) {
 }
 
 TEST_CASE("Node serialization", "[btree]") {
-	auto node1 = Nod(Metadata(Branch({1}, {1})), {}, false);
+	auto node1 = Nod(Metadata(Branch({1}, {1}, {})), {}, false);
 	auto node2 = Nod(Metadata(Leaf({2}, {2})), 13, true);
 
 	auto node1_as_page = node1.make_page();
@@ -78,7 +78,7 @@ TEST_CASE("Persistent nodes", "[btree]") {
 	Pager pr("/tmp/eu-persistent-nodes-pager");
 
 	auto node1_pos = pr.alloc();
-	auto node1 = Nod(Metadata(Branch({1}, {1})), {}, false);
+	auto node1 = Nod(Metadata(Branch({1}, {1}, {})), {}, false);
 	auto node1_as_page = node1.make_page();
 	pr.place(node1_pos, std::move(node1_as_page));
 	auto node1_from_page = Nod::from_page(pr.get(node1_pos));
@@ -127,7 +127,7 @@ TEST_CASE("Paging with many random nodes", "[btree]") {
 }
 
 TEST_CASE("Split full nodes", "[btree]") {
-	auto bn = Nod(Metadata(Branch({}, {})), {}, false); auto &b = bn.branch();
+	auto bn = Nod(Metadata(Branch({}, {}, {})), {}, false); auto &b = bn.branch();
 	auto ln = Nod(Metadata(Leaf({}, {})), 13, true); auto &l = ln.leaf();
 
 	constexpr auto limit_branch = 512;
@@ -137,6 +137,7 @@ TEST_CASE("Split full nodes", "[btree]") {
 	for (int i = 0; i < limit_branch; ++i) {
 		b.m_refs.push_back(i);
 		b.m_links.emplace_back(i);
+		b.m_link_status.emplace_back(LinkStatus::Valid);
 	}
 	b.m_links.emplace_back(limit_branch);
 
