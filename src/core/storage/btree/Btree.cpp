@@ -1,6 +1,7 @@
 #include <map>
 #include <random>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include <catch2/catch.hpp>
@@ -21,10 +22,13 @@ T item();
 
 template<>
 int item<int>() {
-	static std::random_device dev;
-	static std::mt19937 rng(dev());
-	static std::uniform_int_distribution<std::mt19937::result_type> dist(1, 10000000);
-	return dist(rng);
+	static int i = 0;
+	return i++;
+
+	//	static std::random_device dev;
+	//	static std::mt19937 rng(dev());
+	//	static std::uniform_int_distribution<std::mt19937::result_type> dist(1, 10000000);
+	//	return dist(rng);
 }
 
 template<>
@@ -38,7 +42,7 @@ bool item<bool>() {
 }
 
 template<BtreeConfig Config>
-auto fill_tree(Btree<Config> &bpt, std::size_t limit = 1000) {
+auto fill_tree(Btree<Config> &bpt, const std::size_t limit = 1000) {
 	using Key = typename Config::Key;
 	using Val = typename Config::Val;
 	std::map<Key, Val> backup;
@@ -85,7 +89,7 @@ void truncate_file(std::string_view fname) {
 }
 
 struct smallstr {
-	static constexpr inline auto sz = 10;
+	static constexpr auto sz = 10;
 	smallstr(std::string &&s) {
 		assert(s.size() == sz);
 		std::memcpy(m_str, s.data(), sz);
@@ -137,17 +141,143 @@ smallstr item<smallstr>() {
 	return smallstr{std::move(str)};
 }
 
+struct TreeFourConfig : DefaultConfig {
+	/// Nodes will have 2 elements in leaves and 3 in branches
+	static inline constexpr int BRANCHING_FACTOR_LEAF = 4;
+	static inline constexpr int BRANCHING_FACTOR_BRANCH = 4;
+};
+
 TEST_CASE("Btree operations", "[btree]") {
-	truncate_file("/tmp/eu-btree-ops");
-	Btree bpt("/tmp/eu-btree-ops");
-	REQUIRE(bpt.contains(42) == false);
-	REQUIRE(bpt.get(42).has_value() == false);
+	SECTION("Empty tree") {
+		truncate_file("/tmp/eu-btree-ops");
+		Btree bpt("/tmp/eu-btree-ops");
+		REQUIRE(bpt.contains(42) == false);
+		REQUIRE(bpt.get(42).has_value() == false);
+		REQUIRE(std::holds_alternative<RemovedNothing>(bpt.remove(42)));
 
 	static const std::size_t limit = 1000;
 	auto backup = fill_tree(bpt, limit);
+	}
 
-	util::BtreePrinter{bpt, "/tmp/eu-btree-ops-printed"}();
-	valid_tree(bpt, backup);
+	SECTION("Insertion") {
+		truncate_file("/tmp/eu-btree-ops");
+		Btree bpt("/tmp/eu-btree-ops");
+		static const std::size_t limit = 1000;
+		auto backup = fill_tree(bpt, limit);
+
+#ifdef EU_PRINTING_TESTS
+		util::BtreePrinter{bpt, "/tmp/eu-btree-ops-printed"}();
+#endif
+		valid_tree(bpt, backup);
+	}
+
+	SECTION("Removal") {
+		SECTION("Simple remove") {
+			truncate_file("/tmp/eu-btree-ops");
+			Btree bpt("/tmp/eu-btree-ops");
+			for (int key = 0; key < bpt.max_num_records_leaf(); ++key)
+				bpt.insert(key, key);
+
+			for (int key = 0; key < bpt.max_num_records_leaf() / 2; ++key) {
+				const auto removed = bpt.remove(key);
+				REQUIRE(std::holds_alternative<RemovedVal<Config::Val>>(removed));
+				REQUIRE(std::get<RemovedVal<Config::Val>>(removed).val == key);
+			}
+		}
+
+		SECTION("Remove with single borrow from sibling leaf") {
+			truncate_file("/tmp/eu-btree-ops");
+			Btree<TreeFourConfig> treefour("/tmp/eu-btree-ops");
+			treefour.insert(4, 4);
+			treefour.insert(2, 2);
+			treefour.insert(5, 5);
+			treefour.insert(6, 6);
+			treefour.insert(7, 7);
+
+			util::BtreePrinter{treefour, "/tmp/eu-btree-ops-remove-with-borrow-1"}();
+
+			// This should trigger a borrow from left node, meaning that. See the contents of '/tmp/eu-btree-ops-remove-with-borrow' for visual aid
+			const auto removed_val = treefour.remove(2);
+			REQUIRE(std::holds_alternative<RemovedVal<Config::Val>>(removed_val));
+			REQUIRE(std::get<RemovedVal<Config::Val>>(removed_val).val == 2);
+
+			util::BtreePrinter{treefour, "/tmp/eu-btree-ops-remove-with-borrow-2"}();
+
+			Btree<TreeFourConfig> treefour2("/tmp/eu-btree-ops");
+			treefour2.insert(4, 4);
+			treefour2.insert(0, 0);
+			treefour2.insert(6, 6);
+			treefour2.insert(1, 1);
+			treefour2.insert(5, 5);
+			util::BtreePrinter{treefour2, "/tmp/eu-btree-ops-remove-with-borrow-3"}();
+
+			const auto removed_val2 = treefour2.remove(6);
+			REQUIRE(std::holds_alternative<RemovedVal<Config::Val>>(removed_val2));
+			REQUIRE(std::get<RemovedVal<Config::Val>>(removed_val2).val == 6);
+
+			util::BtreePrinter{treefour2, "/tmp/eu-btree-ops-remove-with-borrow-4"}();
+		}
+
+		SECTION("Remove with single borrow from sibling branch") {
+			truncate_file("/tmp/eu-btree-ops");
+			Btree<TreeFourConfig> treefour("/tmp/eu-btree-ops");
+			treefour.insert(11, 11);
+			treefour.insert(12, 12);
+			treefour.insert(1, 1);
+			treefour.insert(9, 9);
+			treefour.insert(14, 14);
+			treefour.insert(15, 15);
+			treefour.insert(10, 10);
+			treefour.insert(4, 4);
+
+			util::BtreePrinter{treefour, "/tmp/eu-btree-ops-remove-with-borrow-5"}();
+
+			const auto removed_val = treefour.remove(10);
+			REQUIRE(std::holds_alternative<RemovedVal<Config::Val>>(removed_val));
+			REQUIRE(std::get<RemovedVal<Config::Val>>(removed_val).val == 10);
+
+			util::BtreePrinter{treefour, "/tmp/eu-btree-ops-remove-with-borrow-6"}();
+		}
+
+		SECTION("Remove with simple merge in leaves") {
+			truncate_file("/tmp/eu-btree-ops");
+			Btree<TreeFourConfig> treefour("/tmp/eu-btree-ops");
+			treefour.insert(27, 27);
+			treefour.insert(10, 10);
+			treefour.insert(42, 42);
+			treefour.insert(62, 62);
+			treefour.insert(76, 76);
+			treefour.insert(83, 83);
+
+			util::BtreePrinter{treefour, "/tmp/eu-btree-ops-remove-with-merge-1"}();
+			const auto removed = treefour.remove(62);
+			REQUIRE(std::holds_alternative<RemovedVal<Config::Val>>(removed));
+			REQUIRE(std::get<RemovedVal<Config::Val>>(removed).val == 62);
+			util::BtreePrinter{treefour, "/tmp/eu-btree-ops-remove-with-merge-2"}();
+		}
+
+		SECTION("Remove with merge") {
+			truncate_file("/tmp/eu-btree-ops");
+			Btree<TreeFourConfig> treefour("/tmp/eu-btree-ops");
+			auto backup = fill_tree(treefour, 1000);
+
+			for (int i = 0; i < 500; ++i) {
+				auto random_key = [&] {
+					std::random_device dev;
+					std::mt19937_64 rng(dev());
+
+					std::uniform_int_distribution<size_t> dist(0, backup.size() - 1);
+					auto random_pair = backup.begin();
+					std::advance(random_pair, dist(rng));
+					return random_pair->first;
+				}();
+				const auto removed = treefour.remove(random_key);
+				REQUIRE(std::holds_alternative<RemovedVal<Config::Val>>(removed));
+				REQUIRE(std::get<RemovedVal<Config::Val>>(removed).val == backup.at(random_key));
+				backup.erase(random_key);
+			}
+		}
+	}
 }
 
 TEST_CASE("Header operations", "[btree]") {
@@ -172,32 +302,44 @@ TEST_CASE("Persistent tree", "[btree]") {
 	std::map<typename DefaultConfig::Key, typename DefaultConfig::Val> backup;
 	Position rootpos;
 	{
+#ifdef EU_PRINTING_TESTS
 		fmt::print(" --- Btree #1 start\n");
+#endif
 		Btree bpt("/tmp/eu-persistent-btree");
 		backup = fill_tree(bpt, 1000);
 		valid_tree(bpt, backup);
 
 		bpt.save();
 		rootpos = bpt.rootpos();
+#ifdef EU_PRINTING_TESTS
 		fmt::print(" --- Btree #1 saved\n");
+#endif
 	}
 
 	{
+#ifdef EU_PRINTING_TESTS
 		fmt::print(" --- Btree #2 start\n");
+#endif
 		Btree bpt("/tmp/eu-persistent-btree", true);
 
 		REQUIRE(bpt.rootpos() == rootpos);
 		valid_tree(bpt, backup);
+#ifdef EU_PRINTING_TESTS
 		fmt::print(" --- Btree #2 end (no save)\n");
+#endif
 	}
 
 	{
+#ifdef EU_PRINTING_TESTS
 		fmt::print(" --- Btree #3 start\n");
+#endif
 		Btree bpt("/tmp/eu-persistent-btree");
 		REQUIRE(bpt.size() == 0);
 		for (auto &[key, _] : backup)
 			REQUIRE(!bpt.contains(key));
+#ifdef EU_PRINTING_TESTS
 		fmt::print(" --- Btree #3 end (no save)\n");
+#endif
 	}
 }
 

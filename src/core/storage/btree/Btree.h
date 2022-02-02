@@ -1,10 +1,14 @@
 #pragma once
+
+#include <algorithm>
 #include <cassert>
+#include <exception>
 #include <fstream>
 #include <memory>
 #include <optional>
 #include <sstream>
 #include <utility>
+#include <variant>
 
 #include <fmt/core.h>
 #include <fmt/ranges.h>
@@ -27,6 +31,35 @@ namespace util {
 template<BtreeConfig Config = DefaultConfig>
 class BtreePrinter;
 }
+
+///
+/// Each removal from the tree may result in one of the following outcomes:
+/// 	1. Exception is thrown - `BadTreeRemove` with an appropriate message formatted. This happens only if an
+///		   unexpected event occurs. It does not denote that no element was removed, but some condition under which no
+///		   direct solution is implemented (e.g parent of a node being leaf, rather than branch).
+/// 	2. RemovalReturnMark<>
+///		   Algebraic type which denotes whether any element was removed and if so, what was its associated data. If
+///		   such instance is returned, then the operation was successfully executed.
+///		   2.1 RemovedVal<>
+///			The pair with key matching the provied one was found and successfully erased from the tree. The associated
+///			data could be found in '.val'
+///		  2.2 RemovedNothing
+///			No such item was found and nothing was removed.
+///
+struct BadTreeRemove : std::runtime_error {
+	explicit BadTreeRemove(std::string_view msg) : std::runtime_error{fmt::format("Eugene: Bad tree remove {}", msg.data())} {}
+};
+
+template<typename Val>
+struct RemovedVal {
+	Val val;
+};
+
+struct RemovedNothing {
+};
+
+template<typename Val>
+using RemovalReturnMark = std::variant<RemovedVal<Val>, RemovedNothing>;
 
 template<BtreeConfig Config = DefaultConfig>
 class Btree final {
@@ -66,8 +99,8 @@ public:
 private:
 	static inline constexpr bool APPLY_COMPRESSION = Config::APPLY_COMPRESSION;
 	static inline constexpr int PAGE_CACHE_SIZE = Config::PAGE_CACHE_SIZE;
-	static inline constexpr int BRANCHING_FACTOR_LEAF = 0;
-	static inline constexpr int BRANCHING_FACTOR_BRANCH = 0;
+	static inline constexpr int BRANCHING_FACTOR_LEAF = Config::BRANCHING_FACTOR_LEAF;
+	static inline constexpr int BRANCHING_FACTOR_BRANCH = Config::BRANCHING_FACTOR_BRANCH;
 
 	static inline constexpr uint32_t MAGIC = 0xB75EEA41;
 
@@ -126,6 +159,12 @@ private:
 		return node.is_full(max_num_records_leaf());
 	}
 
+	[[nodiscard]] constexpr bool is_node_underfull(const Self::Nod &node) {
+		if (node.is_branch())
+			return node.is_underfull(min_num_records_branch());
+		return node.is_underfull(min_num_records_leaf());
+	}
+
 	[[nodiscard]] constexpr auto node_split(Self::Nod &node) {
 		if (node.is_branch())
 			return node.split(max_num_records_branch());
@@ -176,6 +215,105 @@ private:
 		return new_root;
 	}
 
+	void remove_rebalance(Nod &node, const Position node_pos, std::optional<std::size_t> node_idx_in_parent = {}, optional_cref<Key> key_to_remove = {}) {
+		/// There is no need to check the upper levels if the current node is valid.
+		/// And there is no more to check if the current node is the root node.
+		if (!is_node_underfull(node) || node.is_root())
+			return;
+
+		/// If 'node' was root we would have already returned. Therefore it is safe to assume that
+		/// 'node.parent()' contains a valid Position.
+		Nod parent = Nod::from_page(m_pager.get(node.parent()));
+
+		const auto &parent_links = parent.branch().m_links;
+		if (!node_idx_in_parent)
+			node_idx_in_parent.emplace(std::find(parent_links.cbegin(), parent_links.cend(), node_pos) - parent_links.cbegin());
+		if (*node_idx_in_parent >= parent_links.size())
+			throw BadTreeRemove(fmt::format(" - [remove_rebalance] node_idx_in_parent (={}) is out of bounds for parent (@{}) and node (@{})", *node_idx_in_parent, node.parent(), node_pos));
+
+		/* TODO: Link value 0 as of now is a valid link position.
+		   This means that if a node is deleted and the link is replaced by 0, it will seem as if the link is valid. */
+		const bool has_left_sibling = *node_idx_in_parent > 0;
+		const bool has_right_sibling = *node_idx_in_parent < parent.branch().m_links.size() - 1;
+
+		enum class RelativeSibling { Left,
+			                     Right };
+		auto borrow_from_sibling = [&](RelativeSibling sibling_rel) {
+			const auto sibling_idx = sibling_rel == RelativeSibling::Left ? *node_idx_in_parent - 1 : *node_idx_in_parent + 1;
+			const Position sibling_pos = parent.branch().m_links[sibling_idx];
+			Nod sibling = Nod::from_page(m_pager.get(sibling_pos));
+
+			if ((sibling.is_branch() && sibling.num_filled() <= min_num_records_branch())
+			    || (sibling.is_leaf() && sibling.num_filled() <= min_num_records_leaf()))
+				return;
+
+			/// If we are borrowing from the left sibling, then we need its biggest key. Otherwise, if we are borrowing
+			/// from the right sibling, then we need its smallest key in order to not violate the tree properties.
+			/// If we borrow the last element of the sibling (its biggest one), then we should put that as node's first,
+			/// since it's smaller than all elements in node.
+			const auto borrowed_idx = sibling_rel == RelativeSibling::Left ? sibling.num_filled() - 1 : 0;
+			const auto borrowed_dest_idx = sibling_rel == RelativeSibling::Left ? 0 : node.num_filled();
+
+			if (node.is_leaf()) {
+				node.leaf().m_vals.insert(node.leaf().m_vals.cbegin() + borrowed_dest_idx, sibling.leaf().m_vals.at(borrowed_idx));
+				node.leaf().m_keys.insert(node.leaf().m_keys.cbegin() + borrowed_dest_idx, sibling.leaf().m_keys.at(borrowed_idx));
+				sibling.leaf().m_vals.erase(sibling.leaf().m_vals.cbegin() + borrowed_idx);
+				sibling.leaf().m_keys.erase(sibling.leaf().m_keys.cbegin() + borrowed_idx);
+			} else {
+				// TODO
+				// We are currently propagating a merge operation upwards in the tree.
+				abort();
+			}
+			const auto new_separator_key = [&] {
+				if (sibling_rel == RelativeSibling::Left)
+					return sibling.items().at(borrowed_idx - 1);
+				return node.items().at(borrowed_dest_idx);
+			}();
+			parent.items()[*node_idx_in_parent] = new_separator_key;
+
+			m_pager.place(node.parent(), parent.make_page());
+			m_pager.place(node_pos, node.make_page());
+			m_pager.place(sibling_pos, sibling.make_page());
+		};
+
+		if (has_left_sibling)
+			borrow_from_sibling(RelativeSibling::Left);
+		if (is_node_underfull(node) && has_right_sibling)
+			borrow_from_sibling(RelativeSibling::Right);
+
+		/// We tried borrowing a single element from the siblings and that successfully
+		/// rebalanced the tree after the removal.
+		if (!is_node_underfull(node))
+			return;
+
+		/// There is a chance that the last element in 'node' is the same as the 'separator_key'. Duplicates are unwanted.
+		if (const auto separator_key = parent.branch().m_refs[*node_idx_in_parent]; separator_key != node.leaf().m_keys.back()) {
+			/// If the separator_key is the same as the key we removed just before calling `remove_rebalance()` we would not like to keep duplicates, so skip adding it.
+			if (key_to_remove.has_value() && separator_key != *key_to_remove)
+				node.leaf().m_keys.push_back(separator_key);
+		}
+		parent.branch().m_refs.pop_back();
+
+		auto make_merged_node_from = [&](const Nod &left, const Nod &right) {
+			if (auto maybe_merged_node = left.merge_with(right); maybe_merged_node) {
+				const auto merged_node_pos = m_pager.alloc();
+				// Replace previous 'left' link with new merged node
+				parent.branch().m_links[*node_idx_in_parent - 1] = merged_node_pos;
+				// Remove trailing link of previous 'right'. Expected the rest of the links to shift-left due to 'erase()'.
+				parent.branch().m_links.erase(parent.branch().m_links.cbegin() + *node_idx_in_parent);
+				parent.branch().m_refs[*node_idx_in_parent - 1] = maybe_merged_node->leaf().m_keys.back();
+				m_pager.place(merged_node_pos, maybe_merged_node->make_page());
+			}
+		};
+
+		if (has_left_sibling)
+			make_merged_node_from(Nod::from_page(m_pager.get(*node_idx_in_parent - 1)), node);
+		else if (has_right_sibling)
+			make_merged_node_from(node, Nod::from_page(m_pager.get(*node_idx_in_parent + 1)));
+
+		remove_rebalance(parent, node.parent());
+	}
+
 public:
 	[[nodiscard]] auto root() { return Nod::from_page(m_pager.get(rootpos())); }
 
@@ -211,11 +349,11 @@ public:
 		Nod curr{root()};
 
 		if (is_node_full(curr))
+
 			curr = make_new_root();
 
 		while (true) {
 			if (curr.is_leaf()) {
-				/* fmt::print(" -- Putting kv pair in leaf ... \n"); */
 				auto &keys = curr.leaf().m_keys;
 				auto &vals = curr.leaf().m_vals;
 
@@ -264,6 +402,58 @@ public:
 				curr = std::move(sibling);
 			}
 		}
+	}
+
+	[[nodiscard]] RemovalReturnMark<Val> remove(const Self::Key &key) {
+		Position currpos{rootpos()};
+		Nod curr{root()};
+		std::size_t curr_idx_in_parent = 0;
+
+		std::optional<Val> removed;
+		while (true) {
+			if (curr.is_branch()) {
+				auto &refs = curr.branch().m_refs;
+				auto &links = curr.branch().m_links;
+
+				curr_idx_in_parent = std::lower_bound(refs.cbegin(), refs.cend(), key) - refs.cbegin();
+				const Position child_pos = links[curr_idx_in_parent];
+
+				curr = Nod::from_page(m_pager.get(child_pos));
+				currpos = child_pos;
+
+				continue;
+			}
+
+			auto &keys = curr.leaf().m_keys;
+			auto &vals = curr.leaf().m_vals;
+
+			const std::size_t index = std::lower_bound(keys.cbegin(), keys.cend(), key) - keys.cbegin();
+			if (index == keys.size() || keys[index] != key)
+				break;
+
+			removed = vals.at(index);
+			keys.erase(keys.cbegin() + index);
+			vals.erase(vals.cbegin() + index);
+			m_pager.place(currpos, curr.make_page());
+			--m_size;
+
+			if (curr.is_root())
+				break;
+
+			auto parent = Nod::from_page(m_pager.get(curr.parent()));
+			if (parent.is_leaf())
+				throw BadTreeRemove("- parent of current is invalid");
+
+			/// Performs any rebalance operations if needed.
+			/// Calls itself recursively to check upper tree levels as well.
+			remove_rebalance(curr, currpos, curr_idx_in_parent, key);
+
+			break;
+		}
+
+		if (removed)
+			return RemovedVal(*removed);
+		return RemovedNothing();
 	}
 
 	[[nodiscard]] constexpr std::optional<Val> get(const Self::Key &key) {
@@ -343,5 +533,4 @@ private:
 
 	std::size_t m_depth{0};
 };
-
 }// namespace internal::storage::btree

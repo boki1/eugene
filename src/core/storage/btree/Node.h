@@ -77,9 +77,11 @@ public:
 	[[nodiscard]] constexpr bool is_root() const noexcept { return m_is_root; }
 
 	[[nodiscard]] constexpr long num_filled() const noexcept { return is_leaf() ? leaf().m_keys.size() : branch().m_refs.size(); }
+	[[nodiscard]] constexpr const auto &items() const noexcept { return is_leaf() ? leaf().m_keys : branch().m_refs; }
+	[[nodiscard]] constexpr auto &items() noexcept { return is_leaf() ? leaf().m_keys : branch().m_refs; }
 
 	[[nodiscard]] constexpr bool is_full(long m) const noexcept { return num_filled() >= m; }
-	[[nodiscard]] constexpr bool is_under(long m) const noexcept { return num_filled() < m / 2 && !m_is_root; }
+	[[nodiscard]] constexpr bool is_underfull(long m) const noexcept { return num_filled() < m / 2 && !m_is_root; }
 
 public:
 	constexpr Node() : m_metadata{} {}
@@ -166,6 +168,37 @@ private:
 		          std::back_inserter(second));
 		target.resize(pivot);
 		return second;
+	}
+
+	/// Create a new node which is a combination of *this and other.
+	/// The created node is returned as a result and is guaranteed to be a valid node, which conforms to the
+	/// btree requirements for a node.
+	constexpr std::optional<Node> merge_with(const Node &other) const {
+		// Merge is performed only of nodes which share a parent (are siblings)
+		// Also a sanity check is done ensuring the nodes are at the same level.
+		if (is_leaf() ^ other.is_leaf() && parent() == other.parent())
+			return {};
+
+		Node merged = this->clone();
+
+		/// Concatenate two std::vectors
+		auto vec_extend = [](auto &vec1, auto &vec2) {
+			vec1.reserve(vec1.size() + vec2.size());
+			vec1.insert(vec1.end(), vec2.begin(), vec2.end());
+		};
+
+		if (is_leaf()) {
+			vec_extend(merged.leaf().m_keys, other.leaf().m_keys);
+			vec_extend(merged.leaf().m_vals, other.leaf().m_vals);
+		} else {
+			vec_extend(merged.branch().m_refs, other.branch().m_refs);
+			vec_extend(merged.branch().m_links, other.branch().m_links);
+		}
+
+		// Ensure that the node is valid when returned.
+		// assert(!is_full(merged) && !is_underfull(merged));
+
+		return std::make_optional<Node>(std::move(merged));
 	}
 
 public:
