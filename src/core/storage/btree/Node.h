@@ -20,12 +20,19 @@
 #include <core/storage/Pager.h>
 #include <core/storage/btree/Config.h>
 
+#include <fmt/core.h>
+
 namespace internal::storage::btree {
 
 template<BtreeConfig Config>
 class Btree;
 
-enum class LinkStatus : uint8_t { Valid, Inval };
+struct BadTreeAccess : std::runtime_error {
+	explicit BadTreeAccess(std::string_view msg) : std::runtime_error{fmt::format("Eugene: Bad tree access {}", msg.data())} {}
+};
+
+enum class LinkStatus : uint8_t { Valid,
+	                          Inval };
 
 template<BtreeConfig Config = DefaultConfig>
 class Node {
@@ -69,13 +76,25 @@ public:
 	[[nodiscard]] constexpr bool is_leaf() const noexcept { return m_metadata.template is<Leaf>(); }
 	[[nodiscard]] constexpr bool is_branch() const noexcept { return m_metadata.template is<Branch>(); }
 
-	// TODO:
-	// Consider adding some error handling here. As of now calling `leaf()` or `branch()` in either of their const
-	// variants _REQUIRES_ that the value inside is actually the one which we ask for.
-	[[nodiscard]] constexpr Leaf &leaf() { return *m_metadata.template get<Leaf>(); }
-	[[nodiscard]] constexpr Branch &branch() { return *m_metadata.template get<Branch>(); }
-	[[nodiscard]] constexpr const Leaf &leaf() const { return *m_metadata.template get<Leaf>(); }
-	[[nodiscard]] constexpr const Branch &branch() const { return *m_metadata.template get<Branch>(); }
+	[[nodiscard]] Leaf &leaf() {
+		if (is_leaf()) return *m_metadata.template get<Leaf>();
+		throw BadTreeAccess(fmt::format(" - branch accessed as leaf\n"));
+	}
+
+	[[nodiscard]] Branch &branch() {
+		if (is_branch()) return *m_metadata.template get<Branch>();
+		throw BadTreeAccess(fmt::format(" - leaf accessed as branch\n"));
+	}
+
+	[[nodiscard]] const Leaf &leaf() const {
+		if (is_leaf()) return *m_metadata.template get<Leaf>();
+		throw BadTreeAccess(fmt::format(" - branch accessed as leaf\n"));
+	}
+
+	[[nodiscard]] const Branch &branch() const {
+		if (is_branch()) return *m_metadata.template get<Branch>();
+		throw BadTreeAccess(fmt::format(" - leaf accessed as branch\n"));
+	}
 
 	[[nodiscard]] constexpr Position parent() const noexcept { return m_parent_pos; }
 	[[nodiscard]] constexpr bool is_root() const noexcept { return m_is_root; }
@@ -142,7 +161,7 @@ public:
 			Node sibling{meta_of<Branch>(
 			                     break_at_index(b.m_refs, pivot),
 			                     break_at_index(b.m_links, pivot),
-								 break_at_index(b.m_link_status, pivot)), parent()};
+			                     break_at_index(b.m_link_status, pivot)), parent()};
 			b.m_refs.shrink_to_fit();
 			b.m_links.shrink_to_fit();
 			b.m_link_status.shrink_to_fit();
