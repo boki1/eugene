@@ -66,6 +66,14 @@ struct BadTreeSearch : std::runtime_error {
 	explicit BadTreeSearch(std::string_view msg) : std::runtime_error{fmt::format("Eugene: Bad tree search {}", msg.data())} {}
 };
 
+struct InsertedKeyVal {};
+struct InsertedNothing {};
+using InsertionReturnMark = std::variant<InsertedKeyVal, InsertedNothing>;
+
+struct BadTreeInsert : std::runtime_error {
+	explicit BadTreeInsert(std::string_view msg) : std::runtime_error{fmt::format("Eugene: Bad tree insert {}", msg.data())} {}
+};
+
 template<BtreeConfig Config = DefaultConfig>
 class Btree final {
 	using Self = Btree<Config>;
@@ -328,42 +336,16 @@ private:
 		remove_rebalance(parent, node.parent());
 	}
 
-public:
-	[[nodiscard]] auto root() { return Nod::from_page(m_pager.get(rootpos())); }
+	/// Action flag to mark whether a <k,v> pair should be replaced if encountered during '???' operation.
+	/// Used in order to provide a reasonable abstraction for update and insert APIs to call.
+	enum class ActionOnKeyPresent { SubmitChange,
+		                        AbandonChange };
 
-	[[nodiscard]] auto &header() noexcept { return m_header; }
-
-	[[nodiscard]] std::string header_name() const noexcept { return fmt::format("{}-header", m_identifier); }
-
-	[[nodiscard]] const auto &rootpos() const noexcept { return m_rootpos; }
-
-	[[nodiscard]] std::size_t size() noexcept { return m_size; }
-
-	[[nodiscard]] std::size_t size() const noexcept { return m_size; }
-
-	[[nodiscard]] bool empty() const noexcept { return size() == 0; }
-
-	[[nodiscard]] bool empty() noexcept { return size() == 0; }
-
-	[[nodiscard]] std::size_t depth() { return m_depth; }
-
-	[[nodiscard]] auto min_num_records_leaf() const noexcept { return (NUM_RECORDS_LEAF + 1) / 2; }
-	[[nodiscard]] auto max_num_records_leaf() const noexcept { return NUM_RECORDS_LEAF; }
-
-	[[nodiscard]] auto min_num_records_branch() const noexcept { return (NUM_RECORDS_BRANCH + 1) / 2; }
-	[[nodiscard]] auto max_num_records_branch() const noexcept { return NUM_RECORDS_BRANCH; }
-
-public:
-	/*
-	 *  Operations API
-	 */
-
-	void insert(const Self::Key &key, const Self::Val &val) {
+	[[nodiscard]] InsertionReturnMark place_kv_entry(const Key &key, const Val &val, ActionOnKeyPresent action) {
 		Position currpos{rootpos()};
 		Nod curr{root()};
 
 		if (is_node_full(curr))
-
 			curr = make_new_root();
 
 		while (true) {
@@ -372,14 +354,16 @@ public:
 				auto &vals = curr.leaf().m_vals;
 
 				const std::size_t index = std::lower_bound(keys.cbegin(), keys.cend(), key) - keys.cbegin();
-				if (!keys.empty() && index < keys.size() && keys[index] == key)
-					return;
 
-				keys.insert(keys.begin() + index, key);
-				vals.insert(vals.begin() + index, val);
+				/// Check for duplicates and take appropriate actions depending on the value of the 'action' flag
+				if (index < keys.size() && keys[index] == key && action == ActionOnKeyPresent::AbandonChange)
+					return InsertedNothing();
+
+				keys.insert(keys.cbegin() + index, key);
+				vals.insert(vals.cbegin() + index, val);
 				m_pager.place(currpos, curr.make_page());
 				++m_size;
-				break;
+				return InsertedKeyVal();
 			}
 
 			auto &refs = curr.branch().m_refs;
@@ -389,7 +373,7 @@ public:
 			const std::size_t index = std::lower_bound(refs.cbegin(), refs.cend(), key) - refs.cbegin();
 			const Position child_pos = links[index];
 			if (link_status[index] == LinkStatus::Inval)
-				throw BadTreeRemove(fmt::format(" - link status of pos={} marks it as invalid\n", child_pos));
+				throw BadTreeInsert(fmt::format(" - link status of pos={} marks it as invalid\n", child_pos));
 
 			auto child = Nod::from_page(m_pager.get(child_pos));
 
@@ -423,7 +407,41 @@ public:
 		}
 	}
 
-	[[nodiscard]] RemovalReturnMark<Val> remove(const Self::Key &key) {
+public:
+	[[nodiscard]] auto root() { return Nod::from_page(m_pager.get(rootpos())); }
+
+	[[nodiscard]] auto &header() noexcept { return m_header; }
+
+	[[nodiscard]] std::string header_name() const noexcept { return fmt::format("{}-header", m_identifier); }
+
+	[[nodiscard]] const auto &rootpos() const noexcept { return m_rootpos; }
+
+	[[nodiscard]] std::size_t size() noexcept { return m_size; }
+
+	[[nodiscard]] std::size_t size() const noexcept { return m_size; }
+
+	[[nodiscard]] bool empty() const noexcept { return size() == 0; }
+
+	[[nodiscard]] bool empty() noexcept { return size() == 0; }
+
+	[[nodiscard]] std::size_t depth() { return m_depth; }
+
+	[[nodiscard]] auto min_num_records_leaf() const noexcept { return (NUM_RECORDS_LEAF + 1) / 2; }
+	[[nodiscard]] auto max_num_records_leaf() const noexcept { return NUM_RECORDS_LEAF; }
+
+	[[nodiscard]] auto min_num_records_branch() const noexcept { return (NUM_RECORDS_BRANCH + 1) / 2; }
+	[[nodiscard]] auto max_num_records_branch() const noexcept { return NUM_RECORDS_BRANCH; }
+
+public:
+	/*
+	 *  Operations API
+	 */
+
+	constexpr InsertionReturnMark insert(const Self::Key &key, const Self::Val &val) {
+		return place_kv_entry(key, val, ActionOnKeyPresent::AbandonChange);
+	}
+
+	constexpr RemovalReturnMark<Val> remove(const Self::Key &key) {
 		Position currpos{rootpos()};
 		Nod curr{root()};
 		std::size_t curr_idx_in_parent = 0;
@@ -478,11 +496,15 @@ public:
 		return RemovedNothing();
 	}
 
-	[[nodiscard]] constexpr std::optional<Val> get(const Self::Key &key) {
+	constexpr InsertionReturnMark update(const Self::Key &key, const Self::Val &val) {
+		return place_kv_entry(key, val, ActionOnKeyPresent::SubmitChange);
+	}
+
+	constexpr std::optional<Val> get(const Self::Key &key) {
 		return search_subtree(root(), key);
 	}
 
-	[[nodiscard]] constexpr bool contains(const Self::Key &key) {
+	constexpr bool contains(const Self::Key &key) {
 		return search_subtree(root(), key).has_value();
 	}
 

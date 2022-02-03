@@ -155,8 +155,8 @@ TEST_CASE("Btree operations", "[btree]") {
 		REQUIRE(bpt.get(42).has_value() == false);
 		REQUIRE(std::holds_alternative<RemovedNothing>(bpt.remove(42)));
 
-	static const std::size_t limit = 1000;
-	auto backup = fill_tree(bpt, limit);
+		static const std::size_t limit = 1000;
+		auto backup = fill_tree(bpt, limit);
 	}
 
 	SECTION("Insertion") {
@@ -184,7 +184,7 @@ TEST_CASE("Btree operations", "[btree]") {
 				REQUIRE(std::get<RemovedVal<Config::Val>>(removed).val == key);
 			}
 		}
-
+		/*
 		SECTION("Remove with single borrow from sibling leaf") {
 			truncate_file("/tmp/eu-btree-ops");
 			Btree<TreeFourConfig> treefour("/tmp/eu-btree-ops");
@@ -277,6 +277,28 @@ TEST_CASE("Btree operations", "[btree]") {
 				backup.erase(random_key);
 			}
 		}
+		*/
+	}
+
+	SECTION("Update") {
+		truncate_file("/tmp/eu-btree-ops");
+		Btree bpt("/tmp/eu-btree-ops");
+		static const std::size_t limit = 1000;
+		auto backup = fill_tree(bpt, limit);
+
+		/// Perform at most 100 updates and check
+		for (int i = 0; i < 100; ++i) {
+			if (item<bool>())
+				continue;
+			const auto key = item<int>();
+			REQUIRE(backup.contains(key) == bpt.contains(key));
+			if (!backup.contains(key))
+				continue;
+			bpt.update(key, key - 1);
+			backup[key] = key - 1;
+		}
+
+		valid_tree(bpt, backup);
 	}
 }
 
