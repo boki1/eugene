@@ -54,8 +54,7 @@ target_link_libraries(LibEugeneCore
         CONAN_PKG::libnop
 		CONAN_PKG::andreasbuhr-cppcoro
         CONAN_PKG::benchmark
-        CONAN_PKG::catch2
-        CONAN_PKG::cppbenchmark)
+		CONAN_PKG::nlohmann_json)
 
 
 if (DEFINED ENV{EUGENE_BUILD_TESTS})
@@ -76,6 +75,8 @@ if (DEFINED ENV{EUGENE_BUILD_TESTS})
 	eugene_test(Pager src/core/storage)
 	eugene_test(Util src/core)
 
+
+
 	add_library(LibTestsShared src/core/storage/compression/tests/Shared.h)
 	set_target_properties(LibTestsShared PROPERTIES LINKER_LANGUAGE CXX)
 	target_include_directories(LibTestsShared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/core/storage/compression/tests")
@@ -91,6 +92,7 @@ if (DEFINED ENV{EUGENE_BUILD_BENCHMARKS})
 	target_link_libraries(BtreeBench PUBLIC LibEugeneCore)
 
 
+
 	add_library(LibCompShared src/core/storage/compression/benchmarks/Shared.h)
 	set_target_properties(LibCompShared PROPERTIES LINKER_LANGUAGE CXX)
 	target_include_directories(LibCompShared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/core/storage/compression/benchmarks")
@@ -101,9 +103,9 @@ if (DEFINED ENV{EUGENE_BUILD_BENCHMARKS})
 	add_executable(bench_decomp src/core/storage/compression/benchmarks/DecompBench.cpp)
 	target_link_libraries(bench_decomp PUBLIC LibEugeneCore LibCompShared)
 
+
 	message("-- Building benchmarks")
 endif()
 
 add_executable(main src/standalone/json-parse/main.cpp)
-target_link_libraries(main
-        CONAN_PKG::nlohmann_json)
+target_link_libraries(main CONAN_PKG::nlohmann_json)
