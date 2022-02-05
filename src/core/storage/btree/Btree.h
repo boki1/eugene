@@ -33,51 +33,26 @@ template<BtreeConfig Config = DefaultConfig>
 class BtreePrinter;
 }
 
-///
-/// Each removal from the tree may result in one of the following outcomes:
-/// 	1. Exception is thrown - `BadTreeRemove` with an appropriate message formatted. This happens only if an
-///		   unexpected event occurs. It does not denote that no element was removed, but some condition under which no
-///		   direct solution is implemented (e.g parent of a node being leaf, rather than branch).
-/// 	2. RemovalReturnMark<>
-///		   Algebraic type which denotes whether any element was removed and if so, what was its associated data. If
-///		   such instance is returned, then the operation was successfully executed.
-///		   2.1 RemovedVal<>
-///			The pair with key matching the provied one was found and successfully erased from the tree. The associated
-///			data could be found in '.val'
-///		  2.2 RemovedNothing
-///			No such item was found and nothing was removed.
-///
 struct BadTreeRemove : std::runtime_error {
 	explicit BadTreeRemove(std::string_view msg) : std::runtime_error{fmt::format("Eugene: Bad tree remove {}", msg.data())} {}
 };
-
-template<typename Val>
-struct RemovedVal {
-	Val val;
-};
-
-struct RemovedNothing {
-};
-
-template<typename Val>
-using RemovalReturnMark = std::variant<RemovedVal<Val>, RemovedNothing>;
 
 struct BadTreeSearch : std::runtime_error {
 	explicit BadTreeSearch(std::string_view msg) : std::runtime_error{fmt::format("Eugene: Bad tree search {}", msg.data())} {}
 };
 
-struct InsertedKeyVal {};
-struct InsertedNothing {};
-using InsertionReturnMark = std::variant<InsertedKeyVal, InsertedNothing>;
-
 struct BadTreeInsert : std::runtime_error {
 	explicit BadTreeInsert(std::string_view msg) : std::runtime_error{fmt::format("Eugene: Bad tree insert {}", msg.data())} {}
 };
 
-template<BtreeConfig Config = DefaultConfig>
-class Btree final {
-	using Self = Btree<Config>;
+/// Action to undertake on B-tree construction
+/// Denotes whether to load the metadata from storage, or to construct a new
+/// bare one.
+enum class ActionOnConstruction : std::uint8_t { Load,
+	                                         Bare };
 
+template<BtreeConfig Config = DefaultConfig>
+class Btree {
 	using Key = typename Config::Key;
 	using Val = typename Config::Val;
 	using Ref = typename Config::Ref;
@@ -88,103 +63,64 @@ class Btree final {
 
 	friend util::BtreePrinter<Config>;
 
-public:
-	//! Number of entries in branch and leaf nodes may differ
-	//! Directly unwrap with `.value()` since we _want to fail at compile time_ in case their is no value which
-	//! satisfies the predicates
-	int NUM_LINKS_BRANCH = BRANCHING_FACTOR_BRANCH > 0 ? BRANCHING_FACTOR_BRANCH : ::internal::binsearch_primitive(2ul, PAGE_SIZE / 2, [](auto current, auto, auto) {
-		                                                                               auto sz = nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Branch(std::vector<Ref>(current), std::vector<Position>(current), std::vector<LinkStatus>(current))), 10, true});
-		                                                                               return sz - PAGE_SIZE;
-	                                                                               }).value_or(0);
-	int NUM_RECORDS_BRANCH = NUM_LINKS_BRANCH - 1;
+	static inline constexpr auto APPLY_COMPRESSION = Config::APPLY_COMPRESSION;
+	static inline constexpr auto PAGE_CACHE_SIZE = Config::PAGE_CACHE_SIZE;
+	static inline constexpr auto BRANCHING_FACTOR_LEAF = Config::BRANCHING_FACTOR_LEAF;
+	static inline constexpr auto BRANCHING_FACTOR_BRANCH = Config::BRANCHING_FACTOR_BRANCH;
 
-	//! Equivalent to `m` in Knuth's definition
-	//! Make sure that when a leaf is split, its contents could be distributed among the two branch nodes.
-	//! Directly unwrap with `.value()` since we _want to fail at compile time_ in case their is no value which
-	//! satisfies the predicates
-	int _NUM_RECORDS_LEAF = BRANCHING_FACTOR_LEAF > 0 ? BRANCHING_FACTOR_LEAF : ::internal::binsearch_primitive(1ul, PAGE_SIZE / 2, [](auto current, auto, auto) {
-		                                                                            return nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Leaf(std::vector<Key>(current), std::vector<Val>(current))), 10, true}) - PAGE_SIZE;
-	                                                                            }).value_or(0);
-	int NUM_RECORDS_LEAF = _NUM_RECORDS_LEAF - 1 >= NUM_RECORDS_BRANCH * 2
-	        ? NUM_RECORDS_BRANCH * 2 - 1
-	        : _NUM_RECORDS_LEAF - 1;
-
-private:
-	static inline constexpr bool APPLY_COMPRESSION = Config::APPLY_COMPRESSION;
-	static inline constexpr int PAGE_CACHE_SIZE = Config::PAGE_CACHE_SIZE;
-	static inline constexpr int BRANCHING_FACTOR_LEAF = Config::BRANCHING_FACTOR_LEAF;
-	static inline constexpr int BRANCHING_FACTOR_BRANCH = Config::BRANCHING_FACTOR_BRANCH;
-
-	static inline constexpr uint32_t MAGIC = 0xB75EEA41;
+	static inline constexpr std::uint32_t HEADER_MAGIC = 0xB75EEA41;
 
 public:
+	/// Tree header
+	/// Stores important metadata about the tree instance that must remain persistent
+	/// Created by 'header()' and stored inside 'header_name()' file.
+	///
+	/// Note: Consider `magic` to be const. However, libnop refuses to compile the library that way.
+
 	struct Header {
-		Position m_rootpos;
-		std::size_t m_size{};
-		std::size_t m_depth{};
-		uint32_t m_magic{MAGIC};
-		uint32_t m_pgcache_size{PAGE_CACHE_SIZE};
-		uint8_t m_apply_compression{APPLY_COMPRESSION};
+		std::uint32_t magic{HEADER_MAGIC};
+		Position tree_rootpos;
+		std::size_t tree_size;
+		std::size_t tree_depth;
+		long tree_num_leaf_records;
+		long tree_num_branch_records;
 
-		/*
-		 * The storage locations of the tree header and the tree contents differ.
-		 * This one stores the name of the file which contains the header of the tree,
-		 * whereas the other name passed to the Btree constructor is the one where
-		 * the actual nodes of the tree are stored.
-		 */
-		std::string m_content_file;
-
-		/*
-		 * We don't want to serialize this. It is used only to check whether the header
-		 * we are currently possessing is valid.
-		 */
-		bool m_dirty{false};
-
-		Header() = default;
-		explicit Header(Position rootpos, std::size_t size, std::size_t depth, std::string_view content_file)
-		    : m_rootpos{rootpos},
-		      m_size{size},
-		      m_depth{depth},
-		      m_content_file{std::string{content_file}} {}
-
-		[[nodiscard]] auto &rootpos() noexcept { return m_rootpos; }
-
-		[[nodiscard]] auto &size() noexcept { return m_size; }
-
-		[[nodiscard]] auto &depth() noexcept { return m_depth; }
-
-		[[nodiscard]] auto &dirty() noexcept { return m_dirty; }
-
-		auto operator<=>(const Header &) const noexcept = default;
-
-		friend std::ostream &operator<<(std::ostream &os, const Header &h) {
-			os << "Header { .rootpos = " << h.m_rootpos << ", .size =" << h.m_size << ", .depth =" << h.m_depth << " }";
-			return os;
-		}
-
-		NOP_STRUCTURE(Header, m_rootpos, m_size, m_depth, m_magic, m_pgcache_size, m_apply_compression, m_content_file);
+		NOP_STRUCTURE(Header, magic, tree_rootpos, tree_size, tree_depth, tree_num_branch_records, tree_num_leaf_records);
 	};
 
 private:
-	[[nodiscard]] constexpr bool is_node_full(const Self::Nod &node) {
+	///
+	/// Helper functions
+	///
+
+	/// Wrapper for checking whether a node has too many elements
+	[[nodiscard]] constexpr bool is_node_full(const Nod &node) {
 		if (node.is_branch())
 			return node.is_full(max_num_records_branch());
 		return node.is_full(max_num_records_leaf());
 	}
 
-	[[nodiscard]] constexpr bool is_node_underfull(const Self::Nod &node) {
+	/// Wrapper for checking whether a node has too few elements
+	[[nodiscard]] constexpr bool is_node_underfull(const Nod &node) {
 		if (node.is_branch())
 			return node.is_underfull(min_num_records_branch());
 		return node.is_underfull(min_num_records_leaf());
 	}
 
-	[[nodiscard]] constexpr auto node_split(Self::Nod &node) {
+	/// Wrapper for calling split API on a given node
+	[[nodiscard]] constexpr auto node_split(Nod &node) {
 		if (node.is_branch())
 			return node.split(max_num_records_branch());
 		return node.split(max_num_records_leaf());
 	}
 
-	[[nodiscard]] std::optional<Val> search_subtree(const Self::Nod &node, const Self::Key &target_key) {
+	/// Tree search logic
+	/// Given a node, traverse it searching for a 'target_key' in the leaves below it.
+	/// Acquire the value associated with it an return it. If no such <key, value> entry
+	/// is found return an empty std::optional. If an error occurs during traversal,
+	/// throw a 'BadTreeSearch' with a descriptive message.
+	/// It gets called by both 'contains()' and 'get()'.
+	[[nodiscard]] std::optional<Val> search_subtree(const Nod &node, const Key &target_key) {
 		if (node.is_branch()) {
 			const auto &refs = node.branch().m_refs;
 			const std::size_t index = std::lower_bound(refs.cbegin(), refs.cend(), target_key) - refs.cbegin();
@@ -205,31 +141,52 @@ private:
 		return vals[it - keys.cbegin()];
 	}
 
-	Nod make_new_root() {
-		auto old_root = root();
-		auto old_pos = m_rootpos;
+	/// Make tree root
+	/// Create a new tree level
+	/// This can either happen if the tree has no root element at all, or because a node
+	/// split has been propagated up to the root node. Either way, a new root is created,
+	/// initialized and stored, as well as other node (if such are created).
 
+	/// Flag denoting whether to make an initial root, or to make it from the existing one.
+	enum class MakeRootAction { BareInit,
+		                    NewTreeLevel };
+
+	Nod make_root(MakeRootAction action) {
 		auto new_pos = m_pager.alloc();
+		auto new_metadata = [&] {
+			if (action == MakeRootAction::BareInit)
+				return Nod::template meta_of<typename Nod::Leaf>();
 
-		old_root.set_parent(new_pos);
-		old_root.set_root(false);
+			auto old_root = root();
+			auto old_pos = m_rootpos;
+			old_root.set_parent(new_pos);
+			old_root.set_root(false);
 
-		auto [midkey, sibling] = node_split(old_root);
-		auto sibling_pos = m_pager.alloc();
+			auto [midkey, sibling] = node_split(old_root);
+			auto sibling_pos = m_pager.alloc();
 
-		Nod new_root{typename Nod::Metadata(typename Nod::Branch({midkey}, {old_pos, sibling_pos}, {LinkStatus::Valid, LinkStatus::Valid})), new_pos, true};
+			m_pager.place(sibling_pos, sibling.make_page());
+			m_pager.place(old_pos, old_root.make_page());
 
+			return Nod::template meta_of<typename Nod::Branch>(std::vector<Ref>{midkey}, std::vector<Position>{old_pos, sibling_pos}, std::vector<LinkStatus>(2, LinkStatus::Valid));
+		}();
+
+		Nod new_root{std::move(new_metadata), new_pos, Nod::RootStatus::IsRoot};
 		m_pager.place(new_pos, new_root.make_page());
-		m_pager.place(old_pos, old_root.make_page());
-		m_pager.place(sibling_pos, sibling.make_page());
-
 		m_rootpos = new_pos;
 		++m_depth;
-		m_header.m_dirty = true;
 
 		return new_root;
 	}
 
+	/// Balance tree out after performed removal operation
+	/// Fix the tree invariants after a performed removal from 'node', place at position 'node_pos'.
+	/// The following operations may be performed: if node's invariants are not violated- nothing,
+	/// if the node is underfull, but any of its siblings are able to lend an entry- do that, and else-
+	/// merge 'node' with one of its siblings. If a merge occurred, the function calls itself recursively,
+	/// fixing any underflows occurring upwards in the tree.
+	///
+	/// TODO: Fix me
 	void remove_rebalance(Nod &node, const Position node_pos, std::optional<std::size_t> node_idx_in_parent = {}, optional_cref<Key> key_to_remove = {}) {
 		/// There is no need to check the upper levels if the current node is valid.
 		/// And there is no more to check if the current node is the root node.
@@ -341,12 +298,22 @@ private:
 	enum class ActionOnKeyPresent { SubmitChange,
 		                        AbandonChange };
 
+	/// Create new <key, value> entry into the tree.
+	/// Wraps insertion/replacement logic. If the key is already present into the tree, it takes action based
+	/// on the 'action' flag passed. The returned value denotes whether a new entry was put into the tree.
+	/// 'BadTreeInsert' may be thrown if an error occurs.
+	/// It gets called by both 'insert()' and 'update()'.
+
+	struct InsertedKeyVal {};
+	struct InsertedNothing {};
+	using InsertionReturnMark = std::variant<InsertedKeyVal, InsertedNothing>;
+
 	[[nodiscard]] InsertionReturnMark place_kv_entry(const Key &key, const Val &val, ActionOnKeyPresent action) {
 		Position currpos{rootpos()};
 		Nod curr{root()};
 
 		if (is_node_full(curr))
-			curr = make_new_root();
+			curr = make_root(MakeRootAction::NewTreeLevel);
 
 		while (true) {
 			if (curr.is_leaf()) {
@@ -355,8 +322,11 @@ private:
 
 				const std::size_t index = std::lower_bound(keys.cbegin(), keys.cend(), key) - keys.cbegin();
 
-				/// Check for duplicates and take appropriate actions depending on the value of the 'action' flag
-				if (index < keys.size() && keys[index] == key && action == ActionOnKeyPresent::AbandonChange)
+				/// If we are called from 'insert' and the key is already present, do nothing,
+				/// if we are called from 'update' and the key is _not_ already present, do nothing.
+				const bool key_is_present = index < keys.size() && keys[index] == key;
+				if ((action == ActionOnKeyPresent::AbandonChange && key_is_present)
+				    || (action == ActionOnKeyPresent::SubmitChange && !key_is_present))
 					return InsertedNothing();
 
 				keys.insert(keys.cbegin() + index, key);
@@ -407,41 +377,115 @@ private:
 		}
 	}
 
+	/// Construct a new empty tree
+	/// Initializes an empty root node leaf and calculates the appropriate value for 'm'
+	constexpr void bare() {
+		[[maybe_unused]] auto new_root = make_root(MakeRootAction::BareInit);
+
+		/// FIXME: A q.a.d solution here.
+		/// Space evaluation done here.
+		/// Perform a binary search in the PAGE_SIZE range to calculate the maximum number of entries that could be stored.
+
+		/// Make sure that when a leaf is split, its contents could be distributed among the two branch nodes.
+		/// Number of entries in branch and leaf nodes may differ
+		m_num_links_branch = BRANCHING_FACTOR_BRANCH > 0
+		        ? BRANCHING_FACTOR_BRANCH
+		        : ::internal::binsearch_primitive(2ul, PAGE_SIZE / 2, [](auto current, auto, auto) {
+			          return nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Branch(std::vector<Ref>(current), std::vector<Position>(current), std::vector<LinkStatus>(current))), 10, Nod::RootStatus::IsInternal}) - PAGE_SIZE;
+		          }).value_or(0);
+		m_num_records_branch = m_num_links_branch - 1;
+
+		auto num_records_leaf_candidate = BRANCHING_FACTOR_LEAF > 0
+		        ? BRANCHING_FACTOR_LEAF
+		        : ::internal::binsearch_primitive(1ul, PAGE_SIZE / 2, [](auto current, auto, auto) {
+			          return nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Leaf(std::vector<Key>(current), std::vector<Val>(current))), 10, Nod::RootStatus::IsInternal}) - PAGE_SIZE;
+		          }).value_or(0);
+
+		m_num_records_leaf = num_records_leaf_candidate - 1 >= m_num_records_branch * 2
+		        ? m_num_records_branch * 2 - 1
+		        : num_records_leaf_candidate - 1;
+	}
+
 public:
-	[[nodiscard]] auto root() { return Nod::from_page(m_pager.get(rootpos())); }
+	///
+	/// Properties access API
+	///
 
-	[[nodiscard]] auto &header() noexcept { return m_header; }
+	/// Get root node of tree
+	/// Somewhat expensive operation if cache is not hot, since a disk read has to be made.
+	[[nodiscard]] Nod root() { return Nod::from_page(m_pager.get(rootpos())); }
 
-	[[nodiscard]] std::string header_name() const noexcept { return fmt::format("{}-header", m_identifier); }
-
+	/// Get position of root node
 	[[nodiscard]] const auto &rootpos() const noexcept { return m_rootpos; }
 
+	/// Get header of tree
+	[[nodiscard]] Header header() noexcept {
+		return Header{
+		        .magic = HEADER_MAGIC,
+		        .tree_rootpos = rootpos(),
+		        .tree_size = size(),
+		        .tree_depth = depth(),
+		        .tree_num_leaf_records = min_num_records_leaf(),
+		        .tree_num_branch_records = min_num_records_branch()};
+	}
+
+	/// Get header name of tree
+	[[nodiscard]] std::string_view header_name() const {
+		static std::string hn = fmt::format("{}-header", m_identifier);
+		return hn;
+	}
+
+	/// Get tree name
+	[[nodiscard]] std::string_view name() const { return m_identifier; }
+
+	/// Get tree size (# of items present)
 	[[nodiscard]] std::size_t size() noexcept { return m_size; }
 
-	[[nodiscard]] std::size_t size() const noexcept { return m_size; }
-
+	/// Check if the tree is empty
 	[[nodiscard]] bool empty() const noexcept { return size() == 0; }
 
-	[[nodiscard]] bool empty() noexcept { return size() == 0; }
-
+	/// Get tree depth (max level of the tree)
 	[[nodiscard]] std::size_t depth() { return m_depth; }
 
-	[[nodiscard]] auto min_num_records_leaf() const noexcept { return (NUM_RECORDS_LEAF + 1) / 2; }
-	[[nodiscard]] auto max_num_records_leaf() const noexcept { return NUM_RECORDS_LEAF; }
+	/// Get limits of the size of leaf nodes (leaves contain [min; max] entries)
+	[[nodiscard]] long min_num_records_leaf() const noexcept { return (m_num_records_leaf + 1) / 2; }
+	[[nodiscard]] long max_num_records_leaf() const noexcept { return m_num_records_leaf; }
 
-	[[nodiscard]] auto min_num_records_branch() const noexcept { return (NUM_RECORDS_BRANCH + 1) / 2; }
-	[[nodiscard]] auto max_num_records_branch() const noexcept { return NUM_RECORDS_BRANCH; }
+	/// Get limits of the size of branch nodes (branch contain [min; max] entries)
+	[[nodiscard]] long min_num_records_branch() const noexcept { return (m_num_records_branch + 1) / 2; }
+	[[nodiscard]] long max_num_records_branch() const noexcept { return m_num_records_branch; }
 
-public:
-	/*
-	 *  Operations API
-	 */
+	///
+	/// Operations API
+	///
 
-	constexpr InsertionReturnMark insert(const Self::Key &key, const Self::Val &val) {
+	/// Submit a new <key, value> entry into the tree
+	/// In order for the change to be applied, it is a requirement that no such key is already
+	/// associated with data in the tree.
+	/// The returned value may contain either 'InsertedKeyVal' or 'InsertedNothing' depending on
+	/// whether the key is distinct.
+	/// An exception 'BadTreeInsert' may be thrown if an unexpected error occurs. It contains an
+	/// appropriate message describing the failure.
+	constexpr InsertionReturnMark insert(const Key &key, const Val &val) {
 		return place_kv_entry(key, val, ActionOnKeyPresent::AbandonChange);
 	}
 
-	constexpr RemovalReturnMark<Val> remove(const Self::Key &key) {
+	/// Remove an existing <key, value> entry from the tree
+	/// If no such entry with the given key is found, no change is made to tree. The returned value
+	/// may contain either 'RemovedVal(Val)' containing a copy of the removed value, or 'RemovedNothing()'
+	/// if no such key was found. It is possible for 'BadTreeRemove' to be thrown if an unexpected
+	/// error occurs.
+	///
+	/// Slight caveat: only the value is discarded from the tree. The key remains since it does not
+	/// break in any way any of the tree invariants. It remains as an additional element to compare with
+	/// in the branch nodes.
+	struct RemovedVal {
+		Val val;
+	};
+	struct RemovedNothing {};
+	using RemovalReturnMark = std::variant<RemovedVal, RemovedNothing>;
+
+	constexpr RemovalReturnMark remove(const Key &key) {
 		Position currpos{rootpos()};
 		Nod curr{root()};
 		std::size_t curr_idx_in_parent = 0;
@@ -496,85 +540,107 @@ public:
 		return RemovedNothing();
 	}
 
-	constexpr InsertionReturnMark update(const Self::Key &key, const Self::Val &val) {
+	/// Replace an existing <key, value> entry with a new <key, value2>
+	/// If no such entry with the given key is found, 'InsertedNothing' is returned, else-
+	/// 'InsertedKeyVal'. An exception 'BadTreeInsert' may be thrown if an unexpected error
+	/// occurs. It contains an appropriate message describing the failure.
+	constexpr InsertionReturnMark update(const Key &key, const Val &val) {
 		return place_kv_entry(key, val, ActionOnKeyPresent::SubmitChange);
 	}
 
-	constexpr std::optional<Val> get(const Self::Key &key) {
+	/// Acquire the value associated with a given key
+	/// Finds the entry described by 'key'. If no such entry is found, an empty std::optional<>.
+	/// If an error occurs during the tree traversal 'BadTreeSearch' is thrown.
+	constexpr std::optional<Val> get(const Key &key) {
 		return search_subtree(root(), key);
 	}
 
-	constexpr bool contains(const Self::Key &key) {
+	/// Check whether <key, val> entry described by the given key is present in the tree
+	/// If an error occurs during the tree traversal 'BadTreeSearch' is thrown.
+	constexpr bool contains(const Key &key) {
 		return search_subtree(root(), key).has_value();
 	}
 
-private:
-	/// Bare intialize an empty tree
-	constexpr void bare() noexcept {
-		m_rootpos = m_pager.alloc();
-		Nod root_initial{typename Nod::Metadata(typename Nod::Leaf({}, {})), m_rootpos, true};
-		m_pager.place(m_rootpos, std::move(root_initial.make_page()));
+	///
+	/// Persistence API
+	///
 
-		// Fill in initial header
-		m_header.rootpos() = m_rootpos;
-		m_header.size() = m_size;
-		m_header.depth() = m_depth;
-	}
+	/// Load tree metadata from storage
+	/// Reads from 'identifier' and 'identifier'-header and initializes the tree's metadata.
+	void load() {
+		Header header_;
 
-public:
-	/*
-	 *  Persistence API
-	 */
-
-	constexpr void load() {
-		nop::Deserializer<nop::StreamReader<std::ifstream>> deserializer{header_name()};
-		if (!deserializer.Read(&m_header))
+		nop::Deserializer<nop::StreamReader<std::ifstream>> deserializer{header_name().data()};
+		if (!deserializer.Read(&header_))
 			throw BadRead();
 
-		m_rootpos = m_header.m_rootpos;
-		m_size = m_header.m_size;
-		m_depth = m_header.m_depth;
+		m_rootpos = header_.tree_rootpos;
+		m_size = header_.tree_size;
+		m_depth = header_.tree_depth;
+		m_num_records_leaf = header_.tree_num_leaf_records;
+		m_num_records_branch = header_.tree_num_branch_records;
+		m_num_links_branch = m_num_records_branch + 1;
 
 		m_pager.load();
 	}
 
-	constexpr void save() {
-		if (m_header.dirty()) {
-			m_header.rootpos() = m_rootpos;
-			m_header.size() = m_size;
-			m_header.dirty() = false;
-		}
-
-		nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{header_name(), std::ios::trunc};
-		if (!serializer.Write(m_header))
+	/// Store tree metadata to storage
+	/// Stores tree's metadata inside files 'identifier' and 'identifier'-header.
+	void save() {
+		nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{header_name().data(), std::ios::trunc};
+		if (!serializer.Write(header()))
 			throw BadWrite();
 
 		m_pager.save();
 	}
 
-public:
-	explicit Btree(std::string_view identifier, bool load_from_header = false)
-	    : m_pager{identifier},
-	      m_identifier{identifier} {
-
-		// static_assert(NUM_LINKS_BRANCH >= 2);
-		// static_assert(NUM_RECORDS_BRANCH > 1);
-		// static_assert(NUM_RECORDS_LEAF > 1);
-
-		load_from_header ? load() : bare();
+	/// Validity
+	/// Check whether the tree object is valid
+	/// Returns 'true' if it is alright and 'false' if not.
+	constexpr bool sanity_check() const {
+		return (m_num_records_leaf > 1)
+		        && (m_num_records_branch > 1)
+		        && (m_num_links_branch >= 2)
+		        && (m_num_records_leaf - 1 >= m_num_records_branch * 2);
 	}
+
+public:
+	Btree(std::string_view identifier = "/tmp/eu-btree-default", ActionOnConstruction action_on_construction = ActionOnConstruction::Bare) : m_pager{identifier}, m_identifier{identifier} {
+		using enum ActionOnConstruction;
+
+		// clang-format off
+		switch (action_on_construction) {
+		  break; case Load: load();
+                  break; case Bare: bare();
+		}
+		// clang-format on
+
+		/// For debug build, additionally check whether the initialized instance represent a valid B-tree
+		//		assert(sanity_check());
+	}
+
+	Btree(const Btree &) = default;
+	Btree(Btree &&) noexcept = default;
+
+	Btree &operator=(const Btree &) = default;
+	Btree &operator=(Btree &&) noexcept = default;
+
+	virtual ~Btree() noexcept = default;
+
+	auto operator<=>(const Btree &) const noexcept = default;
 
 private:
 	Pager<PagerAllocatorPolicy, PagerEvictionPolicy> m_pager;
-
-	const std::string_view m_identifier;
-
-	mutable Header m_header;
-
+	const std::string m_identifier;
 	Position m_rootpos;
-
 	std::size_t m_size{0};
-
 	std::size_t m_depth{0};
+
+	/// Minimum num of records stored in a leaf node
+	std::size_t m_num_records_leaf{0};
+
+	/// Minimum num of records stored in a branch node
+	std::size_t m_num_records_branch{0};
+	std::size_t m_num_links_branch{0};
 };
 }// namespace internal::storage::btree

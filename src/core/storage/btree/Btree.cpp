@@ -15,7 +15,7 @@
 using namespace internal::storage::btree;
 using internal::storage::Position;
 
-#undef EU_PRINTING_TESTS
+static constexpr bool EU_PRINTING_TESTS = false;
 
 template<typename T>
 T item();
@@ -46,9 +46,7 @@ auto fill_tree(Btree<Config> &bpt, const std::size_t limit = 1000) {
 	using Key = typename Config::Key;
 	using Val = typename Config::Val;
 	std::map<Key, Val> backup;
-#ifdef EU_PRINTING_TESTS
-	int i = 0;
-#endif
+	[[maybe_unused]] int i = 0;
 
 	while (backup.size() != limit) {
 		auto key = item<Key>();
@@ -58,9 +56,8 @@ auto fill_tree(Btree<Config> &bpt, const std::size_t limit = 1000) {
 			continue;
 		}
 
-#ifdef EU_PRINTING_TESTS
-		fmt::print("Element #{} inserted.\n", ++i);
-#endif
+		if constexpr (EU_PRINTING_TESTS)
+			fmt::print("Element #{} inserted.\n", ++i);
 
 		bpt.insert(key, val);
 		backup.emplace(key, val);
@@ -73,13 +70,10 @@ auto fill_tree(Btree<Config> &bpt, const std::size_t limit = 1000) {
 template<BtreeConfig Config>
 void valid_tree(Btree<Config> &bpt, const std::map<typename Config::Key, typename Config::Val> &backup) {
 	REQUIRE(bpt.size() == backup.size());
-#ifdef EU_PRINTING_TESTS
-	std::size_t i = 1;
-#endif
+	[[maybe_unused]] std::size_t i = 1;
 	for (const auto &[key, val] : backup) {
-#ifdef EU_PRINTING_TESTS
-		fmt::print(" [{}]: '{}' => '{}'\n", i++, key, val);
-#endif
+		if constexpr (EU_PRINTING_TESTS)
+			fmt::print(" [{}]: '{}' => '{}'\n", i++, key, val);
 		REQUIRE(bpt.get(key).value() == val);
 	}
 }
@@ -147,13 +141,17 @@ struct TreeFourConfig : DefaultConfig {
 	static inline constexpr int BRANCHING_FACTOR_BRANCH = 4;
 };
 
+using Bt = Btree<DefaultConfig>;
 TEST_CASE("Btree operations", "[btree]") {
 	SECTION("Empty tree") {
 		truncate_file("/tmp/eu-btree-ops");
-		Btree bpt("/tmp/eu-btree-ops");
+		Bt bpt("/tmp/eu-btree-ops");
+
 		REQUIRE(bpt.contains(42) == false);
 		REQUIRE(bpt.get(42).has_value() == false);
-		REQUIRE(std::holds_alternative<RemovedNothing>(bpt.remove(42)));
+		REQUIRE(std::holds_alternative<Bt::RemovedNothing>(bpt.remove(42)));
+
+//		REQUIRE(bpt.sanity_check());
 
 		static const std::size_t limit = 1000;
 		auto backup = fill_tree(bpt, limit);
@@ -161,27 +159,26 @@ TEST_CASE("Btree operations", "[btree]") {
 
 	SECTION("Insertion") {
 		truncate_file("/tmp/eu-btree-ops");
-		Btree bpt("/tmp/eu-btree-ops");
+		Bt bpt("/tmp/eu-btree-ops");
 		static const std::size_t limit = 1000;
 		auto backup = fill_tree(bpt, limit);
 
-#ifdef EU_PRINTING_TESTS
-		util::BtreePrinter{bpt, "/tmp/eu-btree-ops-printed"}();
-#endif
+		if constexpr (EU_PRINTING_TESTS)
+			util::BtreePrinter{bpt, "/tmp/eu-btree-ops-printed"}();
 		valid_tree(bpt, backup);
 	}
 
 	SECTION("Removal") {
 		SECTION("Simple remove") {
 			truncate_file("/tmp/eu-btree-ops");
-			Btree bpt("/tmp/eu-btree-ops");
+			Bt bpt("/tmp/eu-btree-ops");
 			for (int key = 0; key < bpt.max_num_records_leaf(); ++key)
 				bpt.insert(key, key);
 
 			for (int key = 0; key < bpt.max_num_records_leaf() / 2; ++key) {
 				const auto removed = bpt.remove(key);
-				REQUIRE(std::holds_alternative<RemovedVal<Config::Val>>(removed));
-				REQUIRE(std::get<RemovedVal<Config::Val>>(removed).val == key);
+				REQUIRE(std::holds_alternative<Bt::RemovedVal>(removed));
+				REQUIRE(std::get<Bt::RemovedVal>(removed).val == key);
 			}
 		}
 		/*
@@ -198,8 +195,8 @@ TEST_CASE("Btree operations", "[btree]") {
 
 			// This should trigger a borrow from left node, meaning that. See the contents of '/tmp/eu-btree-ops-remove-with-borrow' for visual aid
 			const auto removed_val = treefour.remove(2);
-			REQUIRE(std::holds_alternative<RemovedVal<Config::Val>>(removed_val));
-			REQUIRE(std::get<RemovedVal<Config::Val>>(removed_val).val == 2);
+			REQUIRE(std::holds_alternative<RemovedVal>(removed_val));
+			REQUIRE(std::get<RemovedVal>(removed_val).val == 2);
 
 			util::BtreePrinter{treefour, "/tmp/eu-btree-ops-remove-with-borrow-2"}();
 
@@ -212,8 +209,8 @@ TEST_CASE("Btree operations", "[btree]") {
 			util::BtreePrinter{treefour2, "/tmp/eu-btree-ops-remove-with-borrow-3"}();
 
 			const auto removed_val2 = treefour2.remove(6);
-			REQUIRE(std::holds_alternative<RemovedVal<Config::Val>>(removed_val2));
-			REQUIRE(std::get<RemovedVal<Config::Val>>(removed_val2).val == 6);
+			REQUIRE(std::holds_alternative<RemovedVal>(removed_val2));
+			REQUIRE(std::get<RemovedVal>(removed_val2).val == 6);
 
 			util::BtreePrinter{treefour2, "/tmp/eu-btree-ops-remove-with-borrow-4"}();
 		}
@@ -233,8 +230,8 @@ TEST_CASE("Btree operations", "[btree]") {
 			util::BtreePrinter{treefour, "/tmp/eu-btree-ops-remove-with-borrow-5"}();
 
 			const auto removed_val = treefour.remove(10);
-			REQUIRE(std::holds_alternative<RemovedVal<Config::Val>>(removed_val));
-			REQUIRE(std::get<RemovedVal<Config::Val>>(removed_val).val == 10);
+			REQUIRE(std::holds_alternative<RemovedVal>(removed_val));
+			REQUIRE(std::get<RemovedVal>(removed_val).val == 10);
 
 			util::BtreePrinter{treefour, "/tmp/eu-btree-ops-remove-with-borrow-6"}();
 		}
@@ -251,8 +248,8 @@ TEST_CASE("Btree operations", "[btree]") {
 
 			util::BtreePrinter{treefour, "/tmp/eu-btree-ops-remove-with-merge-1"}();
 			const auto removed = treefour.remove(62);
-			REQUIRE(std::holds_alternative<RemovedVal<Config::Val>>(removed));
-			REQUIRE(std::get<RemovedVal<Config::Val>>(removed).val == 62);
+			REQUIRE(std::holds_alternative<RemovedVal>(removed));
+			REQUIRE(std::get<RemovedVal>(removed).val == 62);
 			util::BtreePrinter{treefour, "/tmp/eu-btree-ops-remove-with-merge-2"}();
 		}
 
@@ -272,8 +269,8 @@ TEST_CASE("Btree operations", "[btree]") {
 					return random_pair->first;
 				}();
 				const auto removed = treefour.remove(random_key);
-				REQUIRE(std::holds_alternative<RemovedVal<Config::Val>>(removed));
-				REQUIRE(std::get<RemovedVal<Config::Val>>(removed).val == backup.at(random_key));
+				REQUIRE(std::holds_alternative<RemovedVa>(removed));
+				REQUIRE(std::get<RemovedVal>(removed).val == backup.at(random_key));
 				backup.erase(random_key);
 			}
 		}
@@ -282,11 +279,10 @@ TEST_CASE("Btree operations", "[btree]") {
 
 	SECTION("Update") {
 		truncate_file("/tmp/eu-btree-ops");
-		Btree bpt("/tmp/eu-btree-ops");
+		Bt bpt("/tmp/eu-btree-ops");
 		static const std::size_t limit = 1000;
 		auto backup = fill_tree(bpt, limit);
 
-		/// Perform at most 100 updates and check
 		for (int i = 0; i < 100; ++i) {
 			if (item<bool>())
 				continue;
@@ -294,8 +290,11 @@ TEST_CASE("Btree operations", "[btree]") {
 			REQUIRE(backup.contains(key) == bpt.contains(key));
 			if (!backup.contains(key))
 				continue;
+			const auto old_val = *bpt.get(key);
 			bpt.update(key, key - 1);
 			backup[key] = key - 1;
+			if constexpr (EU_PRINTING_TESTS)
+				fmt::print("Updating tree entry <{}, {}> to <{}, {}>\n", key, old_val, key, *bpt.get(key));
 		}
 
 		valid_tree(bpt, backup);
@@ -305,16 +304,19 @@ TEST_CASE("Btree operations", "[btree]") {
 TEST_CASE("Header operations", "[btree]") {
 	truncate_file("/tmp/eu-headerops");
 	truncate_file("/tmp/eu-headerops-header");
-	Btree bpt("/tmp/eu-headerops");
+	Bt bpt("/tmp/eu-headerops");
 	bpt.save();
 
-	Btree bpt2("/tmp/eu-headerops");
-	bpt2.header().size() = 100;
-	bpt2.header().depth() = 1;
+	Bt bpt2("/tmp/eu-headerops");
+
+	for (int i = 0; i < bpt2.max_num_records_leaf() + 1; ++i)
+		bpt2.insert(i, i);
+	REQUIRE(bpt.header().tree_size != bpt2.header().tree_size);
+	REQUIRE(bpt.header().tree_depth != bpt2.header().tree_depth);
 
 	bpt2.load();
-
-	REQUIRE(bpt.header() == bpt2.header());
+	REQUIRE(bpt.header().tree_size == bpt2.header().tree_size);
+	REQUIRE(bpt.header().tree_depth == bpt2.header().tree_depth);
 }
 
 TEST_CASE("Persistent tree", "[btree]") {
@@ -323,45 +325,38 @@ TEST_CASE("Persistent tree", "[btree]") {
 
 	std::map<typename DefaultConfig::Key, typename DefaultConfig::Val> backup;
 	Position rootpos;
-	{
-#ifdef EU_PRINTING_TESTS
-		fmt::print(" --- Btree #1 start\n");
-#endif
-		Btree bpt("/tmp/eu-persistent-btree");
+	/*SECTION("Tree #1") */{
+		if constexpr (EU_PRINTING_TESTS)
+			fmt::print(" --- Btree #1 start\n");
+		Bt bpt("/tmp/eu-persistent-btree", ActionOnConstruction::Bare);
 		backup = fill_tree(bpt, 1000);
 		valid_tree(bpt, backup);
 
 		bpt.save();
 		rootpos = bpt.rootpos();
-#ifdef EU_PRINTING_TESTS
-		fmt::print(" --- Btree #1 saved\n");
-#endif
+		if constexpr (EU_PRINTING_TESTS)
+			fmt::print(" --- Btree #1 saved\n");
 	}
+	/*SECTION("Tree #2") */{
+		if constexpr (EU_PRINTING_TESTS)
+			fmt::print(" --- Btree #2 start\n");
 
-	{
-#ifdef EU_PRINTING_TESTS
-		fmt::print(" --- Btree #2 start\n");
-#endif
-		Btree bpt("/tmp/eu-persistent-btree", true);
+		Bt bpt("/tmp/eu-persistent-btree", ActionOnConstruction::Load);
 
 		REQUIRE(bpt.rootpos() == rootpos);
 		valid_tree(bpt, backup);
-#ifdef EU_PRINTING_TESTS
-		fmt::print(" --- Btree #2 end (no save)\n");
-#endif
+		if constexpr (EU_PRINTING_TESTS)
+			fmt::print(" --- Btree #2 end (no save)\n");
 	}
-
-	{
-#ifdef EU_PRINTING_TESTS
-		fmt::print(" --- Btree #3 start\n");
-#endif
-		Btree bpt("/tmp/eu-persistent-btree");
+	/*SECTION("Tree #3") */{
+		if constexpr (EU_PRINTING_TESTS)
+			fmt::print(" --- Btree #3 start\n");
+		Bt bpt("/tmp/eu-persistent-btree", ActionOnConstruction::Bare);
 		REQUIRE(bpt.size() == 0);
 		for (auto &[key, _] : backup)
 			REQUIRE(!bpt.contains(key));
-#ifdef EU_PRINTING_TESTS
-		fmt::print(" --- Btree #3 end (no save)\n");
-#endif
+		if constexpr (EU_PRINTING_TESTS)
+			fmt::print(" --- Btree #3 end (no save)\n");
 	}
 }
 
@@ -388,14 +383,11 @@ TEST_CASE("Custom Config Btree Primitive Type", "[btree]") {
 
 	REQUIRE(bpt.size() == limit);
 
-#ifdef EU_PRINTING_TESTS
-	std::size_t i = 1;
-#endif
+	[[maybe_unused]] std::size_t i = 1;
 
 	for (const auto &[key, val] : backup) {
-#ifdef EU_PRINTING_TESTS
-		fmt::print(" [{}]: '{}' => '{}'\n", i++, key, val);
-#endif
+		if constexpr (EU_PRINTING_TESTS)
+			fmt::print(" [{}]: '{}' => '{}'\n", i++, key, val);
 		REQUIRE(bpt.get(key).value() == val);
 	}
 }
@@ -449,12 +441,14 @@ struct CustomConfigAggregate : DefaultConfig {
 	using Key = smallstr;
 	using Val = Person;
 	using Ref = smallstr;
+
+	static inline constexpr int BRANCHING_FACTOR_LEAF = 83;
+	static inline constexpr int BRANCHING_FACTOR_BRANCH = 84;
 };
 
 TEST_CASE("Custom Config Btree Aggregate Type", "[btree]") {
 	truncate_file("/tmp/eu-btree-custom-config");
 	Btree<CustomConfigAggregate> bpt{"/tmp/eu-btree-custom-config"};
-	bpt.NUM_RECORDS_LEAF = 83;
 
 	static const std::size_t limit = 1000;
 	auto backup = fill_tree(bpt, limit);

@@ -47,7 +47,7 @@ static Nod make_node() {
 	if (auto pp = dist128(rng); pp < 75)
 		p = pp;
 
-	return Node(std::move(metadata), p, dist128(rng) % 2);
+	return Node(std::move(metadata), p, dist128(rng) % 2 ? Nod::RootStatus::IsInternal : Nod::RootStatus::IsRoot);
 }
 
 void truncate_file(std::string_view fname) {
@@ -60,8 +60,8 @@ bool contains(const T& collection, V item) {
 }
 
 TEST_CASE("Node serialization", "[btree]") {
-	auto node1 = Nod(Metadata(Branch({1}, {1}, {})), {}, false);
-	auto node2 = Nod(Metadata(Leaf({2}, {2})), 13, true);
+	auto node1 = Nod(Metadata(Branch({1}, {1}, {})), {}, Nod::RootStatus::IsInternal);
+	auto node2 = Nod(Metadata(Leaf({2}, {2})), 13, Nod::RootStatus::IsInternal);
 
 	auto node1_as_page = node1.make_page();
 	auto node2_as_page = node2.make_page();
@@ -78,7 +78,7 @@ TEST_CASE("Persistent nodes", "[btree]") {
 	Pager pr("/tmp/eu-persistent-nodes-pager");
 
 	auto node1_pos = pr.alloc();
-	auto node1 = Nod(Metadata(Branch({1}, {1}, {})), {}, false);
+	auto node1 = Nod(Metadata(Branch({1}, {1}, {})), {}, Nod::RootStatus::IsInternal);
 	auto node1_as_page = node1.make_page();
 	pr.place(node1_pos, std::move(node1_as_page));
 	auto node1_from_page = Nod::from_page(pr.get(node1_pos));
@@ -86,7 +86,7 @@ TEST_CASE("Persistent nodes", "[btree]") {
 	REQUIRE(node1_from_page.is_root() == false);
 
 	auto node2_pos = pr.alloc();
-	auto node2 = Nod(Metadata(Leaf({2}, {2})), 13, true);
+	auto node2 = Nod(Metadata(Leaf({2}, {2})), 13, Nod::RootStatus::IsRoot);
 	auto node2_as_page = node2.make_page();
 	pr.place(node2_pos, std::move(node2_as_page));
 	auto node2_from_page = Nod::from_page(pr.get(node2_pos));
@@ -127,8 +127,8 @@ TEST_CASE("Paging with many random nodes", "[btree]") {
 }
 
 TEST_CASE("Split full nodes", "[btree]") {
-	auto bn = Nod(Metadata(Branch({}, {}, {})), {}, false); auto &b = bn.branch();
-	auto ln = Nod(Metadata(Leaf({}, {})), 13, true); auto &l = ln.leaf();
+	auto bn = Nod(Metadata(Branch({}, {}, {})), {}, Nod::RootStatus::IsInternal); auto &b = bn.branch();
+	auto ln = Nod(Metadata(Leaf({}, {})), 13, Nod::RootStatus::IsInternal); auto &l = ln.leaf();
 
 	constexpr auto limit_branch = 512;
 	constexpr auto limit_leaf = 512;

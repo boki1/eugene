@@ -275,8 +275,7 @@ public:
 	    : m_allocator{std::forward<Args>(args)...},
 		  m_identifier{identifier},
 	      m_disk{identifier.data()} {
-		using enum ActionOnConstruction;
-		if (action == Load)
+		if (action == ActionOnConstruction::Load)
 			load();
 	}
 

@@ -3,19 +3,19 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <iostream>
 #include <optional>
 #include <tuple>
 #include <utility>
 #include <vector>
-#include <iostream>
 
 #include <nop/serializer.h>
 #include <nop/status.h>
 #include <nop/structure.h>
 #include <nop/types/variant.h>
-#include <nop/utility/die.h>
 #include <nop/utility/buffer_reader.h>
 #include <nop/utility/buffer_writer.h>
+#include <nop/utility/die.h>
 
 #include <core/storage/Pager.h>
 #include <core/storage/btree/Config.h>
@@ -77,23 +77,27 @@ public:
 	[[nodiscard]] constexpr bool is_branch() const noexcept { return m_metadata.template is<Branch>(); }
 
 	[[nodiscard]] Leaf &leaf() {
-		if (is_leaf()) return *m_metadata.template get<Leaf>();
-		throw BadTreeAccess(fmt::format(" - branch accessed as leaf\n"));
+//		if (is_leaf())
+			return *m_metadata.template get<Leaf>();
+//		throw BadTreeAccess(fmt::format(" - branch accessed as leaf\n"));
 	}
 
 	[[nodiscard]] Branch &branch() {
-		if (is_branch()) return *m_metadata.template get<Branch>();
-		throw BadTreeAccess(fmt::format(" - leaf accessed as branch\n"));
+//		if (is_branch())
+			return *m_metadata.template get<Branch>();
+//		throw BadTreeAccess(fmt::format(" - leaf accessed as branch\n"));
 	}
 
 	[[nodiscard]] const Leaf &leaf() const {
-		if (is_leaf()) return *m_metadata.template get<Leaf>();
-		throw BadTreeAccess(fmt::format(" - branch accessed as leaf\n"));
+//		if (is_leaf())
+			return *m_metadata.template get<Leaf>();
+//		throw BadTreeAccess(fmt::format(" - branch accessed as leaf\n"));
 	}
 
 	[[nodiscard]] const Branch &branch() const {
-		if (is_branch()) return *m_metadata.template get<Branch>();
-		throw BadTreeAccess(fmt::format(" - leaf accessed as branch\n"));
+//		if (is_branch())
+			return *m_metadata.template get<Branch>();
+//		throw BadTreeAccess(fmt::format(" - leaf accessed as branch\n"));
 	}
 
 	[[nodiscard]] constexpr Position parent() const noexcept { return m_parent_pos; }
@@ -107,11 +111,14 @@ public:
 	[[nodiscard]] constexpr bool is_underfull(long m) const noexcept { return num_filled() < m / 2 && !m_is_root; }
 
 public:
+	enum class RootStatus { IsRoot,
+		                IsInternal };
+
 	constexpr Node() : m_metadata{} {}
 
-	constexpr Node(Metadata &&metadata, Position parent_pos, bool is_root = false)
+	constexpr Node(Metadata &&metadata, Position parent_pos, RootStatus rs = RootStatus::IsInternal)
 	    : m_metadata{std::move(metadata)},
-	      m_is_root{is_root},
+	      m_is_root{rs == RootStatus::IsRoot},
 	      m_parent_pos{parent_pos} {}
 
 private:
@@ -161,7 +168,8 @@ public:
 			Node sibling{meta_of<Branch>(
 			                     break_at_index(b.m_refs, pivot),
 			                     break_at_index(b.m_links, pivot),
-			                     break_at_index(b.m_link_status, pivot)), parent()};
+			                     break_at_index(b.m_link_status, pivot)),
+			             parent()};
 			b.m_refs.shrink_to_fit();
 			b.m_links.shrink_to_fit();
 			b.m_link_status.shrink_to_fit();
@@ -171,7 +179,8 @@ public:
 			auto &l = leaf();
 			Node sibling{meta_of<Leaf>(
 			                     break_at_index(l.m_keys, pivot),
-			                     break_at_index(l.m_vals, pivot)), parent()};
+			                     break_at_index(l.m_vals, pivot)),
+			             parent()};
 			l.m_keys.shrink_to_fit();
 			l.m_vals.shrink_to_fit();
 			Self::Key midkey = l.m_keys[pivot - 1];
@@ -230,6 +239,7 @@ public:
 	void set_root(bool flag = true) noexcept { m_is_root = flag; }
 
 	void set_parent(Position pos) noexcept { m_parent_pos = pos; }
+
 private:
 	Metadata m_metadata;
 	bool m_is_root{false};

@@ -3,11 +3,16 @@
 #include <concepts>
 #include <cstdint>
 
+#include <nop/structure.h>
+
 #include <core/SizeMetrics.h>
 #include <core/storage/Pager.h>
 
 namespace internal::storage::btree {
 
+/// Btree configuration
+/// Contains information about the entry types (<key, val> types), pager algorithms, sizes, etc.
+/// It is expected that the used derives from this class and defines its own configuration setup for the specific use case.
 struct Config {
 	using Key = int;
 	using Val = int;
