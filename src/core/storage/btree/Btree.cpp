@@ -1,5 +1,6 @@
 #include <map>
 #include <random>
+#include <ranges>
 #include <string>
 #include <variant>
 #include <vector>
@@ -298,6 +299,44 @@ TEST_CASE("Btree operations", "[btree]") {
 		}
 
 		valid_tree(bpt, backup);
+	}
+
+	SECTION("Queries") {
+		Bt tree;
+		truncate_file("/tmp/eu-btree-ops-queries");
+		Bt bpt("/tmp/eu-btree-ops-queries");
+		std::vector<Bt::Entry> inserted_entries;
+		const int limit = 100'000;
+		for (const int item : std::ranges::views::iota(0, limit)) {
+			inserted_entries.push_back(Bt::Entry{item, item});
+			bpt.insert(item, item);
+		}
+
+		REQUIRE(*bpt.get_min_entry() == Bt::Entry{.key = 0, .val = 0});
+		REQUIRE(*bpt.get_max_entry() == Bt::Entry{.key = limit - 1, .val = limit - 1});
+
+		std::vector<Bt::Entry> fetched_entries;
+		for (const Bt::Entry &item : bpt.get_all_entries())
+			fetched_entries.push_back(item);
+		REQUIRE(std::ranges::equal(fetched_entries, inserted_entries));
+
+		std::vector<Bt::Entry> inserted_entries_with_odd_keys{inserted_entries};
+		std::erase_if(inserted_entries_with_odd_keys, [](const Bt::Entry &entry) { return entry.key % 2 == 0; });
+
+		std::vector<Bt::Entry> fetched_entries_with_odd_keys;
+		for (const Bt::Entry &item : bpt.get_all_entries_filtered([] (const Bt::Entry entry) { return entry.key % 2 != 0; }))
+			fetched_entries_with_odd_keys.push_back(item);
+
+		REQUIRE(std::ranges::equal(fetched_entries_with_odd_keys, inserted_entries_with_odd_keys));
+
+		std::vector<Bt::Entry> inserted_entries_in_given_range{inserted_entries};
+		std::erase_if(inserted_entries_in_given_range, [](const Bt::Entry &entry) { return entry.key < 65'900 || entry.key >= 66'000; });
+
+		std::vector<Bt::Entry> fetched_entries_in_given_range;
+		for (const Bt::Entry &item : bpt.get_all_entries_in_key_range(65'900, 66'000))
+			fetched_entries_in_given_range.push_back(item);
+
+		REQUIRE(std::ranges::equal(fetched_entries_in_given_range, inserted_entries_in_given_range));
 	}
 }
 

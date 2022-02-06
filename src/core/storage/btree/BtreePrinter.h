@@ -64,8 +64,8 @@ public:
 	}
 
 	void print() noexcept {
-		fmt::print("keys-in-leaves: [{}; {}]\n", m_btree.min_num_records_leaf(), m_btree.max_num_records_leaf());
-		fmt::print("keys-in-branches: [{}; {}]\n", m_btree.min_num_records_branch(), m_btree.max_num_records_branch());
+		m_out << "keys-in-leaves: [" << m_btree.min_num_records_leaf() << "; " << m_btree.max_num_records_leaf() << "]\n";
+		m_out << "keys-in-branches: [" << m_btree.min_num_records_branch() << "; " << m_btree.max_num_records_branch() << "]\n";
 		m_out << "tree:\n";
 
 		print_node(node_at(m_btree.rootpos()));

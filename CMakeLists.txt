@@ -56,8 +56,8 @@ target_link_libraries(LibEugeneCore
 		CONAN_PKG::andreasbuhr-cppcoro
         CONAN_PKG::benchmark
         CONAN_PKG::catch2
-        CONAN_PKG::cppbenchmark)
-
+        CONAN_PKG::cppbenchmark
+		CONAN_PKG::cppitertools)
 
 if (DEFINED ENV{EUGENE_BUILD_TESTS})
     macro(eugene_test component path_prefix)

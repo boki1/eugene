@@ -100,6 +100,10 @@ public:
 //		throw BadTreeAccess(fmt::format(" - leaf accessed as branch\n"));
 	}
 
+	[[nodiscard]] constexpr std::optional<Position> next_node() const noexcept {
+		/// Convert a nop::Optional<> to std::optional<>
+		return m_next_node_pos ? std::make_optional<Position>(m_next_node_pos.get()) : std::nullopt;
+	}
 	[[nodiscard]] constexpr Position parent() const noexcept { return m_parent_pos; }
 	[[nodiscard]] constexpr bool is_root() const noexcept { return m_is_root; }
 
@@ -142,7 +146,7 @@ public:
 	constexpr auto operator==(const Node &rhs) const noexcept {
 		if (is_leaf() ^ rhs.is_leaf())
 			return false;
-		return is_leaf() ? leaf() == rhs.leaf() : branch() == rhs.branch() && std::tie(m_is_root, m_parent_pos) == std::tie(rhs.m_is_root, rhs.m_parent_pos);
+		return is_leaf() ? leaf() == rhs.leaf() : branch() == rhs.branch() && std::tie(m_is_root, m_parent_pos, m_next_node_pos) == std::tie(rhs.m_is_root, rhs.m_parent_pos, rhs.m_next_node_pos);
 	}
 
 	constexpr auto operator!=(const Node &rhs) const noexcept { return !operator==(rhs); }
@@ -234,18 +238,23 @@ private:
 	}
 
 public:
-	void set_metadata(Metadata &&meta) noexcept { m_metadata = std::move(meta); }
-
-	void set_root(bool flag = true) noexcept { m_is_root = flag; }
+	void set_root_status(RootStatus rs) noexcept { m_is_root = (rs == RootStatus::IsRoot); }
 
 	void set_parent(Position pos) noexcept { m_parent_pos = pos; }
+
+	void set_next_node(Position pos) noexcept { m_next_node_pos = pos; }
 
 private:
 	Metadata m_metadata;
 	bool m_is_root{false};
+
+	/// Keep track of parent node
 	Position m_parent_pos{};
 
-	NOP_STRUCTURE(Node, m_metadata, m_is_root, m_parent_pos);
+	/// Keep a list of all leaf nodes in the tree
+	nop::Optional<Position> m_next_node_pos{};
+
+	NOP_STRUCTURE(Node, m_metadata, m_is_root, m_parent_pos, m_next_node_pos);
 };
 
 }// namespace internal::storage::btree

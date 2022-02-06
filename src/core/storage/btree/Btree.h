@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <concepts>
 #include <exception>
 #include <fstream>
 #include <memory>
@@ -13,6 +14,10 @@
 
 #include <fmt/core.h>
 #include <fmt/ranges.h>
+
+#include <cppcoro/generator.hpp>
+
+#include <cppitertools/zip.hpp>
 
 #include <nop/serializer.h>
 #include <nop/status.h>
@@ -71,12 +76,15 @@ class Btree {
 	static inline constexpr std::uint32_t HEADER_MAGIC = 0xB75EEA41;
 
 public:
+	///
+	/// Dependent types
+	///
+
 	/// Tree header
 	/// Stores important metadata about the tree instance that must remain persistent
 	/// Created by 'header()' and stored inside 'header_name()' file.
 	///
 	/// Note: Consider `magic` to be const. However, libnop refuses to compile the library that way.
-
 	struct Header {
 		std::uint32_t magic{HEADER_MAGIC};
 		Position tree_rootpos;
@@ -86,6 +94,14 @@ public:
 		long tree_num_branch_records;
 
 		NOP_STRUCTURE(Header, magic, tree_rootpos, tree_size, tree_depth, tree_num_branch_records, tree_num_leaf_records);
+	};
+
+	/// Tree entry of the type <key, val>
+	struct Entry {
+		Key key;
+		Val val;
+
+		[[nodiscard]] auto operator<=>(const Entry &) const noexcept = default;
 	};
 
 private:
@@ -141,6 +157,31 @@ private:
 		return vals[it - keys.cbegin()];
 	}
 
+	/// Get node element positioned at the "corner" of the subtree
+	/// The returned node contains either the keys with smallest values, or the biggest ones,
+	/// depending on the value of corner.
+	/// Used by 'get_min' and 'get_max'.
+
+	enum class CornerDetail { MIN,
+		                  MAX };
+
+	[[nodiscard]] Nod get_corner_subtree(const Nod &node, CornerDetail corner) {
+		if (node.is_leaf())
+			return node;
+
+		const auto &link_status = node.branch().m_link_status;
+		const std::size_t index = [&] {
+			if (corner == CornerDetail::MAX)
+				return std::distance(std::cbegin(link_status), std::find(std::crbegin(link_status), std::crend(link_status), LinkStatus::Valid).base()) - 1;
+			assert(corner == CornerDetail::MIN);
+			return std::distance(std::cbegin(link_status), std::find(std::cbegin(link_status), std::cend(link_status), LinkStatus::Valid));
+		}();
+		if (index >= link_status.size() || link_status[index] != LinkStatus::Valid)
+			throw BadTreeSearch(fmt::format(" - no valid link in node marked as branch\n"));
+		const Position pos = node.branch().m_links[index];
+		return get_corner_subtree(Nod::from_page(m_pager.get(pos)), corner);
+	}
+
 	/// Make tree root
 	/// Create a new tree level
 	/// This can either happen if the tree has no root element at all, or because a node
@@ -160,10 +201,11 @@ private:
 			auto old_root = root();
 			auto old_pos = m_rootpos;
 			old_root.set_parent(new_pos);
-			old_root.set_root(false);
+			old_root.set_root_status(Nod::RootStatus::IsInternal);
 
 			auto [midkey, sibling] = node_split(old_root);
 			auto sibling_pos = m_pager.alloc();
+			old_root.set_next_node(sibling_pos);
 
 			m_pager.place(sibling_pos, sibling.make_page());
 			m_pager.place(old_pos, old_root.make_page());
@@ -304,11 +346,15 @@ private:
 	/// 'BadTreeInsert' may be thrown if an error occurs.
 	/// It gets called by both 'insert()' and 'update()'.
 
-	struct InsertedKeyVal {};
+	struct InsertedEntry {};
 	struct InsertedNothing {};
-	using InsertionReturnMark = std::variant<InsertedKeyVal, InsertedNothing>;
+	using InsertionReturnMark = std::variant<InsertedEntry, InsertedNothing>;
 
 	[[nodiscard]] InsertionReturnMark place_kv_entry(const Key &key, const Val &val, ActionOnKeyPresent action) {
+		return place_kv_entry(Entry{.key = key, .val = val}, action);
+	}
+
+	[[nodiscard]] InsertionReturnMark place_kv_entry(const Entry &entry, ActionOnKeyPresent action) {
 		Position currpos{rootpos()};
 		Nod curr{root()};
 
@@ -320,27 +366,27 @@ private:
 				auto &keys = curr.leaf().m_keys;
 				auto &vals = curr.leaf().m_vals;
 
-				const std::size_t index = std::lower_bound(keys.cbegin(), keys.cend(), key) - keys.cbegin();
+				const std::size_t index = std::lower_bound(keys.cbegin(), keys.cend(), entry.key) - keys.cbegin();
 
 				/// If we are called from 'insert' and the key is already present, do nothing,
 				/// if we are called from 'update' and the key is _not_ already present, do nothing.
-				const bool key_is_present = index < keys.size() && keys[index] == key;
+				const bool key_is_present = index < keys.size() && keys[index] == entry.key;
 				if ((action == ActionOnKeyPresent::AbandonChange && key_is_present)
 				    || (action == ActionOnKeyPresent::SubmitChange && !key_is_present))
 					return InsertedNothing();
 
-				keys.insert(keys.cbegin() + index, key);
-				vals.insert(vals.cbegin() + index, val);
+				keys.insert(keys.cbegin() + index, entry.key);
+				vals.insert(vals.cbegin() + index, entry.val);
 				m_pager.place(currpos, curr.make_page());
 				++m_size;
-				return InsertedKeyVal();
+				return InsertedEntry();
 			}
 
 			auto &refs = curr.branch().m_refs;
 			auto &links = curr.branch().m_links;
 			auto &link_status = curr.branch().m_link_status;
 
-			const std::size_t index = std::lower_bound(refs.cbegin(), refs.cend(), key) - refs.cbegin();
+			const std::size_t index = std::lower_bound(refs.cbegin(), refs.cend(), entry.key) - refs.cbegin();
 			const Position child_pos = links[index];
 			if (link_status[index] == LinkStatus::Inval)
 				throw BadTreeInsert(fmt::format(" - link status of pos={} marks it as invalid\n", child_pos));
@@ -355,6 +401,7 @@ private:
 
 			auto [midkey, sibling] = node_split(child);
 			auto sibling_pos = m_pager.alloc();
+			child.set_next_node(sibling_pos);
 
 			assert(std::find(refs.cbegin(), refs.cend(), midkey) == refs.cend());
 			assert(std::find(links.cbegin(), links.cend(), sibling_pos) == links.cend());
@@ -367,13 +414,14 @@ private:
 			m_pager.place(child_pos, std::move(child.make_page()));
 			m_pager.place(currpos, std::move(curr.make_page()));
 
-			if (key < midkey) {
+			if (entry.key < midkey) {
 				currpos = child_pos;
 				curr = std::move(child);
-			} else if (key > midkey) {
+			} else if (entry.key > midkey) {
 				currpos = sibling_pos;
 				curr = std::move(sibling);
-			}
+			} else
+				return InsertedNothing();
 		}
 	}
 
@@ -462,12 +510,16 @@ public:
 	/// Submit a new <key, value> entry into the tree
 	/// In order for the change to be applied, it is a requirement that no such key is already
 	/// associated with data in the tree.
-	/// The returned value may contain either 'InsertedKeyVal' or 'InsertedNothing' depending on
+	/// The returned value may contain either 'InsertedEntry' or 'InsertedNothing' depending on
 	/// whether the key is distinct.
 	/// An exception 'BadTreeInsert' may be thrown if an unexpected error occurs. It contains an
 	/// appropriate message describing the failure.
 	constexpr InsertionReturnMark insert(const Key &key, const Val &val) {
-		return place_kv_entry(key, val, ActionOnKeyPresent::AbandonChange);
+		return place_kv_entry(Entry{.key = key, .val = val}, ActionOnKeyPresent::AbandonChange);
+	}
+
+	constexpr InsertionReturnMark insert(const Entry &entry) {
+		return place_kv_entry(entry, ActionOnKeyPresent::AbandonChange);
 	}
 
 	/// Remove an existing <key, value> entry from the tree
@@ -536,17 +588,21 @@ public:
 		}
 
 		if (removed)
-			return RemovedVal(*removed);
+			return RemovedVal{.val = *removed};
 		return RemovedNothing();
 	}
 
 	/// Replace an existing <key, value> entry with a new <key, value2>
 	/// If no such entry with the given key is found, 'InsertedNothing' is returned, else-
-	/// 'InsertedKeyVal'. An exception 'BadTreeInsert' may be thrown if an unexpected error
+	/// 'InsertedEntry'. An exception 'BadTreeInsert' may be thrown if an unexpected error
 	/// occurs. It contains an appropriate message describing the failure.
 	constexpr InsertionReturnMark update(const Key &key, const Val &val) {
 		return place_kv_entry(key, val, ActionOnKeyPresent::SubmitChange);
 	}
+
+	///
+	/// Query API
+	///
 
 	/// Acquire the value associated with a given key
 	/// Finds the entry described by 'key'. If no such entry is found, an empty std::optional<>.
@@ -559,6 +615,70 @@ public:
 	/// If an error occurs during the tree traversal 'BadTreeSearch' is thrown.
 	constexpr bool contains(const Key &key) {
 		return search_subtree(root(), key).has_value();
+	}
+
+	/// Get the entry with the smallest key
+	std::optional<Entry> get_min_entry() {
+		const auto node_with_smallest_keys = get_corner_subtree(root(), CornerDetail::MIN);
+		if (node_with_smallest_keys.num_filled() <= 0)
+			return {};
+
+		return std::make_optional<Entry>({.key = node_with_smallest_keys.leaf().m_keys.front(),
+		                                  .val = node_with_smallest_keys.leaf().m_vals.front()});
+	}
+
+	/// Get the entry with the biggest key
+	std::optional<Entry> get_max_entry() {
+		const auto node_with_biggest_keys = get_corner_subtree(root(), CornerDetail::MAX);
+		if (node_with_biggest_keys.num_filled() <= 0)
+			return {};
+
+		return std::make_optional<Entry>({.key = node_with_biggest_keys.leaf().m_keys.back(),
+		                                  .val = node_with_biggest_keys.leaf().m_vals.back()});
+	}
+
+	/// Acquire all entries present in the tree
+	/// This returns a generator over <key, val> pairs using the `next_node` member in the nodes.
+	/// It does not traverse the whole tree, but only level 0.
+	cppcoro::generator<const Entry &> get_all_entries() {
+		Nod curr = get_corner_subtree(root(), CornerDetail::MIN);
+		if (!curr.is_leaf())
+			throw BadTreeSearch(" - returned branch corner node\n");
+
+		while (true) {
+			for (const auto &&[key, val] : iter::zip(curr.leaf().m_keys, curr.leaf().m_vals))
+				co_yield Entry{.key = key, .val = val};
+			if (!curr.next_node())
+				co_return;
+			curr = Nod::from_page(m_pager.get(*curr.next_node()));
+		}
+	}
+
+	/// Similar to 'get_all_entries', but filters all entries by a given 'filter_function'.
+	/// Additionally a "smart break" is provided. If 'wrap_up_function' returns true then the execution
+	/// of the coroutine will be ended. This could be considered as a simple optimization which is not
+	/// mandatory for regular queries on the tree.
+	cppcoro::generator<const Entry &> get_all_entries_filtered(auto filter_function, std::optional<std::function<bool(const Entry &)>> wrap_up_function = {}) {
+		for (const auto &entry : get_all_entries()) {
+			if (filter_function(entry))
+				co_yield entry;
+			else if (wrap_up_function && (*wrap_up_function)(entry))
+				co_return;
+		}
+	}
+
+	/// Get all entries whose keys are in the range [key_min, key_max].
+	cppcoro::generator<const Entry &> get_all_entries_in_key_range(const Key &key_min, const Key &key_max) {
+		auto range_filter_function = [key_min, key_max](const Entry &entry) {
+			return key_min <= entry.key && entry.key < key_max;
+		};
+
+		auto wrap_up_function = [key_max](const Entry &entry) {
+			return entry.key >= key_max;
+		};
+
+		for (const auto &entry : get_all_entries_filtered(range_filter_function, std::make_optional(wrap_up_function)))
+			co_yield entry;
 	}
 
 	///

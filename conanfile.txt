@@ -7,6 +7,7 @@ libnop/cci.20200728
 cppbenchmark/cci.20201029
 benchmark/1.6.0
 andreasbuhr-cppcoro/cci.20210113
+cppitertools/2.1
 
 [generators]
 cmake
