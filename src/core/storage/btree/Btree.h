@@ -196,7 +196,7 @@ private:
 		auto new_pos = m_pager.alloc();
 		auto new_metadata = [&] {
 			if (action == MakeRootAction::BareInit)
-				return Nod::template meta_of<typename Nod::Leaf>();
+				return Nod::template metadata_ctor<typename Nod::Leaf>();
 
 			auto old_root = root();
 			auto old_pos = m_rootpos;
@@ -210,7 +210,7 @@ private:
 			m_pager.place(sibling_pos, sibling.make_page());
 			m_pager.place(old_pos, old_root.make_page());
 
-			return Nod::template meta_of<typename Nod::Branch>(std::vector<Ref>{midkey}, std::vector<Position>{old_pos, sibling_pos}, std::vector<LinkStatus>(2, LinkStatus::Valid));
+			return Nod::template metadata_ctor<typename Nod::Branch>(std::vector<Ref>{midkey}, std::vector<Position>{old_pos, sibling_pos}, std::vector<LinkStatus>(2, LinkStatus::Valid));
 		}();
 
 		Nod new_root{std::move(new_metadata), new_pos, Nod::RootStatus::IsRoot};

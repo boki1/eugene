@@ -103,7 +103,7 @@ TEST_CASE("Paging with many random nodes", "[btree]") {
 	for (std::size_t i = 0; i < 128; ++i) {
 		auto node = make_node();
 		auto node_pos = pr.alloc();
-		nodes[node_pos] = node.clone();
+		nodes[node_pos] = Node<Config>{node};
 		auto node_as_page = node.make_page();
 		pr.place(node_pos, std::move(node_as_page));
 		auto node_from_page = Nod::from_page(pr.get(node_pos));
