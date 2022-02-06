@@ -10,21 +10,23 @@
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 
+#include <core/Util.h>
 #include <core/storage/Pager.h>
 #include <core/storage/btree/Btree.h>
 
 using namespace std::ranges::views;
-using std::find;
-
 using namespace internal::storage;
 using namespace internal::storage::btree;
+using namespace internal;
 
 using Nod = Node<DefaultConfig>;
 using Metadata = Nod::Metadata;
 using Branch = Nod::Branch;
 using Leaf = Nod::Leaf;
 
-static Nod make_node() {
+namespace internal {
+template<>
+Nod random_item<Nod>() {
 	static std::random_device dev;
 	std::mt19937 rng(dev());
 	std::uniform_int_distribution<std::mt19937::result_type> dist128(1, 128);
@@ -35,7 +37,7 @@ static Nod make_node() {
 		if (dist128(rng) % 2)
 			a.push_back(dist128(rng));
 		else
-			b.push_back((int)Position(dist128(rng)));
+			b.push_back((int) Position(dist128(rng)));
 
 	Metadata metadata;
 	if (dist128(rng) % 2)
@@ -49,14 +51,12 @@ static Nod make_node() {
 
 	return Node(std::move(metadata), p, dist128(rng) % 2 ? Nod::RootStatus::IsInternal : Nod::RootStatus::IsRoot);
 }
+}// namespace internal
 
-void truncate_file(std::string_view fname) {
-	std::ofstream of{std::string{fname}, std::ios::trunc};
-}
-
-template <typename T, typename V>
-bool contains(const T& collection, V item) {
-	return std::find(collection.cbegin(), collection.cend(), item) != collection.cend();
+TEST_CASE("Prepare storage files") {
+	/// Dummy test case
+	std::ofstream{"/tmp/eu-persistent-nodes-pager", std::ios::trunc};
+	std::ofstream{"/tmp/eu-many-persistent-nodes-pager", std::ios::trunc};
 }
 
 TEST_CASE("Node serialization", "[btree]") {
@@ -74,7 +74,6 @@ TEST_CASE("Node serialization", "[btree]") {
 }
 
 TEST_CASE("Persistent nodes", "[btree]") {
-	truncate_file("/tmp/eu-persistent-nodes-pager");
 	Pager pr("/tmp/eu-persistent-nodes-pager");
 
 	auto node1_pos = pr.alloc();
@@ -96,12 +95,11 @@ TEST_CASE("Persistent nodes", "[btree]") {
 }
 
 TEST_CASE("Paging with many random nodes", "[btree]") {
-	truncate_file("/tmp/eu-many-persistent-nodes-pager");
 	Pager pr("/tmp/eu-many-persistent-nodes-pager");
 
 	std::unordered_map<Position, Nod> nodes;
 	for (std::size_t i = 0; i < 128; ++i) {
-		auto node = make_node();
+		auto node = random_item<Nod>();
 		auto node_pos = pr.alloc();
 		nodes[node_pos] = Node<Config>{node};
 		auto node_as_page = node.make_page();
@@ -127,8 +125,10 @@ TEST_CASE("Paging with many random nodes", "[btree]") {
 }
 
 TEST_CASE("Split full nodes", "[btree]") {
-	auto bn = Nod(Metadata(Branch({}, {}, {})), {}, Nod::RootStatus::IsInternal); auto &b = bn.branch();
-	auto ln = Nod(Metadata(Leaf({}, {})), 13, Nod::RootStatus::IsInternal); auto &l = ln.leaf();
+	auto bn = Nod(Metadata(Branch({}, {}, {})), {}, Nod::RootStatus::IsInternal);
+	auto &b = bn.branch();
+	auto ln = Nod(Metadata(Leaf({}, {})), 13, Nod::RootStatus::IsInternal);
+	auto &l = ln.leaf();
 
 	constexpr auto limit_branch = 512;
 	constexpr auto limit_leaf = 512;
@@ -156,39 +156,39 @@ TEST_CASE("Split full nodes", "[btree]") {
 	auto &leaf_sib = leaf_sib_node.leaf();
 
 	for (decltype(branch_midkey) i = 0; i < branch_midkey; ++i) {
-		REQUIRE(contains(b.m_refs, i));
-		REQUIRE(contains(b.m_links, static_cast<long>(i)));
-		REQUIRE(!contains(branch_sib.m_refs, i));
-		REQUIRE(!contains(branch_sib.m_links, static_cast<long>(i)));
+		REQUIRE(collection_contains(b.m_refs, i));
+		REQUIRE(collection_contains(b.m_links, static_cast<long>(i)));
+		REQUIRE(!collection_contains(branch_sib.m_refs, i));
+		REQUIRE(!collection_contains(branch_sib.m_links, static_cast<long>(i)));
 	}
-	REQUIRE(contains(b.m_links, static_cast<long>(branch_midkey)));
-	REQUIRE(!contains(branch_sib.m_links, static_cast<long>(branch_midkey)));
+	REQUIRE(collection_contains(b.m_links, static_cast<long>(branch_midkey)));
+	REQUIRE(!collection_contains(branch_sib.m_links, static_cast<long>(branch_midkey)));
 
 	for (decltype(leaf_midkey) i = 0; i <= leaf_midkey; ++i) {
-		REQUIRE(contains(l.m_keys, i));
-		REQUIRE(contains(l.m_vals, i));
-		REQUIRE(!contains(leaf_sib.m_keys, i));
-		REQUIRE(!contains(leaf_sib.m_vals, i));
+		REQUIRE(collection_contains(l.m_keys, i));
+		REQUIRE(collection_contains(l.m_vals, i));
+		REQUIRE(!collection_contains(leaf_sib.m_keys, i));
+		REQUIRE(!collection_contains(leaf_sib.m_vals, i));
 	}
 
 	// The middle key should remain in the "left" leaf although it is suppossed to get a
 	// ref inside the new parent, this is the actual spot where the val is stored.
-	REQUIRE(contains(leaf_sib.m_keys, (limit_leaf + 1) / 2));
-	REQUIRE(contains(leaf_sib.m_vals, (limit_leaf + 1) / 2));
+	REQUIRE(collection_contains(leaf_sib.m_keys, (limit_leaf + 1) / 2));
+	REQUIRE(collection_contains(leaf_sib.m_vals, (limit_leaf + 1) / 2));
 
 	for (uint32_t i = branch_midkey + 1; i < limit_branch; ++i) {
-		REQUIRE(!contains(b.m_refs, i));
-		REQUIRE(!contains(b.m_links, static_cast<long>(i)));
-		REQUIRE(contains(branch_sib.m_refs, i));
-		REQUIRE(contains(branch_sib.m_links, static_cast<long>(i)));
+		REQUIRE(!collection_contains(b.m_refs, i));
+		REQUIRE(!collection_contains(b.m_links, static_cast<long>(i)));
+		REQUIRE(collection_contains(branch_sib.m_refs, i));
+		REQUIRE(collection_contains(branch_sib.m_links, static_cast<long>(i)));
 	}
-	REQUIRE(!contains(b.m_links, static_cast<long>(limit_branch)));
-	REQUIRE(contains(branch_sib.m_links, static_cast<long>(limit_branch)));
+	REQUIRE(!collection_contains(b.m_links, static_cast<long>(limit_branch)));
+	REQUIRE(collection_contains(branch_sib.m_links, static_cast<long>(limit_branch)));
 
 	for (uint32_t i = leaf_midkey + 1; i < limit_leaf; ++i) {
-		REQUIRE(!contains(l.m_keys, i));
-		REQUIRE(!contains(l.m_vals, i));
-		REQUIRE(contains(leaf_sib.m_keys, i));
-		REQUIRE(contains(leaf_sib.m_vals, i));
+		REQUIRE(!collection_contains(l.m_keys, i));
+		REQUIRE(!collection_contains(l.m_vals, i));
+		REQUIRE(collection_contains(leaf_sib.m_keys, i));
+		REQUIRE(collection_contains(leaf_sib.m_vals, i));
 	}
 }

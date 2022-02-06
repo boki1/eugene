@@ -1,21 +1,21 @@
-#include <algorithm>
-#include <fstream>
 #include <array>
+#include <fstream>
 #include <vector>
-#include <filesystem>
 
 #include <catch2/catch.hpp>
 
 #include <core/storage/Pager.h>
 
-void truncate_file(std::string_view fname) {
-	std::ofstream of{std::string{fname}, std::ios::trunc};
-}
-
 using namespace internal::storage;
 
+TEST_CASE("Prepare storage files") {
+	/// Dummy test case
+	std::ofstream{"/tmp/eu-pager", std::ios::trunc};
+	std::ofstream{"/tmp/eu-persistent-pager-stackallocater", std::ios::trunc};
+	std::ofstream{"/tmp/eu-pager-persistent-pager-freelistalloc", std::ios::trunc};
+}
+
 TEST_CASE("Page", "[pager]") {
-	truncate_file("/tmp/eu-pager");
 	Pager pr("/tmp/eu-pager");
 	Page p;
 
@@ -31,7 +31,6 @@ TEST_CASE("Page", "[pager]") {
 
 TEST_CASE("Persistent pager", "[pager]") {
 	SECTION("Using stack allocator") {
-		truncate_file("/tmp/eu-persistent-pager-stackallocater");
 		Pager pr_stack1("/tmp/eu-persistent-pager-stackallocater");
 
 		for (int i = 0; i < 10; ++i)
@@ -49,7 +48,6 @@ TEST_CASE("Persistent pager", "[pager]") {
 	}
 
 	SECTION("Using freelist allocator") {
-		truncate_file("/tmp/eu-pager-persistent-pager-freelistalloc");
 		Pager<FreeListAllocator, LRUCache> pr("/tmp/eu-pager-persistent-pager-freelistalloc", ActionOnConstruction::DoNotLoad, 10ul);
 		REQUIRE(pr.allocator().freelist() == std::vector<Position>{36864, 32768, 28672, 24576, 20480, 16384, 12288, 8192, 4096, 0});
 
@@ -57,7 +55,7 @@ TEST_CASE("Persistent pager", "[pager]") {
 			REQUIRE(pr.alloc() == i * PAGE_SIZE);
 		REQUIRE(pr.allocator().freelist().empty());
 
-		for (int i = 0; i < 10; i+=2)
+		for (int i = 0; i < 10; i += 2)
 			REQUIRE_NOTHROW(pr.free(i * PAGE_SIZE));
 		REQUIRE(pr.allocator().freelist() == std::vector<Position>{32768, 24576, 16384, 8192, 0});
 		pr.save();
@@ -81,15 +79,15 @@ TEST_CASE("Page stack allocator", "[pager]") {
 }
 
 TEST_CASE("Page free list", "[pager]") {
-    Pager<FreeListAllocator, LRUCache> pr("/tmp/eu-pager-freelist-alloc", ActionOnConstruction::DoNotLoad, 10ul);
-    REQUIRE(pr.allocator().freelist() == std::vector<Position>{36864, 32768, 28672, 24576, 20480, 16384, 12288, 8192, 4096, 0});
+	Pager<FreeListAllocator, LRUCache> pr("/tmp/eu-pager-freelist-alloc", ActionOnConstruction::DoNotLoad, 10ul);
+	REQUIRE(pr.allocator().freelist() == std::vector<Position>{36864, 32768, 28672, 24576, 20480, 16384, 12288, 8192, 4096, 0});
 
-    for (int i = 0; i < 10; ++i)
-        REQUIRE(pr.alloc() == i * PAGE_SIZE);
-    REQUIRE(pr.allocator().freelist().empty());
+	for (int i = 0; i < 10; ++i)
+		REQUIRE(pr.alloc() == i * PAGE_SIZE);
+	REQUIRE(pr.allocator().freelist().empty());
 
-    for (int i = 0; i < 10; i+=2) {
-        REQUIRE_NOTHROW(pr.free(i * PAGE_SIZE));
+	for (int i = 0; i < 10; i += 2) {
+		REQUIRE_NOTHROW(pr.free(i * PAGE_SIZE));
 	}
 
 	REQUIRE(pr.allocator().freelist() == std::vector<Position>{32768, 24576, 16384, 8192, 0});

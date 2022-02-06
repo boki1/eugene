@@ -1,64 +1,66 @@
 #include <map>
-#include <random>
 #include <ranges>
 #include <string>
 #include <variant>
 #include <vector>
 
 #include <catch2/catch.hpp>
-#include <fmt/core.h>
-#include <fmt/format.h>
-#include <nop/structure.h>
 
+#include <core/Util.h>
 #include <core/storage/btree/Btree.h>
 #include <core/storage/btree/BtreePrinter.h>
 
+using namespace internal;
 using namespace internal::storage::btree;
 using internal::storage::Position;
+using Bt = Btree<DefaultConfig>;
 
+///
+/// Various tree configuration used in the tests below
+///
+
+struct CustomConfigAggregate : DefaultConfig {
+	using Key = smallstr;
+	using Val = person;
+	using Ref = smallstr;
+
+	static inline constexpr int BRANCHING_FACTOR_LEAF = 83;
+	static inline constexpr int BRANCHING_FACTOR_BRANCH = 84;
+};
+
+struct TreeFourConfig : DefaultConfig {
+	/// Nodes will have 2 elements in leaves and 3 in branches
+	static inline constexpr int BRANCHING_FACTOR_LEAF = 4;
+	static inline constexpr int BRANCHING_FACTOR_BRANCH = 4;
+};
+
+struct CustomConfigPrimitives : DefaultConfig {
+	using Key = double;
+	using Val = long long;
+	using Ref = double;
+};
+
+/// Enable debug printing in test suite
 static constexpr bool EU_PRINTING_TESTS = false;
 
-template<typename T>
-T item();
-
-template<>
-int item<int>() {
-	static int i = 0;
-	return i++;
-
-	//	static std::random_device dev;
-	//	static std::mt19937 rng(dev());
-	//	static std::uniform_int_distribution<std::mt19937::result_type> dist(1, 10000000);
-	//	return dist(rng);
-}
-
-template<>
-float item<float>() {
-	return static_cast<float>(item<int>()) / static_cast<float>(item<int>());
-}
-
-template<>
-bool item<bool>() {
-	return item<int>() % 2 == 0;
-}
+///
+/// Utility functions
+///
 
 template<BtreeConfig Config>
-auto fill_tree(Btree<Config> &bpt, const std::size_t limit = 1000) {
+auto fill_tree_with_random_items(Btree<Config> &bpt, const std::size_t limit = 1000) {
 	using Key = typename Config::Key;
 	using Val = typename Config::Val;
 	std::map<Key, Val> backup;
 	[[maybe_unused]] int i = 0;
 
 	while (backup.size() != limit) {
-		auto key = item<Key>();
-		auto val = item<Val>();
+		auto key = random_item<Key>();
+		auto val = random_item<Val>();
 		if (backup.contains(key)) {
 			REQUIRE(bpt.contains(key));
 			continue;
 		}
-
-		if constexpr (EU_PRINTING_TESTS)
-			fmt::print("Element #{} inserted.\n", ++i);
 
 		bpt.insert(key, val);
 		backup.emplace(key, val);
@@ -69,7 +71,7 @@ auto fill_tree(Btree<Config> &bpt, const std::size_t limit = 1000) {
 }
 
 template<BtreeConfig Config>
-void valid_tree(Btree<Config> &bpt, const std::map<typename Config::Key, typename Config::Val> &backup) {
+void check_for_tree_backup_mismatch(Btree<Config> &bpt, const std::map<typename Config::Key, typename Config::Val> &backup) {
 	REQUIRE(bpt.size() == backup.size());
 	[[maybe_unused]] std::size_t i = 1;
 	for (const auto &[key, val] : backup) {
@@ -79,99 +81,48 @@ void valid_tree(Btree<Config> &bpt, const std::map<typename Config::Key, typenam
 	}
 }
 
-void truncate_file(std::string_view fname) {
-	std::ofstream of{std::string{fname}, std::ios::trunc};
+///
+/// Unit tests
+///
+
+TEST_CASE("Prepare storage files") {
+	/// Dummy test case
+	std::ofstream{"/tmp/eu-btree-ops", std::ios::trunc};
+	std::ofstream{"/tmp/eu-btree-ops-queries", std::ios::trunc};
+	std::ofstream{"/tmp/eu-btree-custom-config", std::ios::trunc};
+	std::ofstream{"/tmp/eu-btree-ops-custom-types", std::ios::trunc};
+	std::ofstream{"/tmp/eu-persistent-btree", std::ios::trunc};
+	std::ofstream{"/tmp/eu-persistent-btree-header", std::ios::trunc};
+	std::ofstream{"/tmp/eu-headerops", std::ios::trunc};
+	std::ofstream{"/tmp/eu-headerops-header", std::ios::trunc};
 }
 
-struct smallstr {
-	static constexpr auto sz = 10;
-	smallstr(std::string &&s) {
-		assert(s.size() == sz);
-		std::memcpy(m_str, s.data(), sz);
-	}
-
-	smallstr() = default;
-
-	auto operator<=>(const smallstr &) const noexcept = default;
-
-	friend std::ostream &operator<<(std::ostream &os, const smallstr &str) {
-		os << static_cast<const char *>(str.m_str);
-		return os;
-	}
-
-	char m_str[sz];
-	NOP_STRUCTURE(smallstr, m_str);
-};
-
-template<>
-std::string item<std::string>() {
-	static std::random_device dev;
-	static std::mt19937 rng(dev());
-	static std::uniform_int_distribution<std::mt19937::result_type> dist10(1, 10);
-
-	static const char alphanum[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-	static std::uniform_int_distribution<std::mt19937::result_type> dist_alphanum(0, sizeof(alphanum) - 1);
-
-	auto len = dist10(rng);
-	std::string str;
-	str.reserve(len);
-	for (auto i = 0ul; i < len; ++i)
-		str += alphanum[dist_alphanum(rng)];
-	return str;
-}
-
-template<>
-smallstr item<smallstr>() {
-	static std::random_device dev;
-	static std::mt19937 rng(dev());
-	static std::uniform_int_distribution<std::mt19937::result_type> dist10(1, 10);
-
-	static const char alphanum[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-	static std::uniform_int_distribution<std::mt19937::result_type> dist_alphanum(0, sizeof(alphanum) - 1);
-
-	std::string str;
-	str.reserve(smallstr::sz);
-	for (int i = 0; i < smallstr::sz; ++i)
-		str += alphanum[dist_alphanum(rng)];
-	return smallstr{std::move(str)};
-}
-
-struct TreeFourConfig : DefaultConfig {
-	/// Nodes will have 2 elements in leaves and 3 in branches
-	static inline constexpr int BRANCHING_FACTOR_LEAF = 4;
-	static inline constexpr int BRANCHING_FACTOR_BRANCH = 4;
-};
-
-using Bt = Btree<DefaultConfig>;
 TEST_CASE("Btree operations", "[btree]") {
 	SECTION("Empty tree") {
-		truncate_file("/tmp/eu-btree-ops");
 		Bt bpt("/tmp/eu-btree-ops");
 
 		REQUIRE(bpt.contains(42) == false);
 		REQUIRE(bpt.get(42).has_value() == false);
 		REQUIRE(std::holds_alternative<Bt::RemovedNothing>(bpt.remove(42)));
 
-//		REQUIRE(bpt.sanity_check());
+		//		REQUIRE(bpt.sanity_check());
 
 		static const std::size_t limit = 1000;
-		auto backup = fill_tree(bpt, limit);
+		auto backup = fill_tree_with_random_items(bpt, limit);
 	}
 
 	SECTION("Insertion") {
-		truncate_file("/tmp/eu-btree-ops");
 		Bt bpt("/tmp/eu-btree-ops");
 		static const std::size_t limit = 1000;
-		auto backup = fill_tree(bpt, limit);
+		auto backup = fill_tree_with_random_items(bpt, limit);
 
 		if constexpr (EU_PRINTING_TESTS)
 			util::BtreePrinter{bpt, "/tmp/eu-btree-ops-printed"}();
-		valid_tree(bpt, backup);
+		check_for_tree_backup_mismatch(bpt, backup);
 	}
 
 	SECTION("Removal") {
 		SECTION("Simple remove") {
-			truncate_file("/tmp/eu-btree-ops");
 			Bt bpt("/tmp/eu-btree-ops");
 			for (int key = 0; key < bpt.max_num_records_leaf(); ++key)
 				bpt.insert(key, key);
@@ -184,7 +135,6 @@ TEST_CASE("Btree operations", "[btree]") {
 		}
 		/*
 		SECTION("Remove with single borrow from sibling leaf") {
-			truncate_file("/tmp/eu-btree-ops");
 			Btree<TreeFourConfig> treefour("/tmp/eu-btree-ops");
 			treefour.insert(4, 4);
 			treefour.insert(2, 2);
@@ -217,7 +167,6 @@ TEST_CASE("Btree operations", "[btree]") {
 		}
 
 		SECTION("Remove with single borrow from sibling branch") {
-			truncate_file("/tmp/eu-btree-ops");
 			Btree<TreeFourConfig> treefour("/tmp/eu-btree-ops");
 			treefour.insert(11, 11);
 			treefour.insert(12, 12);
@@ -238,7 +187,6 @@ TEST_CASE("Btree operations", "[btree]") {
 		}
 
 		SECTION("Remove with simple merge in leaves") {
-			truncate_file("/tmp/eu-btree-ops");
 			Btree<TreeFourConfig> treefour("/tmp/eu-btree-ops");
 			treefour.insert(27, 27);
 			treefour.insert(10, 10);
@@ -255,9 +203,8 @@ TEST_CASE("Btree operations", "[btree]") {
 		}
 
 		SECTION("Remove with merge") {
-			truncate_file("/tmp/eu-btree-ops");
 			Btree<TreeFourConfig> treefour("/tmp/eu-btree-ops");
-			auto backup = fill_tree(treefour, 1000);
+			auto backup = fill_tree_with_random_items(treefour, 1000);
 
 			for (int i = 0; i < 500; ++i) {
 				auto random_key = [&] {
@@ -279,15 +226,14 @@ TEST_CASE("Btree operations", "[btree]") {
 	}
 
 	SECTION("Update") {
-		truncate_file("/tmp/eu-btree-ops");
 		Bt bpt("/tmp/eu-btree-ops");
 		static const std::size_t limit = 1000;
-		auto backup = fill_tree(bpt, limit);
+		auto backup = fill_tree_with_random_items(bpt, limit);
 
 		for (int i = 0; i < 100; ++i) {
-			if (item<bool>())
+			if (random_item<bool>())
 				continue;
-			const auto key = item<int>();
+			const auto key = random_item<int>();
 			REQUIRE(backup.contains(key) == bpt.contains(key));
 			if (!backup.contains(key))
 				continue;
@@ -298,12 +244,11 @@ TEST_CASE("Btree operations", "[btree]") {
 				fmt::print("Updating tree entry <{}, {}> to <{}, {}>\n", key, old_val, key, *bpt.get(key));
 		}
 
-		valid_tree(bpt, backup);
+		check_for_tree_backup_mismatch(bpt, backup);
 	}
 
 	SECTION("Queries") {
 		Bt tree;
-		truncate_file("/tmp/eu-btree-ops-queries");
 		Bt bpt("/tmp/eu-btree-ops-queries");
 		std::vector<Bt::Entry> inserted_entries;
 		const int limit = 100'000;
@@ -324,7 +269,7 @@ TEST_CASE("Btree operations", "[btree]") {
 		std::erase_if(inserted_entries_with_odd_keys, [](const Bt::Entry &entry) { return entry.key % 2 == 0; });
 
 		std::vector<Bt::Entry> fetched_entries_with_odd_keys;
-		for (const Bt::Entry &item : bpt.get_all_entries_filtered([] (const Bt::Entry entry) { return entry.key % 2 != 0; }))
+		for (const Bt::Entry &item : bpt.get_all_entries_filtered([](const Bt::Entry entry) { return entry.key % 2 != 0; }))
 			fetched_entries_with_odd_keys.push_back(item);
 
 		REQUIRE(std::ranges::equal(fetched_entries_with_odd_keys, inserted_entries_with_odd_keys));
@@ -341,8 +286,6 @@ TEST_CASE("Btree operations", "[btree]") {
 }
 
 TEST_CASE("Header operations", "[btree]") {
-	truncate_file("/tmp/eu-headerops");
-	truncate_file("/tmp/eu-headerops-header");
 	Bt bpt("/tmp/eu-headerops");
 	bpt.save();
 
@@ -359,35 +302,32 @@ TEST_CASE("Header operations", "[btree]") {
 }
 
 TEST_CASE("Persistent tree", "[btree]") {
-	truncate_file("/tmp/eu-persistent-btree");
-	truncate_file("/tmp/eu-persistent-btree-header");
-
 	std::map<typename DefaultConfig::Key, typename DefaultConfig::Val> backup;
 	Position rootpos;
-	/*SECTION("Tree #1") */{
+	/*SECTION("Tree #1") */ {
 		if constexpr (EU_PRINTING_TESTS)
 			fmt::print(" --- Btree #1 start\n");
 		Bt bpt("/tmp/eu-persistent-btree", ActionOnConstruction::Bare);
-		backup = fill_tree(bpt, 1000);
-		valid_tree(bpt, backup);
+		backup = fill_tree_with_random_items(bpt, 1000);
+		check_for_tree_backup_mismatch(bpt, backup);
 
 		bpt.save();
 		rootpos = bpt.rootpos();
 		if constexpr (EU_PRINTING_TESTS)
 			fmt::print(" --- Btree #1 saved\n");
 	}
-	/*SECTION("Tree #2") */{
+	/*SECTION("Tree #2") */ {
 		if constexpr (EU_PRINTING_TESTS)
 			fmt::print(" --- Btree #2 start\n");
 
 		Bt bpt("/tmp/eu-persistent-btree", ActionOnConstruction::Load);
 
 		REQUIRE(bpt.rootpos() == rootpos);
-		valid_tree(bpt, backup);
+		check_for_tree_backup_mismatch(bpt, backup);
 		if constexpr (EU_PRINTING_TESTS)
 			fmt::print(" --- Btree #2 end (no save)\n");
 	}
-	/*SECTION("Tree #3") */{
+	/*SECTION("Tree #3") */ {
 		if constexpr (EU_PRINTING_TESTS)
 			fmt::print(" --- Btree #3 start\n");
 		Bt bpt("/tmp/eu-persistent-btree", ActionOnConstruction::Bare);
@@ -399,21 +339,14 @@ TEST_CASE("Persistent tree", "[btree]") {
 	}
 }
 
-struct CustomConfigPrimitives : DefaultConfig {
-	using Key = double;
-	using Val = long long;
-	using Ref = double;
-};
-
 TEST_CASE("Custom Config Btree Primitive Type", "[btree]") {
-	truncate_file("/tmp/eu-btree-ops-custom-types");
 	Btree<CustomConfigPrimitives> bpt("/tmp/eu-btree-ops-custom-types");
 	static const std::size_t limit = 1000;
 
 	std::map<CustomConfigPrimitives::Key, CustomConfigPrimitives::Val> backup;
 	while (backup.size() != limit) {
-		double key = item<float>();
-		long long val = item<int>();
+		double key = random_item<float>();
+		long long val = random_item<int>();
 		bpt.insert(key, val);
 		backup.emplace(key, val);
 	}
@@ -431,67 +364,12 @@ TEST_CASE("Custom Config Btree Primitive Type", "[btree]") {
 	}
 }
 
-struct Person {
-	smallstr name;
-	int age{};
-	smallstr email;
-
-	auto operator<=>(const Person &) const noexcept = default;
-
-	NOP_STRUCTURE(Person, name, age, email);
-};
-
-// Make Person printable
-template<>
-struct fmt::formatter<Person> {
-	template<typename ParseContext>
-	constexpr auto parse(ParseContext &ctx) {
-		return ctx.begin();
-	}
-
-	template<typename FormatContext>
-	auto format(const Person &p, FormatContext &ctx) {
-		return fmt::format_to(ctx.out(), "Person{{ .name='{}', .age={}, .email='{}' }}", p.name, p.age, p.email);
-	}
-};
-
-template<>
-struct fmt::formatter<smallstr> {
-	template<typename ParseContext>
-	constexpr auto parse(ParseContext &ctx) {
-		return ctx.begin();
-	}
-
-	template<typename FormatContext>
-	auto format(const smallstr &s, FormatContext &ctx) {
-		return fmt::format_to(ctx.out(), "{}", fmt::join(s.m_str, ""));
-	}
-};
-
-template<>
-Person item<Person>() {
-	return Person{
-	        .name = item<smallstr>(),
-	        .age = item<int>(),
-	        .email = item<smallstr>()};
-}
-
-struct CustomConfigAggregate : DefaultConfig {
-	using Key = smallstr;
-	using Val = Person;
-	using Ref = smallstr;
-
-	static inline constexpr int BRANCHING_FACTOR_LEAF = 83;
-	static inline constexpr int BRANCHING_FACTOR_BRANCH = 84;
-};
-
 TEST_CASE("Custom Config Btree Aggregate Type", "[btree]") {
-	truncate_file("/tmp/eu-btree-custom-config");
 	Btree<CustomConfigAggregate> bpt{"/tmp/eu-btree-custom-config"};
 
 	static const std::size_t limit = 1000;
-	auto backup = fill_tree(bpt, limit);
+	auto backup = fill_tree_with_random_items(bpt, limit);
 
 	util::BtreePrinter{bpt, "/tmp/eu-btree-aggregatetype-printed"}();
-	valid_tree(bpt, backup);
+	check_for_tree_backup_mismatch(bpt, backup);
 }

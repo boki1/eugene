@@ -3,10 +3,18 @@
 #include <functional>
 #include <limits>
 #include <optional>
+#include <random>
 
+#include <nop/structure.h>
+
+#include <fmt/core.h>
 #include <fmt/format.h>
 
 namespace internal {
+
+///
+/// Used inside 'core'
+///
 
 /// std::optional for mutable references
 template<typename T>
@@ -67,4 +75,143 @@ template<typename T>
 	return vec1;
 };
 
+template <typename T, typename V>
+[[nodiscard]] bool collection_contains(const T& collection, V item) {
+	return std::find(collection.cbegin(), collection.cend(), item) != collection.cend();
+}
+
+///
+/// Used  primarily in unit tests
+///
+
+/// String with limit of 10 characters in size - small string.
+class smallstr {
+	static constexpr std::size_t SMALL_LIMIT = 10;
+	char m_str[SMALL_LIMIT];
+
+	NOP_STRUCTURE(smallstr, m_str);
+public:
+	constexpr smallstr() = default;
+
+	smallstr(std::string &&s) {
+		const auto bytes_to_copy = std::min(s.size(), SMALL_LIMIT);
+		for (std::size_t i = 0; i < bytes_to_copy; ++i)
+			m_str[i] = s.at(i);
+	}
+
+	constexpr auto operator<=>(const smallstr &) const noexcept = default;
+
+	friend std::ostream &operator<<(std::ostream &os, const smallstr &str) {
+		os << static_cast<const char *>(str.m_str);
+		return os;
+	}
+
+	constexpr const char *str() const noexcept { return m_str; }
+
+	static constexpr std::size_t small_limit() noexcept { return SMALL_LIMIT; }
+};
+
+/// Person class used for testing purposes.
+struct person {
+	smallstr name;
+	int age{};
+	smallstr email;
+
+	auto operator<=>(const person &) const noexcept = default;
+
+	NOP_STRUCTURE(person, name, age, email);
+};
+
+/// Random random_item generators
+/// Return a random value of type <T>
+template<typename T>
+T random_item();
+
+template<>
+int random_item<int>() {
+	static std::random_device dev;
+	static std::mt19937 rng(dev());
+	static std::uniform_int_distribution<std::mt19937::result_type> dist(1, 10000000);
+	return dist(rng);
+}
+
+template<>
+float random_item<float>() {
+	return static_cast<float>(random_item<int>()) / static_cast<float>(random_item<int>());
+}
+
+template<>
+bool random_item<bool>() {
+	return random_item<int>() % 2 == 0;
+}
+
+template<>
+std::string random_item<std::string>() {
+	static std::random_device dev;
+	static std::mt19937 rng(dev());
+	static std::uniform_int_distribution<std::mt19937::result_type> dist10(1, 10);
+
+	static const char alphanum[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+	static std::uniform_int_distribution<std::mt19937::result_type> dist_alphanum(0, sizeof(alphanum) - 1);
+
+	auto len = dist10(rng);
+	std::string str;
+	str.reserve(len);
+	for (auto i = 0ul; i < len; ++i)
+		str += alphanum[dist_alphanum(rng)];
+	return str;
+}
+
+template<>
+smallstr random_item<smallstr>() {
+	static std::random_device dev;
+	static std::mt19937 rng(dev());
+	static std::uniform_int_distribution<std::mt19937::result_type> dist10(1, 10);
+
+	static const char alphanum[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+	static std::uniform_int_distribution<std::mt19937::result_type> dist_alphanum(0, sizeof(alphanum) - 1);
+
+	std::string str;
+	str.reserve(smallstr::small_limit());
+	for (std::size_t i = 0; i < smallstr::small_limit(); ++i)
+		str += alphanum[dist_alphanum(rng)];
+	return smallstr{std::move(str)};
+}
+
+template<>
+person random_item<person>() {
+	return person{
+	        .name = random_item<smallstr>(),
+	        .age = random_item<int>(),
+	        .email = random_item<smallstr>()};
+}
+
 }// namespace internal
+
+/// Formatters should remain outside of 'internal' namespace.
+
+template<>
+struct fmt::formatter<internal::smallstr> {
+	template<typename ParseContext>
+	constexpr auto parse(ParseContext &ctx) {
+		return ctx.begin();
+	}
+
+	template<typename FormatContext>
+	auto format(const internal::smallstr &s, FormatContext &ctx) {
+		return fmt::format_to(ctx.out(), "{}", std::string(s.str()));
+	}
+};
+
+template<>
+struct fmt::formatter<internal::person> {
+	template<typename ParseContext>
+	constexpr auto parse(ParseContext &ctx) {
+		return ctx.begin();
+	}
+
+	template<typename FormatContext>
+	auto format(const internal::person &p, FormatContext &ctx) {
+		return fmt::format_to(ctx.out(), "person{{ .name='{}', .age={}, .email='{}' }}", p.name, p.age, p.email);
+	}
+};
