@@ -106,6 +106,3 @@ if (DEFINED ENV{EUGENE_BUILD_BENCHMARKS})
 
 	message("-- Building benchmarks")
 endif()
-
-add_executable(main src/standalone/json-parse/main.cpp)
-target_link_libraries(main CONAN_PKG::nlohmann_json)
