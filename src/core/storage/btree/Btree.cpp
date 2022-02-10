@@ -62,6 +62,10 @@ auto fill_tree_with_random_items(Btree<Config> &bpt, const std::size_t limit = 1
 			continue;
 		}
 
+		if (backup.size() == static_cast<unsigned long>(bpt.max_num_records_leaf())) {
+
+		}
+
 		bpt.insert(key, val);
 		backup.emplace(key, val);
 	}
@@ -75,7 +79,7 @@ void check_for_tree_backup_mismatch(Btree<Config> &bpt, const std::map<typename 
 	REQUIRE(bpt.size() == backup.size());
 	[[maybe_unused]] std::size_t i = 1;
 	for (const auto &[key, val] : backup) {
-		if constexpr (EU_PRINTING_TESTS)
+//		if constexpr (EU_PRINTING_TESTS)
 			fmt::print(" [{}]: '{}' => '{}'\n", i++, key, val);
 		REQUIRE(bpt.get(key).value() == val);
 	}
@@ -105,19 +109,18 @@ TEST_CASE("Btree operations", "[btree]") {
 		REQUIRE(bpt.get(42).has_value() == false);
 		REQUIRE(std::holds_alternative<Bt::RemovedNothing>(bpt.remove(42)));
 
-		//		REQUIRE(bpt.sanity_check());
-
-		static const std::size_t limit = 1000;
-		auto backup = fill_tree_with_random_items(bpt, limit);
+		REQUIRE(bpt.sanity_check());
 	}
 
 	SECTION("Insertion") {
 		Bt bpt("/tmp/eu-btree-ops");
-		static const std::size_t limit = 1000;
+		static const std::size_t limit = 983;
 		auto backup = fill_tree_with_random_items(bpt, limit);
 
-		if constexpr (EU_PRINTING_TESTS)
+		if constexpr (EU_PRINTING_TESTS) {
 			util::BtreePrinter{bpt, "/tmp/eu-btree-ops-printed"}();
+		}
+
 		check_for_tree_backup_mismatch(bpt, backup);
 	}
 

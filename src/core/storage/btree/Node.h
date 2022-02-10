@@ -248,6 +248,8 @@ public:
 
 	[[nodiscard]] constexpr bool is_underfull(long m) const noexcept { return num_filled() < m / 2 && !m_is_root; }
 
+	[[nodiscard]] constexpr bool is_empty() const noexcept { return num_filled() == 0; }
+
 	void set_root_status(RootStatus rs) noexcept { m_is_root = (rs == RootStatus::IsRoot); }
 
 	void set_parent(Position pos) noexcept { m_parent_pos = pos; }

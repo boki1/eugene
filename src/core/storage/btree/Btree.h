@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <sstream>
+#include <stack>
 #include <stdexcept>
 #include <utility>
 #include <variant>
@@ -104,6 +105,20 @@ public:
 		[[nodiscard]] auto operator<=>(const Entry &) const noexcept = default;
 	};
 
+	/// Node, its position and its index in the parent links
+	/// 'idx_in_parent' may be empty if the node has no parent. That is the case for every "root"
+	/// node when calling 'search_subtree()'.
+	/// 'idx_of_key' may be empty if the key we are searching for (usually we are searching for some key 😀) is
+	/// not the node. If the node actually contains a 'ref' rather than 'key', 'idx_of_key' is still not set.
+	struct PosNod {
+		Position node_pos;
+		std::optional<std::size_t> idx_in_parent;
+		std::optional<std::size_t> idx_of_key;
+	};
+
+	/// Root-to-leaf path populated by a search operation
+	using TreePath = std::stack<PosNod>;
+
 private:
 	///
 	/// Helper functions
@@ -131,30 +146,68 @@ private:
 	}
 
 	/// Tree search logic
-	/// Given a node, traverse it searching for a 'target_key' in the leaves below it.
-	/// Acquire the value associated with it an return it. If no such <key, value> entry
-	/// is found return an empty std::optional. If an error occurs during traversal,
-	/// throw a 'BadTreeSearch' with a descriptive message.
-	/// It gets called by both 'contains()' and 'get()'.
-	[[nodiscard]] std::optional<Val> search_subtree(const Nod &node, const Key &target_key) {
-		if (node.is_branch()) {
-			const auto &refs = node.branch().m_refs;
-			const std::size_t index = std::lower_bound(refs.cbegin(), refs.cend(), target_key) - refs.cbegin();
-			if (node.branch().m_link_status[index] == LinkStatus::Inval)
-				throw BadTreeSearch(fmt::format(" - invalid link w/ index={} pointing to pos={} in branch node\n", index, node.branch().m_links[index]));
-			const Position pos = node.branch().m_links[index];
-			const auto other = Nod::from_page(m_pager.get(pos));
-			return search_subtree(other, target_key);
+	/// Given a node, traverse it searching for a 'target_key' in the leaves below it. During the top-down traversal
+	/// keep track of the visited nodes using a 'TreePath' instance. The return value contains the node where the
+	/// 'target_key' may be found, or empty if it is not present in the tree. Additionally, the path of the traversal
+	/// is provided to the called. 'key_expected_pos' contains the index where the key should be positioned and
+	/// 'key_is_present' is a flag denoting whether that is actually the case. If an error occurs during traversal,
+	/// throw a 'BadTreeSearch' with a descriptive message. It gets called by both 'contains()' and 'get()'.
+	///
+	/// Contracts. Guarantees that...
+	///	- on exit, if no exception is thrown, the returned node is a leaf.
+	struct SearchResultMark {
+		Nod node;
+		TreePath path;
+		std::size_t key_expected_pos;
+		bool key_is_present;
+	};
+
+	[[nodiscard]] SearchResultMark search_subtree(const Key &target_key, const Nod &origin, const Position origin_pos) {
+		TreePath path;
+		Nod curr = origin;
+		Position curr_pos = origin_pos;
+		std::optional<std::size_t> curr_idx_in_parent{};
+		bool key_is_present = false;
+		std::size_t key_expected_pos;
+
+		while (true) {
+			path.push(PosNod{
+			        .node_pos = curr_pos,
+			        .idx_in_parent = curr_idx_in_parent,
+			        .idx_of_key = {}});
+
+			if (curr.is_branch()) {
+				const auto &branch_node = curr.branch();
+				const std::size_t index = std::lower_bound(branch_node.m_refs.cbegin(), branch_node.m_refs.cend(), target_key) - branch_node.m_refs.cbegin();
+				if (branch_node.m_link_status[index] == LinkStatus::Inval)
+					throw BadTreeSearch(fmt::format("- invalid link w/ index={} pointing to pos={} in branch node\n", index, curr.branch().m_links[index]));
+				curr_idx_in_parent = index;
+				curr_pos = branch_node.m_links[index];
+				curr = Nod::from_page(m_pager.get(curr_pos));
+			} else if (curr.is_leaf()) {
+				const auto &leaf_node = curr.leaf();
+				key_expected_pos = std::lower_bound(leaf_node.m_keys.cbegin(), leaf_node.m_keys.cend(), target_key) - leaf_node.m_keys.cbegin();
+				key_is_present = key_expected_pos >= leaf_node.m_keys.size() ? false : leaf_node.m_keys[key_expected_pos] == target_key;
+				if (key_is_present)
+					path.top().idx_of_key = key_expected_pos;
+
+				break;
+			} else
+				throw BadTreeSearch(fmt::format("- node @{} is neither branch nor leaf", curr_pos));
 		}
 
-		assert(node.is_leaf());
+		if (!curr.is_leaf())
+			throw BadTreeSearch("- branch as final visited node");
 
-		const auto &keys = node.leaf().m_keys;
-		const auto &vals = node.leaf().m_vals;
-		const auto it = std::lower_bound(keys.cbegin(), keys.cend(), target_key);
-		if (it == keys.cend() || *it != target_key)
-			return {};
-		return vals[it - keys.cbegin()];
+		return SearchResultMark{
+		        .node = curr,
+		        .path = path,
+		        .key_expected_pos = key_expected_pos,
+		        .key_is_present = key_is_present};
+	}
+
+	[[nodiscard]] SearchResultMark search(const Key &target_key) {
+		return search_subtree(target_key, root(), rootpos());
 	}
 
 	/// Get node element positioned at the "corner" of the subtree
@@ -221,6 +274,41 @@ private:
 		return new_root;
 	}
 
+	void rebalance_after_insert(TreePath &visited) {
+//		std::optional<Nod> next_node;
+		while (true) {
+			const PosNod &path_of_curr = visited.top();
+			auto curr = Nod::from_page(m_pager.get(path_of_curr.node_pos));
+
+			/// Having the current node valid, means that the upper levels of the tree are fine as well.
+			if (!is_node_full(curr))
+				break;
+
+			if (curr.is_root()) {
+				[[maybe_unused]] const auto new_root = make_root(MakeRootAction::NewTreeLevel);
+				break;
+			}
+
+			auto [midkey, sibling] = node_split(curr);
+			auto sibling_pos = m_pager.alloc();
+			curr.set_next_node(sibling_pos);
+
+			visited.pop();
+			const PosNod &path_of_parent = visited.top();
+			auto parent = Nod::from_page(m_pager.get(path_of_parent.node_pos));
+
+			/// Safety: 'path_of_curr.idx_in_parent' is guaranteed to contain a value since 'curr' is not root.
+			const auto idx = path_of_curr.idx_in_parent.value();
+
+			parent.branch().m_refs.insert(parent.branch().m_refs.cbegin() + idx, midkey);
+			parent.branch().m_links.insert(parent.branch().m_links.cbegin() + idx + 1, sibling_pos);
+			parent.branch().m_link_status.insert(parent.branch().m_link_status.cbegin() + idx + 1, LinkStatus::Valid);
+
+			m_pager.place(sibling_pos, sibling.make_page());
+			m_pager.place(path_of_curr.node_pos, curr.make_page());
+		}
+	}
+
 	/// Balance tree out after performed removal operation
 	/// Fix the tree invariants after a performed removal from 'node', place at position 'node_pos'.
 	/// The following operations may be performed: if node's invariants are not violated- nothing,
@@ -229,7 +317,8 @@ private:
 	/// fixing any underflows occurring upwards in the tree.
 	///
 	/// TODO: Fix me
-	void remove_rebalance(Nod &node, const Position node_pos, std::optional<std::size_t> node_idx_in_parent = {}, optional_cref<Key> key_to_remove = {}) {
+	/// TODO: Use new TreePath API
+	[[maybe_unused]] void rebalance_after_remove(Nod &node, const Position node_pos, std::optional<std::size_t> node_idx_in_parent = {}, optional_cref<Key> key_to_remove = {}) {
 		/// There is no need to check the upper levels if the current node is valid.
 		/// And there is no more to check if the current node is the root node.
 		if (!is_node_underfull(node) || node.is_root())
@@ -245,7 +334,7 @@ private:
 		if (!node_idx_in_parent)
 			node_idx_in_parent.emplace(std::find(parent_links.cbegin(), parent_links.cend(), node_pos) - parent_links.cbegin());
 		if (*node_idx_in_parent >= parent_links.size())
-			throw BadTreeRemove(fmt::format(" - [remove_rebalance] node_idx_in_parent (={}) is out of bounds for parent (@{}) and node (@{})", *node_idx_in_parent, node.parent(), node_pos));
+			throw BadTreeRemove(fmt::format(" - [rebalance_after_remove] node_idx_in_parent (={}) is out of bounds for parent (@{}) and node (@{})", *node_idx_in_parent, node.parent(), node_pos));
 
 		const bool has_left_sibling = *node_idx_in_parent > 0 && parent_link_status[*node_idx_in_parent - 1] == LinkStatus::Valid;
 		const bool has_right_sibling = *node_idx_in_parent < parent.branch().m_links.size() - 1 && parent_link_status[*node_idx_in_parent + 1] == LinkStatus::Valid;
@@ -304,7 +393,7 @@ private:
 
 		/// There is a chance that the last element in 'node' is the same as the 'separator_key'. Duplicates are unwanted.
 		if (const auto separator_key = parent.branch().m_refs[*node_idx_in_parent]; separator_key != node.leaf().m_keys.back()) {
-			/// If the separator_key is the same as the key we removed just before calling `remove_rebalance()` we would not like to keep duplicates, so skip adding it.
+			/// If the separator_key is the same as the key we removed just before calling `rebalance_after_remove()` we would not like to keep duplicates, so skip adding it.
 			if (key_to_remove.has_value() && separator_key != *key_to_remove)
 				node.leaf().m_keys.push_back(separator_key);
 		}
@@ -332,7 +421,37 @@ private:
 		else if (has_right_sibling)
 			make_merged_node_from(node, Nod::from_page(m_pager.get(*node_idx_in_parent + 1)));
 
-		remove_rebalance(parent, node.parent());
+		rebalance_after_remove(parent, node.parent());
+	}
+
+	/// Balance tree out after performed removal operation following the _relaxed_ strategy
+	/// The algorithm is described in "Deletion Without Rebalancing in Multiway Search Trees", 2009
+	/// and proved to be efficient for most use cases.
+	void rebalance_after_remove_relaxed(TreePath &search_path) {
+		while (!search_path.empty()) {
+			const PosNod &path_of_curr = search_path.top();
+
+			auto node = Nod::from_page(m_pager.get(path_of_curr.node_pos));
+			/// Empty nodes should be removed. However, we don't want to delete the root node.
+			/// Keep it empty for potential future insertions.
+			if (!node.is_empty() || node.is_root())
+				return;
+
+			// Delete node
+			m_pager.free(path_of_curr.node_pos);
+			search_path.pop();
+
+			/// Delete link from parent
+
+			/// Sadly, since we are "iterating" through the tree path bottom-to-top there is no way to backup the parent node.
+			/// This should be fine, expecting that the cache is large enough to fit _at least all branch nodes_.
+			auto parent_node = Nod::from_page(m_pager.get(search_path.top().node_pos));
+
+			auto &parent_links = parent_node.branch().m_links;
+
+			/// Safety: 'path_of_curr.idx_in_parent' has value which is guaranteed by the fact that the current node is not root
+			parent_links.erase(parent_links.cbegin() + path_of_curr.idx_in_parent.value());
+		}
 	}
 
 	/// Action flag to mark whether a <k,v> pair should be replaced if encountered during '???' operation.
@@ -355,74 +474,29 @@ private:
 	}
 
 	[[nodiscard]] InsertionReturnMark place_kv_entry(const Entry &entry, ActionOnKeyPresent action) {
-		Position currpos{rootpos()};
-		Nod curr{root()};
+		/// Locate position
+		auto search_res = search(entry.key);
 
-		if (is_node_full(curr))
-			curr = make_root(MakeRootAction::NewTreeLevel);
+		if ((action == ActionOnKeyPresent::AbandonChange && search_res.key_is_present)
+		    || (action == ActionOnKeyPresent::SubmitChange && !search_res.key_is_present))
+			return InsertedNothing();
 
-		while (true) {
-			if (curr.is_leaf()) {
-				auto &keys = curr.leaf().m_keys;
-				auto &vals = curr.leaf().m_vals;
+		if (!search_res.node.is_leaf())// sanity check
+			throw BadTreeInsert(fmt::format("- returned non-leaf node as 'final visited leaf' in search result for target_key={}", entry.key));
+		auto &leaf_node = search_res.node.leaf();
+		/// Insert new element
+		leaf_node.m_keys.insert(leaf_node.m_keys.cbegin() + search_res.key_expected_pos, entry.key);
+		leaf_node.m_vals.insert(leaf_node.m_vals.cbegin() + search_res.key_expected_pos, entry.val);
+		m_pager.place(search_res.path.top().node_pos, search_res.node.make_page());
 
-				const std::size_t index = std::lower_bound(keys.cbegin(), keys.cend(), entry.key) - keys.cbegin();
+		/// Update stats
+		/// TODO:
+		++m_size;
 
-				/// If we are called from 'insert' and the key is already present, do nothing,
-				/// if we are called from 'update' and the key is _not_ already present, do nothing.
-				const bool key_is_present = index < keys.size() && keys[index] == entry.key;
-				if ((action == ActionOnKeyPresent::AbandonChange && key_is_present)
-				    || (action == ActionOnKeyPresent::SubmitChange && !key_is_present))
-					return InsertedNothing();
+		/// Rebalance
+		rebalance_after_insert(search_res.path);
 
-				keys.insert(keys.cbegin() + index, entry.key);
-				vals.insert(vals.cbegin() + index, entry.val);
-				m_pager.place(currpos, curr.make_page());
-				++m_size;
-				return InsertedEntry();
-			}
-
-			auto &refs = curr.branch().m_refs;
-			auto &links = curr.branch().m_links;
-			auto &link_status = curr.branch().m_link_status;
-
-			const std::size_t index = std::lower_bound(refs.cbegin(), refs.cend(), entry.key) - refs.cbegin();
-			const Position child_pos = links[index];
-			if (link_status[index] == LinkStatus::Inval)
-				throw BadTreeInsert(fmt::format(" - link status of pos={} marks it as invalid\n", child_pos));
-
-			auto child = Nod::from_page(m_pager.get(child_pos));
-
-			if (!is_node_full(child)) {
-				currpos = child_pos;
-				curr = std::move(child);
-				continue;
-			}
-
-			auto [midkey, sibling] = node_split(child);
-			auto sibling_pos = m_pager.alloc();
-			child.set_next_node(sibling_pos);
-
-			assert(std::find(refs.cbegin(), refs.cend(), midkey) == refs.cend());
-			assert(std::find(links.cbegin(), links.cend(), sibling_pos) == links.cend());
-
-			refs.insert(refs.begin() + index, midkey);
-			links.insert(links.begin() + index + 1, sibling_pos);
-			link_status.insert(link_status.begin() + index + 1, LinkStatus::Valid);
-
-			m_pager.place(sibling_pos, std::move(sibling.make_page()));
-			m_pager.place(child_pos, std::move(child.make_page()));
-			m_pager.place(currpos, std::move(curr.make_page()));
-
-			if (entry.key < midkey) {
-				currpos = child_pos;
-				curr = std::move(child);
-			} else if (entry.key > midkey) {
-				currpos = sibling_pos;
-				curr = std::move(sibling);
-			} else
-				return InsertedNothing();
-		}
+		return InsertedEntry();
 	}
 
 	/// Construct a new empty tree
@@ -532,64 +606,41 @@ public:
 	/// break in any way any of the tree invariants. It remains as an additional element to compare with
 	/// in the branch nodes.
 	struct RemovedVal {
-		Val val;
+		const Val val;
 	};
 	struct RemovedNothing {};
 	using RemovalReturnMark = std::variant<RemovedVal, RemovedNothing>;
 
-	constexpr RemovalReturnMark remove(const Key &key) {
-		Position currpos{rootpos()};
-		Nod curr{root()};
-		std::size_t curr_idx_in_parent = 0;
+	RemovalReturnMark remove(const Key &key) {
+		auto search_res = search(key);
 
-		std::optional<Val> removed;
-		while (true) {
-			if (curr.is_branch()) {
-				const auto &refs = curr.branch().m_refs;
-				const auto &links = curr.branch().m_links;
-				const auto &link_status = curr.branch().m_link_status;
+		if (!search_res.key_is_present)// key is not in the tree, nothing to remove
+			return RemovedNothing();
 
-				curr_idx_in_parent = std::lower_bound(refs.cbegin(), refs.cend(), key) - refs.cbegin();
-				const Position child_pos = links[curr_idx_in_parent];
-				if (link_status[curr_idx_in_parent] == LinkStatus::Inval)
-					throw BadTreeRemove(fmt::format(" - link status of pos={} marks it as invalid\n", child_pos));
+		auto &node_leaf = search_res.node.leaf();
+		const auto &node_path = search_res.path.top();
 
-				curr = Nod::from_page(m_pager.get(child_pos));
-				currpos = child_pos;
+		const Val removed = node_leaf.m_vals.at(search_res.key_expected_pos);
 
-				continue;
-			}
+		/// Erase element
+		node_leaf.m_keys.erase(node_leaf.m_keys.cbegin() + search_res.key_expected_pos);
+		node_leaf.m_vals.erase(node_leaf.m_vals.cbegin() + search_res.key_expected_pos);
+		m_pager.place(node_path.node_pos, search_res.node.make_page());
 
-			auto &keys = curr.leaf().m_keys;
-			auto &vals = curr.leaf().m_vals;
+		/// TODO:
+		/// Update stats
+		--m_size;
 
-			const std::size_t index = std::lower_bound(keys.cbegin(), keys.cend(), key) - keys.cbegin();
-			if (index == keys.size() || keys[index] != key)
-				break;
-
-			removed = vals.at(index);
-			keys.erase(keys.cbegin() + index);
-			vals.erase(vals.cbegin() + index);
-			m_pager.place(currpos, curr.make_page());
-			--m_size;
-
-			if (curr.is_root())
-				break;
-
-			auto parent = Nod::from_page(m_pager.get(curr.parent()));
-			if (parent.is_leaf())
-				throw BadTreeRemove("- parent of current is invalid");
-
-			/// Performs any rebalance operations if needed.
-			/// Calls itself recursively to check upper tree levels as well.
-			remove_rebalance(curr, currpos, curr_idx_in_parent, key);
-
-			break;
+		/// Performs any rebalance operations if needed.
+		if constexpr (Config::BTREE_RELAXED_REMOVES)
+			rebalance_after_remove_relaxed(search_res.path);
+		else {
+			// FIXME:
+			// rebalance_after_remove(curr, currpos, curr_idx_in_parent, key);
+			throw BadTreeRemove("- using a not yet implemented rebalancing mechanism");
 		}
 
-		if (removed)
-			return RemovedVal{.val = *removed};
-		return RemovedNothing();
+		return RemovedVal{.val = removed};
 	}
 
 	/// Replace an existing <key, value> entry with a new <key, value2>
@@ -606,15 +657,20 @@ public:
 
 	/// Acquire the value associated with a given key
 	/// Finds the entry described by 'key'. If no such entry is found, an empty std::optional<>.
-	/// If an error occurs during the tree traversal 'BadTreeSearch' is thrown.
+	/// If an error occurs during the tree traversal 'BadTreeSea
+	/// rch' is thrown.
 	constexpr std::optional<Val> get(const Key &key) {
-		return search_subtree(root(), key);
+		const auto search_result = search(key);
+		if (!search_result.key_is_present)
+			return {};
+
+		return search_result.node.leaf().m_vals[search_result.key_expected_pos];
 	}
 
 	/// Check whether <key, val> entry described by the given key is present in the tree
 	/// If an error occurs during the tree traversal 'BadTreeSearch' is thrown.
 	constexpr bool contains(const Key &key) {
-		return search_subtree(root(), key).has_value();
+		return search(key).key_is_present;
 	}
 
 	/// Get the entry with the smallest key
@@ -718,10 +774,9 @@ public:
 	/// Check whether the tree object is valid
 	/// Returns 'true' if it is alright and 'false' if not.
 	constexpr bool sanity_check() const {
-		return (m_num_records_leaf > 1)
-		        && (m_num_records_branch > 1)
-		        && (m_num_links_branch >= 2)
-		        && (m_num_records_leaf - 1 >= m_num_records_branch * 2);
+		return min_num_records_leaf() > 1
+		        && min_num_records_branch() > 1
+		        && m_num_links_branch >= 2;
 	}
 
 public:
