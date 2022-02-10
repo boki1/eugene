@@ -34,8 +34,7 @@ set(LibEugenePager_SRC
 
 set(LibEugeneCompression_SRC
         storage/compression/Compressor.h
-        storage/compression/Decompressor.h
-        storage/compression/Compression.cpp)
+        storage/compression/Decompressor.h)
 
 set(LibEugeneCore_SRC
         Util.h Util.cpp SizeMetrics.h Logger.h
@@ -53,10 +52,8 @@ target_link_libraries(LibEugeneCore
         CONAN_PKG::catch2
         CONAN_PKG::spdlog
         CONAN_PKG::libnop
-		CONAN_PKG::andreasbuhr-cppcoro
-        CONAN_PKG::benchmark
-        CONAN_PKG::catch2
-        CONAN_PKG::cppbenchmark)
+        CONAN_PKG::andreasbuhr-cppcoro
+        CONAN_PKG::benchmark)
 
 
 if (DEFINED ENV{EUGENE_BUILD_TESTS})
@@ -72,20 +69,37 @@ if (DEFINED ENV{EUGENE_BUILD_TESTS})
     add_library(TestMain src/core/Main.cpp)
     target_link_libraries(TestMain CONAN_PKG::catch2)
 
-    eugene_test(Compression src/core/storage/compression)
     eugene_test(Btree src/core/storage/btree)
     eugene_test(Node src/core/storage/btree)
     eugene_test(Pager src/core/storage)
     eugene_test(Util src/core)
+
+
+    add_library(LibTestsShared src/core/storage/compression/tests/Shared.h)
+    set_target_properties(LibTestsShared PROPERTIES LINKER_LANGUAGE CXX)
+    target_include_directories(LibTestsShared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/core/storage/compression/tests")
+
+    eugene_test(CompDecompTests src/core/storage/compression/tests)
+    eugene_test(CompTests src/core/storage/compression/tests)
+    eugene_test(DecompTests src/core/storage/compression/tests)
 endif ()
 
 
 if (DEFINED ENV{EUGENE_BUILD_BENCHMARKS})
-    add_executable(benchmark src/core/storage/compression/BenchmarkCompression.cpp)
-    target_link_libraries(benchmark PUBLIC LibEugeneCore)
-
     add_executable(BtreeBench src/core/storage/btree/Bench.cpp)
     target_link_libraries(BtreeBench PUBLIC LibEugeneCore)
+
+
+    add_library(LibCompShared src/core/storage/compression/benchmarks/Shared.h)
+    set_target_properties(LibCompShared PROPERTIES LINKER_LANGUAGE CXX)
+    target_include_directories(LibCompShared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/core/storage/compression/benchmarks")
+
+    add_executable(bench_comp src/core/storage/compression/benchmarks/CompBench.cpp)
+    target_link_libraries(bench_comp PUBLIC LibEugeneCore LibCompShared)
+
+    add_executable(bench_decomp src/core/storage/compression/benchmarks/DecompBench.cpp)
+    target_link_libraries(bench_decomp PUBLIC LibEugeneCore LibCompShared)
+
 
     message("-- Building benchmarks")
 endif ()
