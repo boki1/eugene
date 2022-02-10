@@ -6,7 +6,6 @@ spdlog/1.9.2
 libnop/cci.20200728
 andreasbuhr-cppcoro/cci.20210113
 benchmark/1.6.0
-nlohmann_json/3.10.4
 
 
 [generators]
