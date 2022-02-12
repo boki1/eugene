@@ -69,6 +69,9 @@ public:
 		constexpr Branch(std::vector<Ref> &&refs, std::vector<Position> &&links, std::vector<LinkStatus> &&link_status)
 		    : m_refs{std::move(refs)}, m_links{std::move(links)}, m_link_status{std::move(link_status)} {}
 
+		constexpr Branch(const Branch&) = default;
+		constexpr Branch& operator=(const Branch&) = default;
+
 		auto operator<=>(const Branch &) const noexcept = default;
 		NOP_STRUCTURE(Branch, m_refs, m_links, m_link_status);
 	};
@@ -84,6 +87,9 @@ public:
 		constexpr Leaf() = default;
 		constexpr Leaf(std::vector<Key> &&keys, std::vector<Val> &&vals)
 		    : m_keys{std::move(keys)}, m_vals{std::move(vals)} {}
+
+		constexpr Leaf(const Leaf&) = default;
+		constexpr Leaf& operator=(const Leaf&) = default;
 
 		auto operator<=>(const Leaf &) const noexcept = default;
 		NOP_STRUCTURE(Leaf, m_keys, m_vals);
@@ -144,40 +150,48 @@ public:
 		return p;
 	}
 
+	/// Denotes how split operations distributes the entries of the overflowed node.
+	/// LeanLeft means that the left node is kept full, LeanRight- that the right node is kept full,
+	/// and Unbiased- that the entries are equally distributed among to the two siblings.
+	enum class SplitBias { LeanLeft,
+		               LeanRight,
+		               DistributeEvenly };
+
 	/// Perform a split operation based on some branching factor 'm'.
 	/// Returns a brand new node and the key which is not contained in
 	/// neither of the nodes. It should be put in the parent's list.
-	constexpr std::pair<Key, Nod> split(const std::size_t m) {
-		const std::size_t pivot = (m + 1) / 2;
+	constexpr std::pair<Key, Nod> split(const std::size_t max_num_records, const SplitBias bias) {
+		Node sibling;
+		Key midkey;
+		const auto pivot = [max_num_records, bias, this]() -> std::size_t {
+			// clang-format off
+			switch (bias) {
+				break; case SplitBias::LeanLeft: return max_num_records - 1;
+				break; case SplitBias::LeanRight: return std::abs(num_filled() - static_cast<long>(max_num_records)) + 1;
+				break; case SplitBias::DistributeEvenly: return num_filled() / 2;
+			}
+			// clang-format on
+			UNREACHABLE
+		}();
+
 		if (is_branch()) {
 			auto &b = branch();
-			Node sibling{metadata_ctor<Branch>(
-			                     break_at_index(b.m_refs, pivot),
-			                     break_at_index(b.m_links, pivot),
-			                     break_at_index(b.m_link_status, pivot)),
-			             parent()};
-			b.m_refs.shrink_to_fit();
-			b.m_links.shrink_to_fit();
-			b.m_link_status.shrink_to_fit();
-			Key midkey = b.m_refs[pivot - 1];
-			return std::make_pair<Key, Nod>(std::move(midkey), std::move(sibling));
+			midkey = b.m_refs[pivot];
+			sibling = {metadata_ctor<Branch>(break_at_index(b.m_refs, pivot + 1), break_at_index(b.m_links, pivot + 1), break_at_index(b.m_link_status, pivot + 1)), parent()};
+			b.m_refs.pop_back(); // Branch nodes do not copy mid-keys
 		} else {
 			auto &l = leaf();
-			Node sibling{metadata_ctor<Leaf>(
-			                     break_at_index(l.m_keys, pivot),
-			                     break_at_index(l.m_vals, pivot)),
-			             parent()};
-			l.m_keys.shrink_to_fit();
-			l.m_vals.shrink_to_fit();
-			Key midkey = l.m_keys[pivot - 1];
-			return std::make_pair<Key, Nod>(std::move(midkey), std::move(sibling));
+			sibling = {metadata_ctor<Leaf>(break_at_index(l.m_keys, pivot), break_at_index(l.m_vals, pivot)), parent()};
+			midkey = sibling.leaf().m_keys.front();
 		}
+
+		return std::make_pair<Key, Nod>(std::move(midkey), std::move(sibling));
 	}
 
 	/// Create a new node which is a combination of *this and other.
 	/// The created node is returned as a result and is guaranteed to be a valid node, which conforms to the
 	/// btree requirements for a node.
-	constexpr std::optional<Node> merge_with(const Node &other) const {
+	[[maybe_unused]] constexpr std::optional<Node> merge_with(const Node &other) const {
 		// Merge is performed only of nodes which share a parent (are siblings)
 		// Also a sanity check is done ensuring the nodes are at the same level.
 		if (is_leaf() ^ other.is_leaf() && parent() == other.parent())
@@ -244,9 +258,9 @@ public:
 
 	[[nodiscard]] constexpr auto &items() noexcept { return is_leaf() ? leaf().m_keys : branch().m_refs; }
 
-	[[nodiscard]] constexpr bool is_full(long m) const noexcept { return num_filled() >= m; }
+	[[nodiscard]] constexpr bool is_over(long m) const noexcept { return num_filled() > m; }
 
-	[[nodiscard]] constexpr bool is_underfull(long m) const noexcept { return num_filled() < m / 2 && !m_is_root; }
+	[[nodiscard]] constexpr bool is_under(long m) const noexcept { return num_filled() < m / 2 && !m_is_root; }
 
 	[[nodiscard]] constexpr bool is_empty() const noexcept { return num_filled() == 0; }
 

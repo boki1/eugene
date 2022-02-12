@@ -13,6 +13,16 @@
 namespace internal {
 
 ///
+/// Used inside 'core/storage'
+///
+
+static constexpr unsigned long long operator""_MB(const unsigned long long x) { return x * (1 << 20); }
+
+static constexpr unsigned long long operator""_KB(const unsigned long long x) { return x * (1 << 10); }
+
+static constexpr unsigned long long operator""_B(const unsigned long long x) { return x; }
+
+///
 /// Used inside 'core'
 ///
 
@@ -57,6 +67,8 @@ template<typename T>
 constexpr std::vector<T> break_at_index(std::vector<T> &target, uint32_t pivot) {
 	assert(target.size() >= 2);
 
+//	fmt::print("Breaking target '{}' with pivot={} into ", fmt::join(target, ", "), pivot);
+
 	std::vector<T> second;
 	second.reserve(target.size() - pivot);
 
@@ -64,6 +76,8 @@ constexpr std::vector<T> break_at_index(std::vector<T> &target, uint32_t pivot) 
 	          target.end(),
 	          std::back_inserter(second));
 	target.resize(pivot);
+
+//	fmt::print("'{}' and '{}'\n", fmt::join(target, ", "), fmt::join(second, ", "));
 	return second;
 }
 
@@ -75,10 +89,16 @@ template<typename T>
 	return vec1;
 };
 
-template <typename T, typename V>
-[[nodiscard]] bool collection_contains(const T& collection, V item) {
+template<typename T, typename V>
+[[nodiscard]] bool collection_contains(const T &collection, V item) {
 	return std::find(collection.cbegin(), collection.cend(), item) != collection.cend();
 }
+
+#define UNREACHABLE \
+	abort();
+
+#define UNIMPLEMENTED \
+	abort();
 
 ///
 /// Used  primarily in unit tests
@@ -90,6 +110,7 @@ class smallstr {
 	char m_str[SMALL_LIMIT];
 
 	NOP_STRUCTURE(smallstr, m_str);
+
 public:
 	constexpr smallstr() = default;
 
@@ -127,12 +148,15 @@ struct person {
 template<typename T>
 T random_item();
 
+static int g_i = 0;
+
 template<>
 int random_item<int>() {
-	static std::random_device dev;
-	static std::mt19937 rng(dev());
-	static std::uniform_int_distribution<std::mt19937::result_type> dist(1, 10000000);
-	return dist(rng);
+	return g_i++;
+	//	static std::random_device dev;
+	//	static std::mt19937 rng(dev());
+	//	static std::uniform_int_distribution<std::mt19937::result_type> dist(1, 10000000);
+	//	return dist(rng);
 }
 
 template<>
@@ -184,6 +208,15 @@ person random_item<person>() {
 	        .name = random_item<smallstr>(),
 	        .age = random_item<int>(),
 	        .email = random_item<smallstr>()};
+}
+
+template<typename T>
+std::vector<T> n_random_items(const std::size_t n) {
+	std::vector<T> vec;
+	vec.reserve(n);
+	for (auto i = 0ul; i < n; ++i)
+		vec.push_back(random_item<T>());
+	return vec;
 }
 
 }// namespace internal

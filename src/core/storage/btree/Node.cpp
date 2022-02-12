@@ -24,6 +24,12 @@ using Metadata = Nod::Metadata;
 using Branch = Nod::Branch;
 using Leaf = Nod::Leaf;
 
+#define PRINT_LEAF(node) \
+	fmt::print(#node" = (keys: {}, vals: {})\n", fmt::join(node.m_keys, " "), fmt::join(node.m_vals, " "))
+
+#define PRINT_BRANCH(node) \
+	fmt::print(#node" = (refs: {}, links: {})\n", fmt::join(node.m_refs, " "), fmt::join(node.m_links, " "))
+
 namespace internal {
 template<>
 Nod random_item<Nod>() {
@@ -125,70 +131,81 @@ TEST_CASE("Paging with many random nodes", "[btree]") {
 }
 
 TEST_CASE("Split full nodes", "[btree]") {
-	auto bn = Nod(Metadata(Branch({}, {}, {})), {}, Nod::RootStatus::IsInternal);
-	auto &b = bn.branch();
-	auto ln = Nod(Metadata(Leaf({}, {})), 13, Nod::RootStatus::IsInternal);
-	auto &l = ln.leaf();
+	static constexpr auto BRANCH_NUM = 6;
+	static constexpr auto LEAF_NUM = 6;
 
-	constexpr auto limit_branch = 512;
-	constexpr auto limit_leaf = 512;
+	[[maybe_unused]] static constexpr auto BRANCH_LIMIT = 5;
+	[[maybe_unused]] static constexpr auto LEAF_LIMIT = 5;
 
-	// Fill
-	for (int i = 0; i < limit_branch; ++i) {
-		b.m_refs.push_back(i);
-		b.m_links.emplace_back(i);
-		b.m_link_status.emplace_back(LinkStatus::Valid);
+	std::vector<Position> branch_links(BRANCH_NUM + 1);
+	std::iota(branch_links.begin(), branch_links.end(), static_cast<Position>(0ul));
+
+	auto branch_node = Nod{Metadata(Branch(n_random_items<int>(BRANCH_NUM), std::move(branch_links), std::vector<LinkStatus>(BRANCH_NUM + 1, LinkStatus::Valid))), {}, Nod::RootStatus::IsInternal};
+	g_i = 0;
+	auto leaf_node = Nod{Metadata(Leaf(n_random_items<int>(LEAF_NUM), n_random_items<int>(LEAF_NUM))), {}, Nod::RootStatus::IsInternal};
+	auto &branch = branch_node.branch();
+	auto &leaf = leaf_node.leaf();
+
+	const auto branch_before_split = Nod::Branch{branch_node.branch()};
+	const auto leaf_before_split = Nod::Leaf{leaf_node.leaf()};
+
+	auto validate_branch = [](const Nod::Branch &branch_before_split, const Nod::Branch &left, const Nod::Branch &right, const std::size_t pivot_idx, const auto midkey) {
+		if constexpr (NDEBUG) {
+			fmt::print("branch_pivot = {}\n", pivot_idx);
+			fmt::print("branch_midkey = {}\n", midkey);
+			PRINT_BRANCH(branch_before_split);
+			PRINT_BRANCH(left);
+			PRINT_BRANCH(right);
+			fmt::print("\n");
+		}
+
+		REQUIRE(midkey == branch_before_split.m_refs[pivot_idx]);
+		REQUIRE(std::equal(branch_before_split.m_refs.cbegin(), branch_before_split.m_refs.cbegin() + pivot_idx, left.m_refs.cbegin()));
+		REQUIRE(std::equal(branch_before_split.m_links.cbegin(), branch_before_split.m_links.cbegin() + pivot_idx + 1, left.m_links.cbegin()));
+		REQUIRE(std::equal(branch_before_split.m_link_status.cbegin(), branch_before_split.m_link_status.cbegin() + pivot_idx + 1, left.m_link_status.cbegin()));
+		REQUIRE(std::equal(branch_before_split.m_refs.cbegin() + pivot_idx + 1, branch_before_split.m_refs.cend(), right.m_refs.cbegin()));
+		REQUIRE(std::equal(branch_before_split.m_links.cbegin() + pivot_idx + 1, branch_before_split.m_links.cend(), right.m_links.cbegin()));
+		REQUIRE(std::equal(branch_before_split.m_link_status.cbegin() + pivot_idx + 1, branch_before_split.m_link_status.cend(), right.m_link_status.cbegin()));
+	};
+
+	auto validate_leaf = [](const Nod::Leaf &leaf_before_split, const Nod::Leaf &left, const Nod::Leaf &right, const std::size_t pivot_idx, const auto midkey) {
+		if constexpr (NDEBUG) {
+			fmt::print("leaf_pivot = {}\n", pivot_idx);
+			fmt::print("leaf_midkey = {}\n", midkey);
+			PRINT_LEAF(leaf_before_split);
+			PRINT_LEAF(left);
+			PRINT_LEAF(right);
+			fmt::print("\n");
+		}
+
+ 		REQUIRE(midkey == leaf_before_split.m_keys[pivot_idx]);
+		REQUIRE(std::equal(leaf_before_split.m_keys.cbegin(), leaf_before_split.m_keys.cbegin() + pivot_idx + 1, left.m_keys.cbegin()));
+		REQUIRE(std::equal(leaf_before_split.m_vals.cbegin(), leaf_before_split.m_vals.cbegin() + pivot_idx + 1, left.m_vals.cbegin()));
+		REQUIRE(std::equal(leaf_before_split.m_keys.cbegin() + pivot_idx, leaf_before_split.m_keys.cend(), right.m_keys.cbegin()));
+		REQUIRE(std::equal(leaf_before_split.m_vals.cbegin() + pivot_idx, leaf_before_split.m_vals.cend(), right.m_vals.cbegin()));
+	};
+
+	SECTION("Even distribution of entries") {
+		auto [branch_midkey, branch_sib_node] = branch_node.split(BRANCH_LIMIT, Nod::SplitBias::DistributeEvenly);
+		validate_branch(branch_before_split, branch, branch_sib_node.branch(), (BRANCH_LIMIT + 1) / 2, branch_midkey);
+
+		auto [leaf_midkey, leaf_sib_node] = leaf_node.split(LEAF_LIMIT, Nod::SplitBias::DistributeEvenly);
+		validate_leaf(leaf_before_split, leaf, leaf_sib_node.leaf(), (LEAF_LIMIT + 1) / 2, leaf_midkey);
 	}
-	b.m_links.emplace_back(limit_branch);
 
-	for (int i = 0; i < limit_leaf; ++i) {
-		l.m_keys.push_back(i);
-		l.m_vals.push_back(i);
+	SECTION("Left leaning distribution of entries") {
+		auto [branch_midkey, branch_sib_node] = branch_node.split(BRANCH_LIMIT, Nod::SplitBias::LeanLeft);
+		validate_branch(branch_before_split, branch, branch_sib_node.branch(), BRANCH_LIMIT - 1, branch_midkey);
+
+		auto [leaf_midkey, leaf_sib_node] = leaf_node.split(LEAF_LIMIT, Nod::SplitBias::LeanLeft);
+		validate_leaf(leaf_before_split, leaf, leaf_sib_node.leaf(), LEAF_LIMIT - 1, leaf_midkey);
 	}
 
-	// Break apart
-	auto [branch_midkey, branch_sib_node] = bn.split(limit_branch);
-	auto [leaf_midkey, leaf_sib_node] = ln.split(limit_leaf);
-	REQUIRE(branch_midkey == limit_branch / 2 - 1);
-	REQUIRE(leaf_midkey == limit_leaf / 2 - 1);
+	SECTION("Right leaning distribution of entries") {
+		auto [branch_midkey, branch_sib_node] = branch_node.split(BRANCH_LIMIT, Nod::SplitBias::LeanRight);
+		validate_branch(branch_before_split, branch, branch_sib_node.branch(), std::abs(BRANCH_LIMIT - BRANCH_NUM) + 1, branch_midkey);
 
-	auto &branch_sib = branch_sib_node.branch();
-	auto &leaf_sib = leaf_sib_node.leaf();
-
-	for (decltype(branch_midkey) i = 0; i < branch_midkey; ++i) {
-		REQUIRE(collection_contains(b.m_refs, i));
-		REQUIRE(collection_contains(b.m_links, static_cast<long>(i)));
-		REQUIRE(!collection_contains(branch_sib.m_refs, i));
-		REQUIRE(!collection_contains(branch_sib.m_links, static_cast<long>(i)));
-	}
-	REQUIRE(collection_contains(b.m_links, static_cast<long>(branch_midkey)));
-	REQUIRE(!collection_contains(branch_sib.m_links, static_cast<long>(branch_midkey)));
-
-	for (decltype(leaf_midkey) i = 0; i <= leaf_midkey; ++i) {
-		REQUIRE(collection_contains(l.m_keys, i));
-		REQUIRE(collection_contains(l.m_vals, i));
-		REQUIRE(!collection_contains(leaf_sib.m_keys, i));
-		REQUIRE(!collection_contains(leaf_sib.m_vals, i));
-	}
-
-	// The middle key should remain in the "left" leaf although it is suppossed to get a
-	// ref inside the new parent, this is the actual spot where the val is stored.
-	REQUIRE(collection_contains(leaf_sib.m_keys, (limit_leaf + 1) / 2));
-	REQUIRE(collection_contains(leaf_sib.m_vals, (limit_leaf + 1) / 2));
-
-	for (uint32_t i = branch_midkey + 1; i < limit_branch; ++i) {
-		REQUIRE(!collection_contains(b.m_refs, i));
-		REQUIRE(!collection_contains(b.m_links, static_cast<long>(i)));
-		REQUIRE(collection_contains(branch_sib.m_refs, i));
-		REQUIRE(collection_contains(branch_sib.m_links, static_cast<long>(i)));
-	}
-	REQUIRE(!collection_contains(b.m_links, static_cast<long>(limit_branch)));
-	REQUIRE(collection_contains(branch_sib.m_links, static_cast<long>(limit_branch)));
-
-	for (uint32_t i = leaf_midkey + 1; i < limit_leaf; ++i) {
-		REQUIRE(!collection_contains(l.m_keys, i));
-		REQUIRE(!collection_contains(l.m_vals, i));
-		REQUIRE(collection_contains(leaf_sib.m_keys, i));
-		REQUIRE(collection_contains(leaf_sib.m_vals, i));
+		auto [leaf_midkey, leaf_sib_node] = leaf_node.split(LEAF_LIMIT, Nod::SplitBias::LeanRight);
+		validate_leaf(leaf_before_split, leaf, leaf_sib_node.leaf(), std::abs(LEAF_LIMIT - LEAF_NUM) + 1, leaf_midkey);
 	}
 }

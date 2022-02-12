@@ -64,7 +64,8 @@ class Btree {
 	using Ref = typename Config::Ref;
 	using Nod = Node<Config>;
 
-	using PagerAllocatorPolicy = typename Config::PageAllocatorPolicy;
+//	using PagerAllocatorPolicy = typename Config::PageAllocatorPolicy;
+	using PagerAllocatorPolicy = FreeListAllocator;
 	using PagerEvictionPolicy = typename Config::PageEvictionPolicy;
 
 	friend util::BtreePrinter<Config>;
@@ -75,6 +76,9 @@ class Btree {
 	static inline constexpr auto BRANCHING_FACTOR_BRANCH = Config::BRANCHING_FACTOR_BRANCH;
 
 	static inline constexpr std::uint32_t HEADER_MAGIC = 0xB75EEA41;
+
+	/// Type shortcuts
+	using SplitBias = typename Nod::SplitBias;
 
 public:
 	///
@@ -125,24 +129,24 @@ private:
 	///
 
 	/// Wrapper for checking whether a node has too many elements
-	[[nodiscard]] constexpr bool is_node_full(const Nod &node) {
+	[[nodiscard]] constexpr bool is_node_over(const Nod &node) {
 		if (node.is_branch())
-			return node.is_full(max_num_records_branch());
-		return node.is_full(max_num_records_leaf());
+			return node.is_over(max_num_records_branch());
+		return node.is_over(max_num_records_leaf());
 	}
 
 	/// Wrapper for checking whether a node has too few elements
-	[[nodiscard]] constexpr bool is_node_underfull(const Nod &node) {
+	[[nodiscard]] constexpr bool is_node_under(const Nod &node) {
 		if (node.is_branch())
-			return node.is_underfull(min_num_records_branch());
-		return node.is_underfull(min_num_records_leaf());
+			return node.is_under(min_num_records_branch());
+		return node.is_under(min_num_records_leaf());
 	}
 
 	/// Wrapper for calling split API on a given node
-	[[nodiscard]] constexpr auto node_split(Nod &node) {
+	[[nodiscard]] constexpr auto node_split(Nod &node, const SplitBias bias) {
 		if (node.is_branch())
-			return node.split(max_num_records_branch());
-		return node.split(max_num_records_leaf());
+			return node.split(max_num_records_branch(), bias);
+		return node.split(max_num_records_leaf(), bias);
 	}
 
 	/// Tree search logic
@@ -178,7 +182,11 @@ private:
 
 			if (curr.is_branch()) {
 				const auto &branch_node = curr.branch();
-				const std::size_t index = std::lower_bound(branch_node.m_refs.cbegin(), branch_node.m_refs.cend(), target_key) - branch_node.m_refs.cbegin();
+				const std::size_t index = [&] {
+					auto it = std::lower_bound(branch_node.m_refs.cbegin(), branch_node.m_refs.cend(), target_key);
+					return it - branch_node.m_refs.cbegin() + (it != branch_node.m_refs.cend() && *it == target_key);
+				}();
+
 				if (branch_node.m_link_status[index] == LinkStatus::Inval)
 					throw BadTreeSearch(fmt::format("- invalid link w/ index={} pointing to pos={} in branch node\n", index, curr.branch().m_links[index]));
 				curr_idx_in_parent = index;
@@ -187,7 +195,7 @@ private:
 			} else if (curr.is_leaf()) {
 				const auto &leaf_node = curr.leaf();
 				key_expected_pos = std::lower_bound(leaf_node.m_keys.cbegin(), leaf_node.m_keys.cend(), target_key) - leaf_node.m_keys.cbegin();
-				key_is_present = key_expected_pos >= leaf_node.m_keys.size() ? false : leaf_node.m_keys[key_expected_pos] == target_key;
+				key_is_present = key_expected_pos < leaf_node.m_keys.size() && leaf_node.m_keys[key_expected_pos] == target_key;
 				if (key_is_present)
 					path.top().idx_of_key = key_expected_pos;
 
@@ -256,7 +264,7 @@ private:
 			old_root.set_parent(new_pos);
 			old_root.set_root_status(Nod::RootStatus::IsInternal);
 
-			auto [midkey, sibling] = node_split(old_root);
+			auto [midkey, sibling] = node_split(old_root, Nod::SplitBias::DistributeEvenly);
 			auto sibling_pos = m_pager.alloc();
 			old_root.set_next_node(sibling_pos);
 
@@ -274,38 +282,44 @@ private:
 		return new_root;
 	}
 
-	void rebalance_after_insert(TreePath &visited) {
-//		std::optional<Nod> next_node;
+	void rebalance_after_insert(TreePath &visited, const SplitBias bias) {
+		std::optional<Nod> node;
 		while (true) {
-			const PosNod &path_of_curr = visited.top();
-			auto curr = Nod::from_page(m_pager.get(path_of_curr.node_pos));
+			const PosNod &path_of_node = visited.top();
+			if (!node)
+				node = Nod::from_page(m_pager.get(path_of_node.node_pos));
 
 			/// Having the current node valid, means that the upper levels of the tree are fine as well.
-			if (!is_node_full(curr))
+			if (!is_node_over(*node))
 				break;
 
-			if (curr.is_root()) {
+			if (node->is_root()) {
 				[[maybe_unused]] const auto new_root = make_root(MakeRootAction::NewTreeLevel);
 				break;
 			}
 
-			auto [midkey, sibling] = node_split(curr);
+			auto [midkey, sibling] = node_split(*node, bias);
 			auto sibling_pos = m_pager.alloc();
-			curr.set_next_node(sibling_pos);
+			node->set_next_node(sibling_pos);
+			/// TODO: Can 'sibling' already have a right neighbor?
 
 			visited.pop();
 			const PosNod &path_of_parent = visited.top();
 			auto parent = Nod::from_page(m_pager.get(path_of_parent.node_pos));
 
-			/// Safety: 'path_of_curr.idx_in_parent' is guaranteed to contain a value since 'curr' is not root.
-			const auto idx = path_of_curr.idx_in_parent.value();
+			/// Safety: 'path_of_node.idx_in_parent' is guaranteed to contain a value since '*node' is not root.
+			const auto idx = path_of_node.idx_in_parent.value();
 
 			parent.branch().m_refs.insert(parent.branch().m_refs.cbegin() + idx, midkey);
 			parent.branch().m_links.insert(parent.branch().m_links.cbegin() + idx + 1, sibling_pos);
 			parent.branch().m_link_status.insert(parent.branch().m_link_status.cbegin() + idx + 1, LinkStatus::Valid);
 
 			m_pager.place(sibling_pos, sibling.make_page());
-			m_pager.place(path_of_curr.node_pos, curr.make_page());
+			m_pager.place(path_of_node.node_pos, node->make_page());
+			m_pager.place(path_of_parent.node_pos, parent.make_page());
+
+			/// Cache next node that will be looked at
+			node = parent;
 		}
 	}
 
@@ -316,12 +330,11 @@ private:
 	/// merge 'node' with one of its siblings. If a merge occurred, the function calls itself recursively,
 	/// fixing any underflows occurring upwards in the tree.
 	///
-	/// TODO: Fix me
-	/// TODO: Use new TreePath API
+	/// FIXME: Use new TreePath API
 	[[maybe_unused]] void rebalance_after_remove(Nod &node, const Position node_pos, std::optional<std::size_t> node_idx_in_parent = {}, optional_cref<Key> key_to_remove = {}) {
 		/// There is no need to check the upper levels if the current node is valid.
 		/// And there is no more to check if the current node is the root node.
-		if (!is_node_underfull(node) || node.is_root())
+		if (!is_node_under(node) || node.is_root())
 			return;
 
 		/// If 'node' was root we would have already returned. Therefore it is safe to assume that
@@ -365,9 +378,7 @@ private:
 				sibling.leaf().m_vals.erase(sibling.leaf().m_vals.cbegin() + borrowed_idx);
 				sibling.leaf().m_keys.erase(sibling.leaf().m_keys.cbegin() + borrowed_idx);
 			} else {
-				// TODO
 				// We are currently propagating a merge operation upwards in the tree.
-				abort();
 			}
 			const auto new_separator_key = [&] {
 				if (sibling_rel == RelativeSibling::Left)
@@ -383,12 +394,12 @@ private:
 
 		if (has_left_sibling)
 			borrow_from_sibling(RelativeSibling::Left);
-		if (is_node_underfull(node) && has_right_sibling)
+		if (is_node_under(node) && has_right_sibling)
 			borrow_from_sibling(RelativeSibling::Right);
 
 		/// We tried borrowing a single element from the siblings and that successfully
 		/// rebalanced the tree after the removal.
-		if (!is_node_underfull(node))
+		if (!is_node_under(node))
 			return;
 
 		/// There is a chance that the last element in 'node' is the same as the 'separator_key'. Duplicates are unwanted.
@@ -481,8 +492,6 @@ private:
 		    || (action == ActionOnKeyPresent::SubmitChange && !search_res.key_is_present))
 			return InsertedNothing();
 
-		if (!search_res.node.is_leaf())// sanity check
-			throw BadTreeInsert(fmt::format("- returned non-leaf node as 'final visited leaf' in search result for target_key={}", entry.key));
 		auto &leaf_node = search_res.node.leaf();
 		/// Insert new element
 		leaf_node.m_keys.insert(leaf_node.m_keys.cbegin() + search_res.key_expected_pos, entry.key);
@@ -494,7 +503,7 @@ private:
 		++m_size;
 
 		/// Rebalance
-		rebalance_after_insert(search_res.path);
+		rebalance_after_insert(search_res.path, Nod::SplitBias::LeanLeft);
 
 		return InsertedEntry();
 	}
@@ -564,7 +573,7 @@ public:
 	[[nodiscard]] std::size_t size() noexcept { return m_size; }
 
 	/// Check if the tree is empty
-	[[nodiscard]] bool empty() const noexcept { return size() == 0; }
+	[[nodiscard]] bool empty() noexcept { return size() == 0; }
 
 	/// Get tree depth (max level of the tree)
 	[[nodiscard]] std::size_t depth() { return m_depth; }
@@ -635,9 +644,7 @@ public:
 		if constexpr (Config::BTREE_RELAXED_REMOVES)
 			rebalance_after_remove_relaxed(search_res.path);
 		else {
-			// FIXME:
-			// rebalance_after_remove(curr, currpos, curr_idx_in_parent, key);
-			throw BadTreeRemove("- using a not yet implemented rebalancing mechanism");
+			// rebalance_after_remove(curr, currpos, curr_idx_in_parent, ke}y);
 		}
 
 		return RemovedVal{.val = removed};
@@ -774,8 +781,8 @@ public:
 	/// Check whether the tree object is valid
 	/// Returns 'true' if it is alright and 'false' if not.
 	constexpr bool sanity_check() const {
-		return min_num_records_leaf() > 1
-		        && min_num_records_branch() > 1
+		return min_num_records_leaf() >= 1
+		        && min_num_records_branch() >= 1
 		        && m_num_links_branch >= 2;
 	}
 
@@ -790,8 +797,8 @@ public:
 		}
 		// clang-format on
 
-		/// For debug build, additionally check whether the initialized instance represent a valid B-tree
-		//		assert(sanity_check());
+		/// For debug build, additionally check whether the initialized instance represents a valid B-tree
+		assert(sanity_check());
 	}
 
 	Btree(const Btree &) = default;

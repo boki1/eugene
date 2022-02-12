@@ -16,9 +16,13 @@ namespace internal::storage::btree::util {
 
 template<typename Collection>
 static std::string join(const Collection& collection, std::string_view delim) {
-	std::stringstream ss;
 	auto begin = std::cbegin(collection);
 	const auto end = std::cend(collection);
+    if (begin == end) {
+        return "";
+	}
+
+	std::stringstream ss;
 	while (begin < end - 1)
 		ss << *begin++ << delim;
 	ss << *begin;
@@ -55,7 +59,7 @@ public:
 		}
 
 		m_out << '[' << join(node.branch().m_refs, ", ") << "]\n";
-		m_out << indentation << (level > 1 ? "  " : "") << "children: \n";
+		m_out << indentation << (level > 1 ? "  " : "") << "children:\n";
 		for (std::size_t i = 0; i < node.branch().m_links.size(); ++i)
 			if (node.branch().m_link_status[i] == LinkStatus::Inval)
 				fmt::print("- Empty\n");

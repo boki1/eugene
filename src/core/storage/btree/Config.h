@@ -5,7 +5,7 @@
 
 #include <nop/structure.h>
 
-#include <core/SizeMetrics.h>
+#include <core/Util.h>
 #include <core/storage/Pager.h>
 
 namespace internal::storage::btree {
@@ -30,6 +30,10 @@ struct Config {
 	/// Marks whether relaxed rebalancing should be performed on remove operations
 	static inline constexpr bool BTREE_RELAXED_REMOVES = true;
 };
+
+#define BTREE_OF_ORDER(m)\
+	static inline constexpr int BRANCHING_FACTOR_LEAF = (m);\
+	static inline constexpr int BRANCHING_FACTOR_BRANCH = (m)
 
 template<typename C>
 concept BtreeConfig = std::is_base_of_v<Config, C>;
