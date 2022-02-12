@@ -12,10 +12,13 @@ add_compile_options(
         -Werror
         -pedantic
         -ggdb3
+		-Wfatal-errors
         -fdiagnostics-color)
 
 enable_testing()
 include(FetchContent)
+
+add_compile_definitions(NDEBUG="true")
 
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup(TARGETS)
