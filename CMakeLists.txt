@@ -23,7 +23,7 @@ conan_basic_setup(TARGETS)
 set(LibEugeneBtree_SRC
         storage/btree/Btree.h
         storage/btree/Btree.cpp
-        storage/btree/Bench.cpp
+        storage/btree/BenchBtree.cpp
         storage/btree/Node.h
         storage/btree/BtreePrinter.h
         storage/btree/Config.h)
@@ -60,35 +60,44 @@ target_link_libraries(LibEugeneCore
         CONAN_PKG::catch2
         CONAN_PKG::cppbenchmark)
 
+if (DEFINED EU_BUILD_TESTS)
+	message(STATUS "EU_BUILD_TESTS = " ${EU_BUILD_TESTS})
+	if ("${EU_BUILD_TESTS}" STREQUAL "yes")
+		macro(eugene_test component path_prefix)
+			add_executable(Test${component} ${path_prefix}/${component}.cpp)
+			target_link_libraries(Test${component} TestMain LibEugeneCore)
+			add_test(NAME Test${component} COMMAND Test${component})
+			message(STATUS "\tTest about '${component}' component added from \"${path_prefix}/${component}.cpp\"")
+		endmacro()
 
-if (DEFINED ENV{EUGENE_BUILD_TESTS})
-    macro(eugene_test component path_prefix)
-        add_executable(Test${component} ${path_prefix}/${component}.cpp)
-        target_link_libraries(Test${component} TestMain LibEugeneCore)
-        add_test(NAME Test${component} COMMAND Test${component})
-        message("   -- Test about '${component}' component added from \"${path_prefix}/${component}.cpp\"")
-    endmacro()
+		message(STATUS "Building core unit tests")
 
-    message("-- Building core unit tests")
+		add_library(TestMain src/core/Main.cpp)
+		target_link_libraries(TestMain CONAN_PKG::catch2)
 
-    add_library(TestMain src/core/Main.cpp)
-    target_link_libraries(TestMain CONAN_PKG::catch2)
-
-    eugene_test(Compression src/core/storage/compression)
-    eugene_test(Btree src/core/storage/btree)
-    eugene_test(Node src/core/storage/btree)
-    eugene_test(Page src/core/storage)
-    eugene_test(PageCache src/core/storage)
-    eugene_test(Util src/core)
+		eugene_test(Compression src/core/storage/compression)
+		eugene_test(Btree src/core/storage/btree)
+		eugene_test(Node src/core/storage/btree)
+		eugene_test(Page src/core/storage)
+		eugene_test(PageCache src/core/storage)
+		eugene_test(Util src/core)
+	endif()
 endif ()
 
 
-if (DEFINED ENV{EUGENE_BUILD_BENCHMARKS})
-    add_executable(benchmark src/core/storage/compression/BenchmarkCompression.cpp)
-    target_link_libraries(benchmark PUBLIC LibEugeneCore)
+if (DEFINED EU_BUILD_BENCHMARKS)
+	message(STATUS "EU_BUILD_BENCHMARKS = " ${EU_BUILD_BENCHMARKS})
+	if ("${EU_BUILD_BENCHMARKS}" STREQUAL "yes")
+		macro(eugene_bench component path_prefix)
+			set(bench_name Bench${component})
+			add_executable(${bench_name} ${path_prefix}/${bench_name}.cpp)
+			target_link_libraries(${bench_name} LibEugeneCore CONAN_PKG::benchmark)
+			message(STATUS "\tBenchmark about '${component}' component added from \"${path_prefix}/${bench_name}.cpp\"")
+		endmacro()
 
-    add_executable(BtreeBench src/core/storage/btree/Bench.cpp)
-    target_link_libraries(BtreeBench PUBLIC LibEugeneCore)
+		message(STATUS "Building core benchmarks")
 
-    message("-- Building benchmarks")
+		#eugene_bench(Compression src/core/storage/compression)
+		eugene_bench(Btree src/core/storage/btree)
+	endif()
 endif ()
