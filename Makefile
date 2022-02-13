@@ -5,8 +5,9 @@ EU_BUILD_DIR ?= build
 EU_THREADS ?= 4
 EU_BUILD_TESTS := no
 EU_BUILD_BENCHMARKS := no
+EU_CONAN_PROFILE ?= ${HOME}/.conan/profiles/default
 
-all: config-test config-bench config build
+all: config-test config-bench config build exec-test exec-bench
 
 clean: mrproper
 
@@ -14,9 +15,12 @@ mrproper:
 	rm -rf ${EU_BUILD_DIR}
 	rm -f build.log
 
-config:
+dep-setup:
 	mkdir -p build
-	conan install . -if ${EU_BUILD_DIR} --build=missing
+	CXX=${EU_CXX_COMPILER} CC=${EU_C_COMPILER}\
+		conan install . --profile ${EU_CONAN_PROFILE} -if ${EU_BUILD_DIR} --build=missing
+
+config: dep-setup
 	cmake -S. -B${EU_BUILD_DIR}/ -GNinja\
 		-DCMAKE_C_COMPILER=${EU_C_COMPILER}\
 		-DCMAKE_CXX_COMPILER=${EU_CXX_COMPILER}\
@@ -34,13 +38,17 @@ config-bench:
 build: config
 	ninja -C${EU_BUILD_DIR} -j${EU_THREADS}
 
-test: config-test config build
-	test --no-tests=error --rerun-failed --output-on-failure --test-dir ${EU_BUILD_DIR}
+test: config-test config build exec-test
+
+exec-test:
+	ctest --no-tests=error --rerun-failed --output-on-failure --test-dir ${EU_BUILD_DIR}
 	$(eval EU_BUILD_TESTS=no)
 
-bench: config-bench config build
+exec-bench:
 	for bench in `ls ${EU_BUILD_DIR}/bin/Bench*`; do $$bench; done
 	$(eval EU_BUILD_BENCHMARKS=no)
+
+bench: config-bench config build exec-bench
 
 clean-test: clean test
 
@@ -50,4 +58,4 @@ clean-build: clean build
 
 clean-all: clean all
 
-.PHONY: all clean clean-test clean-bench clean-build clean-all
+.PHONY: all clean clean-test clean-bench clean-build clean-all test bench
