@@ -183,19 +183,19 @@ private:
 			if (curr.is_branch()) {
 				const auto &branch_node = curr.branch();
 				const std::size_t index = [&] {
-					auto it = std::lower_bound(branch_node.m_refs.cbegin(), branch_node.m_refs.cend(), target_key);
-					return it - branch_node.m_refs.cbegin() + (it != branch_node.m_refs.cend() && *it == target_key);
+					auto it = std::lower_bound(branch_node.refs.cbegin(), branch_node.refs.cend(), target_key);
+					return it - branch_node.refs.cbegin() + (it != branch_node.refs.cend() && *it == target_key);
 				}();
 
-				if (branch_node.m_link_status[index] == LinkStatus::Inval)
-					throw BadTreeSearch(fmt::format("- invalid link w/ index={} pointing to pos={} in branch node\n", index, curr.branch().m_links[index]));
+				if (branch_node.link_status[index] == LinkStatus::Inval)
+					throw BadTreeSearch(fmt::format("- invalid link w/ index={} pointing to pos={} in branch node\n", index, curr.branch().links[index]));
 				curr_idx_in_parent = index;
-				curr_pos = branch_node.m_links[index];
+				curr_pos = branch_node.links[index];
 				curr = Nod::from_page(m_pager.get(curr_pos));
 			} else if (curr.is_leaf()) {
 				const auto &leaf_node = curr.leaf();
-				key_expected_pos = std::lower_bound(leaf_node.m_keys.cbegin(), leaf_node.m_keys.cend(), target_key) - leaf_node.m_keys.cbegin();
-				key_is_present = key_expected_pos < leaf_node.m_keys.size() && leaf_node.m_keys[key_expected_pos] == target_key;
+				key_expected_pos = std::lower_bound(leaf_node.keys.cbegin(), leaf_node.keys.cend(), target_key) - leaf_node.keys.cbegin();
+				key_is_present = key_expected_pos < leaf_node.keys.size() && leaf_node.keys[key_expected_pos] == target_key;
 				if (key_is_present)
 					path.top().idx_of_key = key_expected_pos;
 
@@ -230,7 +230,7 @@ private:
 		if (node.is_leaf())
 			return node;
 
-		const auto &link_status = node.branch().m_link_status;
+		const auto &link_status = node.branch().link_status;
 		const std::size_t index = [&] {
 			if (corner == CornerDetail::MAX)
 				return std::distance(std::cbegin(link_status), std::find(std::crbegin(link_status), std::crend(link_status), LinkStatus::Valid).base()) - 1;
@@ -239,7 +239,7 @@ private:
 		}();
 		if (index >= link_status.size() || link_status[index] != LinkStatus::Valid)
 			throw BadTreeSearch(fmt::format(" - no valid link in node marked as branch\n"));
-		const Position pos = node.branch().m_links[index];
+		const Position pos = node.branch().links[index];
 		return get_corner_subtree(Nod::from_page(m_pager.get(pos)), corner);
 	}
 
@@ -310,9 +310,9 @@ private:
 			/// Safety: 'path_of_node.idx_in_parent' is guaranteed to contain a value since '*node' is not root.
 			const auto idx = path_of_node.idx_in_parent.value();
 
-			parent.branch().m_refs.insert(parent.branch().m_refs.cbegin() + idx, midkey);
-			parent.branch().m_links.insert(parent.branch().m_links.cbegin() + idx + 1, sibling_pos);
-			parent.branch().m_link_status.insert(parent.branch().m_link_status.cbegin() + idx + 1, LinkStatus::Valid);
+			parent.branch().refs.insert(parent.branch().refs.cbegin() + idx, midkey);
+			parent.branch().links.insert(parent.branch().links.cbegin() + idx + 1, sibling_pos);
+			parent.branch().link_status.insert(parent.branch().link_status.cbegin() + idx + 1, LinkStatus::Valid);
 
 			m_pager.place(sibling_pos, sibling.make_page());
 			m_pager.place(path_of_node.node_pos, node->make_page());
@@ -341,8 +341,8 @@ private:
 		/// 'node.parent()' contains a valid Position.
 		Nod parent = Nod::from_page(m_pager.get(node.parent()));
 
-		auto &parent_links = parent.branch().m_links;
-		auto &parent_link_status = parent.branch().m_link_status;
+		auto &parent_links = parent.branch().links;
+		auto &parent_link_status = parent.branch().link_status;
 
 		if (!node_idx_in_parent)
 			node_idx_in_parent.emplace(std::find(parent_links.cbegin(), parent_links.cend(), node_pos) - parent_links.cbegin());
@@ -350,7 +350,7 @@ private:
 			throw BadTreeRemove(fmt::format(" - [rebalance_after_remove] node_idx_in_parent (={}) is out of bounds for parent (@{}) and node (@{})", *node_idx_in_parent, node.parent(), node_pos));
 
 		const bool has_left_sibling = *node_idx_in_parent > 0 && parent_link_status[*node_idx_in_parent - 1] == LinkStatus::Valid;
-		const bool has_right_sibling = *node_idx_in_parent < parent.branch().m_links.size() - 1 && parent_link_status[*node_idx_in_parent + 1] == LinkStatus::Valid;
+		const bool has_right_sibling = *node_idx_in_parent < parent.branch().links.size() - 1 && parent_link_status[*node_idx_in_parent + 1] == LinkStatus::Valid;
 
 		enum class RelativeSibling { Left,
 			                     Right };
@@ -373,10 +373,10 @@ private:
 			const auto borrowed_dest_idx = sibling_rel == RelativeSibling::Left ? 0 : node.num_filled();
 
 			if (node.is_leaf()) {
-				node.leaf().m_vals.insert(node.leaf().m_vals.cbegin() + borrowed_dest_idx, sibling.leaf().m_vals.at(borrowed_idx));
-				node.leaf().m_keys.insert(node.leaf().m_keys.cbegin() + borrowed_dest_idx, sibling.leaf().m_keys.at(borrowed_idx));
-				sibling.leaf().m_vals.erase(sibling.leaf().m_vals.cbegin() + borrowed_idx);
-				sibling.leaf().m_keys.erase(sibling.leaf().m_keys.cbegin() + borrowed_idx);
+				node.leaf().vals.insert(node.leaf().vals.cbegin() + borrowed_dest_idx, sibling.leaf().vals.at(borrowed_idx));
+				node.leaf().keys.insert(node.leaf().keys.cbegin() + borrowed_dest_idx, sibling.leaf().keys.at(borrowed_idx));
+				sibling.leaf().vals.erase(sibling.leaf().vals.cbegin() + borrowed_idx);
+				sibling.leaf().keys.erase(sibling.leaf().keys.cbegin() + borrowed_idx);
 			} else {
 				// We are currently propagating a merge operation upwards in the tree.
 			}
@@ -403,12 +403,12 @@ private:
 			return;
 
 		/// There is a chance that the last element in 'node' is the same as the 'separator_key'. Duplicates are unwanted.
-		if (const auto separator_key = parent.branch().m_refs[*node_idx_in_parent]; separator_key != node.leaf().m_keys.back()) {
+		if (const auto separator_key = parent.branch().refs[*node_idx_in_parent]; separator_key != node.leaf().keys.back()) {
 			/// If the separator_key is the same as the key we removed just before calling `rebalance_after_remove()` we would not like to keep duplicates, so skip adding it.
 			if (key_to_remove.has_value() && separator_key != *key_to_remove)
-				node.leaf().m_keys.push_back(separator_key);
+				node.leaf().keys.push_back(separator_key);
 		}
-		parent.branch().m_refs.pop_back();
+		parent.branch().refs.pop_back();
 
 		auto make_merged_node_from = [&](const Nod &left, const Nod &right) {
 			if (auto maybe_merged_node = left.merge_with(right); maybe_merged_node) {
@@ -422,7 +422,7 @@ private:
 				parent_links.erase(parent_links.cbegin() + *node_idx_in_parent);
 				parent_link_status.erase(parent_link_status.cbegin() + *node_idx_in_parent);
 
-				parent.branch().m_refs[*node_idx_in_parent - 1] = maybe_merged_node->leaf().m_keys.back();
+				parent.branch().refs[*node_idx_in_parent - 1] = maybe_merged_node->leaf().keys.back();
 				m_pager.place(merged_node_pos, maybe_merged_node->make_page());
 			}
 		};
@@ -458,7 +458,7 @@ private:
 			/// This should be fine, expecting that the cache is large enough to fit _at least all branch nodes_.
 			auto parent_node = Nod::from_page(m_pager.get(search_path.top().node_pos));
 
-			auto &parent_links = parent_node.branch().m_links;
+			auto &parent_links = parent_node.branch().links;
 
 			/// Safety: 'path_of_curr.idx_in_parent' has value which is guaranteed by the fact that the current node is not root
 			parent_links.erase(parent_links.cbegin() + path_of_curr.idx_in_parent.value());
@@ -494,8 +494,8 @@ private:
 
 		auto &leaf_node = search_res.node.leaf();
 		/// Insert new element
-		leaf_node.m_keys.insert(leaf_node.m_keys.cbegin() + search_res.key_expected_pos, entry.key);
-		leaf_node.m_vals.insert(leaf_node.m_vals.cbegin() + search_res.key_expected_pos, entry.val);
+		leaf_node.keys.insert(leaf_node.keys.cbegin() + search_res.key_expected_pos, entry.key);
+		leaf_node.vals.insert(leaf_node.vals.cbegin() + search_res.key_expected_pos, entry.val);
 		m_pager.place(search_res.path.top().node_pos, search_res.node.make_page());
 
 		/// Update stats
@@ -519,12 +519,12 @@ private:
 
 		/// Make sure that when a leaf is split, its contents could be distributed among the two branch nodes.
 		/// Number of entries in branch and leaf nodes may differ
-		m_num_links_branch = BRANCHING_FACTOR_BRANCH > 0
+		m_nulinks_branch = BRANCHING_FACTOR_BRANCH > 0
 		        ? BRANCHING_FACTOR_BRANCH
 		        : ::internal::binsearch_primitive(2ul, PAGE_SIZE / 2, [](auto current, auto, auto) {
 			          return nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Branch(std::vector<Ref>(current), std::vector<Position>(current), std::vector<LinkStatus>(current))), 10, Nod::RootStatus::IsInternal}) - PAGE_SIZE;
 		          }).value_or(0);
-		m_num_records_branch = m_num_links_branch - 1;
+		m_num_records_branch = m_nulinks_branch - 1;
 
 		auto num_records_leaf_candidate = BRANCHING_FACTOR_LEAF > 0
 		        ? BRANCHING_FACTOR_LEAF
@@ -629,11 +629,11 @@ public:
 		auto &node_leaf = search_res.node.leaf();
 		const auto &node_path = search_res.path.top();
 
-		const Val removed = node_leaf.m_vals.at(search_res.key_expected_pos);
+		const Val removed = node_leaf.vals.at(search_res.key_expected_pos);
 
 		/// Erase element
-		node_leaf.m_keys.erase(node_leaf.m_keys.cbegin() + search_res.key_expected_pos);
-		node_leaf.m_vals.erase(node_leaf.m_vals.cbegin() + search_res.key_expected_pos);
+		node_leaf.keys.erase(node_leaf.keys.cbegin() + search_res.key_expected_pos);
+		node_leaf.vals.erase(node_leaf.vals.cbegin() + search_res.key_expected_pos);
 		m_pager.place(node_path.node_pos, search_res.node.make_page());
 
 		/// TODO:
@@ -671,7 +671,7 @@ public:
 		if (!search_result.key_is_present)
 			return {};
 
-		return search_result.node.leaf().m_vals[search_result.key_expected_pos];
+		return search_result.node.leaf().vals[search_result.key_expected_pos];
 	}
 
 	/// Check whether <key, val> entry described by the given key is present in the tree
@@ -686,8 +686,8 @@ public:
 		if (node_with_smallest_keys.num_filled() <= 0)
 			return {};
 
-		return std::make_optional<Entry>({.key = node_with_smallest_keys.leaf().m_keys.front(),
-		                                  .val = node_with_smallest_keys.leaf().m_vals.front()});
+		return std::make_optional<Entry>({.key = node_with_smallest_keys.leaf().keys.front(),
+		                                  .val = node_with_smallest_keys.leaf().vals.front()});
 	}
 
 	/// Get the entry with the biggest key
@@ -696,8 +696,8 @@ public:
 		if (node_with_biggest_keys.num_filled() <= 0)
 			return {};
 
-		return std::make_optional<Entry>({.key = node_with_biggest_keys.leaf().m_keys.back(),
-		                                  .val = node_with_biggest_keys.leaf().m_vals.back()});
+		return std::make_optional<Entry>({.key = node_with_biggest_keys.leaf().keys.back(),
+		                                  .val = node_with_biggest_keys.leaf().vals.back()});
 	}
 
 	/// Acquire all entries present in the tree
@@ -709,7 +709,7 @@ public:
 			throw BadTreeSearch(" - returned branch corner node\n");
 
 		while (true) {
-			for (const auto &&[key, val] : iter::zip(curr.leaf().m_keys, curr.leaf().m_vals))
+			for (const auto &&[key, val] : iter::zip(curr.leaf().keys, curr.leaf().vals))
 				co_yield Entry{.key = key, .val = val};
 			if (!curr.next_node())
 				co_return;
@@ -762,7 +762,7 @@ public:
 		m_depth = header_.tree_depth;
 		m_num_records_leaf = header_.tree_num_leaf_records;
 		m_num_records_branch = header_.tree_num_branch_records;
-		m_num_links_branch = m_num_records_branch + 1;
+		m_nulinks_branch = m_num_records_branch + 1;
 
 		m_pager.load();
 	}
@@ -783,7 +783,7 @@ public:
 	constexpr bool sanity_check() const {
 		return min_num_records_leaf() >= 1
 		        && min_num_records_branch() >= 1
-		        && m_num_links_branch >= 2;
+		        && m_nulinks_branch >= 2;
 	}
 
 public:
@@ -823,6 +823,6 @@ private:
 
 	/// Minimum num of records stored in a branch node
 	std::size_t m_num_records_branch{0};
-	std::size_t m_num_links_branch{0};
+	std::size_t m_nulinks_branch{0};
 };
 }// namespace internal::storage::btree

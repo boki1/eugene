@@ -61,19 +61,19 @@ public:
 	/// status- check the definition of 'LinkStatus' for the details. This type is serializable (persistent) and
 	/// comparable.
 	struct Branch {
-		std::vector<Ref> m_refs;
-		std::vector<Position> m_links;
-		std::vector<LinkStatus> m_link_status;
+		std::vector<Ref> refs;
+		std::vector<Position> links;
+		std::vector<LinkStatus> link_status;
 
 		constexpr Branch() = default;
 		constexpr Branch(std::vector<Ref> &&refs, std::vector<Position> &&links, std::vector<LinkStatus> &&link_status)
-		    : m_refs{std::move(refs)}, m_links{std::move(links)}, m_link_status{std::move(link_status)} {}
+		    : refs{std::move(refs)}, links{std::move(links)}, link_status{std::move(link_status)} {}
 
 		constexpr Branch(const Branch&) = default;
 		constexpr Branch& operator=(const Branch&) = default;
 
 		auto operator<=>(const Branch &) const noexcept = default;
-		NOP_STRUCTURE(Branch, m_refs, m_links, m_link_status);
+		NOP_STRUCTURE(Branch, refs, links, link_status);
 	};
 
 	/// Data specific to leaf nodes.
@@ -81,18 +81,18 @@ public:
 	/// This is whether the entry association is done (<key, val>).
 	/// This type is serializable (persistent) and comparable.
 	struct Leaf {
-		std::vector<Key> m_keys;
-		std::vector<Val> m_vals;
+		std::vector<Key> keys;
+		std::vector<Val> vals;
 
 		constexpr Leaf() = default;
 		constexpr Leaf(std::vector<Key> &&keys, std::vector<Val> &&vals)
-		    : m_keys{std::move(keys)}, m_vals{std::move(vals)} {}
+		    : keys{std::move(keys)}, vals{std::move(vals)} {}
 
 		constexpr Leaf(const Leaf&) = default;
 		constexpr Leaf& operator=(const Leaf&) = default;
 
 		auto operator<=>(const Leaf &) const noexcept = default;
-		NOP_STRUCTURE(Leaf, m_keys, m_vals);
+		NOP_STRUCTURE(Leaf, keys, vals);
 	};
 
 	/// Each node contains either a Branch or Leaf specific data.
@@ -176,13 +176,13 @@ public:
 
 		if (is_branch()) {
 			auto &b = branch();
-			midkey = b.m_refs[pivot];
-			sibling = {metadata_ctor<Branch>(break_at_index(b.m_refs, pivot + 1), break_at_index(b.m_links, pivot + 1), break_at_index(b.m_link_status, pivot + 1)), parent()};
-			b.m_refs.pop_back(); // Branch nodes do not copy mid-keys
+			midkey = b.refs[pivot];
+			sibling = {metadata_ctor<Branch>(break_at_index(b.refs, pivot + 1), break_at_index(b.links, pivot + 1), break_at_index(b.link_status, pivot + 1)), parent()};
+			b.refs.pop_back(); // Branch nodes do not copy mid-keys
 		} else {
 			auto &l = leaf();
-			sibling = {metadata_ctor<Leaf>(break_at_index(l.m_keys, pivot), break_at_index(l.m_vals, pivot)), parent()};
-			midkey = sibling.leaf().m_keys.front();
+			sibling = {metadata_ctor<Leaf>(break_at_index(l.keys, pivot), break_at_index(l.vals, pivot)), parent()};
+			midkey = sibling.leaf().keys.front();
 		}
 
 		return std::make_pair<Key, Nod>(std::move(midkey), std::move(sibling));
@@ -200,12 +200,12 @@ public:
 		Node merged{*this};
 
 		if (is_leaf()) {
-			vector_extend(merged.leaf().m_keys, other.leaf().m_keys);
-			vector_extend(merged.leaf().m_vals, other.leaf().m_vals);
+			vector_extend(merged.leaf().keys, other.leaf().keys);
+			vector_extend(merged.leaf().vals, other.leaf().vals);
 		} else {
-			vector_extend(merged.branch().m_refs, other.branch().m_refs);
-			vector_extend(merged.branch().m_links, other.branch().m_links);
-			vector_extend(merged.branch().m_link_status, other.branch().m_link_status);
+			vector_extend(merged.branch().refs, other.branch().refs);
+			vector_extend(merged.branch().links, other.branch().links);
+			vector_extend(merged.branch().link_status, other.branch().link_status);
 		}
 
 		return std::make_optional<Node>(std::move(merged));
@@ -252,11 +252,11 @@ public:
 
 	[[nodiscard]] constexpr bool is_root() const noexcept { return m_is_root; }
 
-	[[nodiscard]] constexpr long num_filled() const noexcept { return is_leaf() ? leaf().m_keys.size() : branch().m_refs.size(); }
+	[[nodiscard]] constexpr long num_filled() const noexcept { return is_leaf() ? leaf().keys.size() : branch().refs.size(); }
 
-	[[nodiscard]] constexpr const auto &items() const noexcept { return is_leaf() ? leaf().m_keys : branch().m_refs; }
+	[[nodiscard]] constexpr const auto &items() const noexcept { return is_leaf() ? leaf().keys : branch().refs; }
 
-	[[nodiscard]] constexpr auto &items() noexcept { return is_leaf() ? leaf().m_keys : branch().m_refs; }
+	[[nodiscard]] constexpr auto &items() noexcept { return is_leaf() ? leaf().keys : branch().refs; }
 
 	[[nodiscard]] constexpr bool is_over(long m) const noexcept { return num_filled() > m; }
 

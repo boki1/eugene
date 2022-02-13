@@ -25,10 +25,10 @@ using Branch = Nod::Branch;
 using Leaf = Nod::Leaf;
 
 #define PRINT_LEAF(node) \
-	fmt::print(#node" = (keys: {}, vals: {})\n", fmt::join(node.m_keys, " "), fmt::join(node.m_vals, " "))
+	fmt::print(#node" = (keys: {}, vals: {})\n", fmt::join(node.keys, " "), fmt::join(node.vals, " "))
 
 #define PRINT_BRANCH(node) \
-	fmt::print(#node" = (refs: {}, links: {})\n", fmt::join(node.m_refs, " "), fmt::join(node.m_links, " "))
+	fmt::print(#node" = (refs: {}, links: {})\n", fmt::join(node.refs, " "), fmt::join(node.links, " "))
 
 namespace internal {
 template<>
@@ -159,13 +159,13 @@ TEST_CASE("Split full nodes", "[btree]") {
 			fmt::print("\n");
 		}
 
-		REQUIRE(midkey == branch_before_split.m_refs[pivot_idx]);
-		REQUIRE(std::equal(branch_before_split.m_refs.cbegin(), branch_before_split.m_refs.cbegin() + pivot_idx, left.m_refs.cbegin()));
-		REQUIRE(std::equal(branch_before_split.m_links.cbegin(), branch_before_split.m_links.cbegin() + pivot_idx + 1, left.m_links.cbegin()));
-		REQUIRE(std::equal(branch_before_split.m_link_status.cbegin(), branch_before_split.m_link_status.cbegin() + pivot_idx + 1, left.m_link_status.cbegin()));
-		REQUIRE(std::equal(branch_before_split.m_refs.cbegin() + pivot_idx + 1, branch_before_split.m_refs.cend(), right.m_refs.cbegin()));
-		REQUIRE(std::equal(branch_before_split.m_links.cbegin() + pivot_idx + 1, branch_before_split.m_links.cend(), right.m_links.cbegin()));
-		REQUIRE(std::equal(branch_before_split.m_link_status.cbegin() + pivot_idx + 1, branch_before_split.m_link_status.cend(), right.m_link_status.cbegin()));
+		REQUIRE(midkey == branch_before_split.refs[pivot_idx]);
+		REQUIRE(std::equal(branch_before_split.refs.cbegin(), branch_before_split.refs.cbegin() + pivot_idx, left.refs.cbegin()));
+		REQUIRE(std::equal(branch_before_split.links.cbegin(), branch_before_split.links.cbegin() + pivot_idx + 1, left.links.cbegin()));
+		REQUIRE(std::equal(branch_before_split.link_status.cbegin(), branch_before_split.link_status.cbegin() + pivot_idx + 1, left.link_status.cbegin()));
+		REQUIRE(std::equal(branch_before_split.refs.cbegin() + pivot_idx + 1, branch_before_split.refs.cend(), right.refs.cbegin()));
+		REQUIRE(std::equal(branch_before_split.links.cbegin() + pivot_idx + 1, branch_before_split.links.cend(), right.links.cbegin()));
+		REQUIRE(std::equal(branch_before_split.link_status.cbegin() + pivot_idx + 1, branch_before_split.link_status.cend(), right.link_status.cbegin()));
 	};
 
 	auto validate_leaf = [](const Nod::Leaf &leaf_before_split, const Nod::Leaf &left, const Nod::Leaf &right, const std::size_t pivot_idx, const auto midkey) {
@@ -178,11 +178,11 @@ TEST_CASE("Split full nodes", "[btree]") {
 			fmt::print("\n");
 		}
 
- 		REQUIRE(midkey == leaf_before_split.m_keys[pivot_idx]);
-		REQUIRE(std::equal(leaf_before_split.m_keys.cbegin(), leaf_before_split.m_keys.cbegin() + pivot_idx + 1, left.m_keys.cbegin()));
-		REQUIRE(std::equal(leaf_before_split.m_vals.cbegin(), leaf_before_split.m_vals.cbegin() + pivot_idx + 1, left.m_vals.cbegin()));
-		REQUIRE(std::equal(leaf_before_split.m_keys.cbegin() + pivot_idx, leaf_before_split.m_keys.cend(), right.m_keys.cbegin()));
-		REQUIRE(std::equal(leaf_before_split.m_vals.cbegin() + pivot_idx, leaf_before_split.m_vals.cend(), right.m_vals.cbegin()));
+ 		REQUIRE(midkey == leaf_before_split.keys[pivot_idx]);
+		REQUIRE(std::equal(leaf_before_split.keys.cbegin(), leaf_before_split.keys.cbegin() + pivot_idx + 1, left.keys.cbegin()));
+		REQUIRE(std::equal(leaf_before_split.vals.cbegin(), leaf_before_split.vals.cbegin() + pivot_idx + 1, left.vals.cbegin()));
+		REQUIRE(std::equal(leaf_before_split.keys.cbegin() + pivot_idx, leaf_before_split.keys.cend(), right.keys.cbegin()));
+		REQUIRE(std::equal(leaf_before_split.vals.cbegin() + pivot_idx, leaf_before_split.vals.cend(), right.vals.cbegin()));
 	};
 
 	SECTION("Even distribution of entries") {
