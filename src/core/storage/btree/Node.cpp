@@ -186,26 +186,26 @@ TEST_CASE("Split full nodes", "[btree]") {
 	};
 
 	SECTION("Even distribution of entries") {
-		auto [branch_midkey, branch_sib_node] = branch_node.split(BRANCH_LIMIT, Nod::SplitBias::DistributeEvenly);
+		auto [branch_midkey, branch_sib_node] = branch_node.split(BRANCH_LIMIT, SplitBias::DistributeEvenly);
 		validate_branch(branch_before_split, branch, branch_sib_node.branch(), (BRANCH_LIMIT + 1) / 2, branch_midkey);
 
-		auto [leaf_midkey, leaf_sib_node] = leaf_node.split(LEAF_LIMIT, Nod::SplitBias::DistributeEvenly);
+		auto [leaf_midkey, leaf_sib_node] = leaf_node.split(LEAF_LIMIT, SplitBias::DistributeEvenly);
 		validate_leaf(leaf_before_split, leaf, leaf_sib_node.leaf(), (LEAF_LIMIT + 1) / 2, leaf_midkey);
 	}
 
 	SECTION("Left leaning distribution of entries") {
-		auto [branch_midkey, branch_sib_node] = branch_node.split(BRANCH_LIMIT, Nod::SplitBias::LeanLeft);
+		auto [branch_midkey, branch_sib_node] = branch_node.split(BRANCH_LIMIT, SplitBias::LeanLeft);
 		validate_branch(branch_before_split, branch, branch_sib_node.branch(), BRANCH_LIMIT - 1, branch_midkey);
 
-		auto [leaf_midkey, leaf_sib_node] = leaf_node.split(LEAF_LIMIT, Nod::SplitBias::LeanLeft);
+		auto [leaf_midkey, leaf_sib_node] = leaf_node.split(LEAF_LIMIT, SplitBias::LeanLeft);
 		validate_leaf(leaf_before_split, leaf, leaf_sib_node.leaf(), LEAF_LIMIT - 1, leaf_midkey);
 	}
 
 	SECTION("Right leaning distribution of entries") {
-		auto [branch_midkey, branch_sib_node] = branch_node.split(BRANCH_LIMIT, Nod::SplitBias::LeanRight);
+		auto [branch_midkey, branch_sib_node] = branch_node.split(BRANCH_LIMIT, SplitBias::LeanRight);
 		validate_branch(branch_before_split, branch, branch_sib_node.branch(), std::abs(BRANCH_LIMIT - BRANCH_NUM) + 1, branch_midkey);
 
-		auto [leaf_midkey, leaf_sib_node] = leaf_node.split(LEAF_LIMIT, Nod::SplitBias::LeanRight);
+		auto [leaf_midkey, leaf_sib_node] = leaf_node.split(LEAF_LIMIT, SplitBias::LeanRight);
 		validate_leaf(leaf_before_split, leaf, leaf_sib_node.leaf(), std::abs(LEAF_LIMIT - LEAF_NUM) + 1, leaf_midkey);
 	}
 }

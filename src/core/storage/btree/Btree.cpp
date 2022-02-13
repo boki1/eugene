@@ -32,7 +32,9 @@ struct SmallstrToPerson : DefaultConfig {
 };
 
 /// 2-3 tree: https://en.wikipedia.org/wiki/2-3_tree
-struct Tree23 : DefaultConfig { BTREE_OF_ORDER(3); };
+struct Tree23 : DefaultConfig {
+	BTREE_OF_ORDER(3);
+};
 
 struct DoubleToLong : DefaultConfig {
 	using Key = double;
@@ -96,7 +98,6 @@ TEST_CASE("Btree operations", "[btree]") {
 		REQUIRE(mem_bpt.get(42).has_value() == false);
 		REQUIRE(std::holds_alternative<Bt::RemovedNothing>(mem_bpt.remove(42)));
 		REQUIRE(mem_bpt.sanity_check());
-
 	}
 	SECTION("Insertion") {
 		SECTION("Insertion without rebalancing") {
@@ -105,14 +106,14 @@ TEST_CASE("Btree operations", "[btree]") {
 			static const std::size_t limit = bpt.max_num_records_leaf();
 			auto backup = fill_tree_with_random_items(bpt, limit);
 
-			 if constexpr (NDEBUG)
+			if constexpr (NDEBUG)
 				util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-operations/insertion-without-rebalancing-printed"}();
 
 			check_for_tree_backup_mismatch(bpt, backup);
 		}
 		SECTION("Difficult insertion") {
-			Bt bpt("/tmp/eugene-tests/btree-operations/difficult-insertion");
-			[[maybe_unused]] static const std::size_t limit = 1'000;
+			Btree<Tree23> bpt("/tmp/eugene-tests/btree-operations/difficult-insertion");
+			[[maybe_unused]] static const std::size_t limit = 10;
 			fmt::print("keys-in-leaf: [{}]; [{}]\n", bpt.min_num_records_leaf(), bpt.max_num_records_leaf());
 			fmt::print("keys-in-branch: [{}]; [{}]\n", bpt.min_num_records_branch(), bpt.max_num_records_branch());
 			auto backup = fill_tree_with_random_items(bpt, limit);
@@ -164,7 +165,6 @@ TEST_CASE("Btree operations", "[btree]") {
 			REQUIRE(bpt.empty());
 
 			util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-operations/difficult-removal-printed-2"}();
-
 		}
 	}
 
@@ -225,6 +225,25 @@ TEST_CASE("Btree operations", "[btree]") {
 
 		REQUIRE(std::ranges::equal(fetched_entries_in_given_range, inserted_entries_in_given_range));
 	}
+}
+
+TEST_CASE("Btree bulk insertion", "[btree]") {
+	fs::create_directories("/tmp/eugene-tests/btree-bulk-insertion");
+	Btree<Tree23> bpt("/tmp/eugene-tests/btree-bulk-insertion/insert-many");
+
+	static const std::size_t limit = 250;
+	std::vector<Btree<Tree23>::Entry> entries_to_insert;
+	entries_to_insert.reserve(limit);
+	std::generate_n(std::back_inserter(entries_to_insert), limit, [i = 0]() mutable { return Btree<Tree23>::Entry{.key = i, .val = i++}; });
+
+	const auto res = bpt.insert_many(entries_to_insert);
+
+	for (auto i = 0ul; i < limit; ++i) {
+		REQUIRE(std::holds_alternative<Btree<Tree23>::InsertedEntry>(res.at(i)));
+		REQUIRE(*bpt.get(entries_to_insert[i].key) == entries_to_insert[i].val);
+	}
+	
+	util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-bulk-insertion/insert-many-printed"}();
 }
 
 TEST_CASE("Btree persistence", "[btree]") {

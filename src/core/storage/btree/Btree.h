@@ -60,6 +60,11 @@ enum class ActionOnConstruction : std::uint8_t {
 	InMemoryOnly
 };
 
+/// Action flag to mark whether a <k,v> pair should be replaced if encountered during '???' operation.
+/// Used in order to provide a reasonable abstraction for update and insert APIs to call.
+enum class ActionOnKeyPresent { SubmitChange,
+	                        AbandonChange };
+
 template<BtreeConfig Config = DefaultConfig>
 class Btree {
 	using Key = typename Config::Key;
@@ -80,8 +85,16 @@ class Btree {
 
 	static inline constexpr std::uint32_t HEADER_MAGIC = 0xB75EEA41;
 
-	/// Type shortcuts
-	using SplitBias = typename Nod::SplitBias;
+	/// Same configuration as the provided, but non-persistent
+	struct MemConfig : Config {
+		static inline constexpr bool PERSISTENT = false;
+		using PagerType = InMemoryPager<typename Config::PageAllocatorPolicy>;
+	};
+
+	using MemTree = Btree<MemConfig>;
+	using MemNode = Node<MemConfig>;
+	friend MemTree;
+	friend MemNode;
 
 public:
 	///
@@ -105,12 +118,7 @@ public:
 	};
 
 	/// Tree entry of the type <key, val>
-	struct Entry {
-		Key key;
-		Val val;
-
-		[[nodiscard]] auto operator<=>(const Entry &) const noexcept = default;
-	};
+	using Entry = typename Nod::Entry;
 
 	/// Node, its position and its index in the parent links
 	/// 'idx_in_parent' may be empty if the node has no parent. That is the case for every "root"
@@ -125,6 +133,12 @@ public:
 
 	/// Root-to-leaf path populated by a search operation
 	using TreePath = std::stack<PosNod>;
+
+	/// Insertion return type
+	/// See 'place_kv_entry' for more information
+	struct InsertedEntry {};
+	struct InsertedNothing {};
+	using InsertionReturnMark = std::variant<InsertedEntry, InsertedNothing>;
 
 private:
 	///
@@ -194,7 +208,7 @@ private:
 					throw BadTreeSearch(fmt::format("- invalid link w/ index={} pointing to pos={} in branch node\n", index, curr.branch().links[index]));
 				curr_idx_in_parent = index;
 				curr_pos = branch_node.links[index];
-				curr = Nod::from_page(m_pager.get(curr_pos));
+				curr = Nod::from_page(m_pager->get(curr_pos));
 			} else if (curr.is_leaf()) {
 				const auto &leaf_node = curr.leaf();
 				key_expected_pos = std::lower_bound(leaf_node.keys.cbegin(), leaf_node.keys.cend(), target_key) - leaf_node.keys.cbegin();
@@ -243,7 +257,7 @@ private:
 		if (index >= link_status.size() || link_status[index] != LinkStatus::Valid)
 			throw BadTreeSearch(fmt::format(" - no valid link in node marked as branch\n"));
 		const Position pos = node.branch().links[index];
-		return get_corner_subtree(Nod::from_page(m_pager.get(pos)), corner);
+		return get_corner_subtree(Nod::from_page(m_pager->get(pos)), corner);
 	}
 
 	/// Make tree root
@@ -257,7 +271,7 @@ private:
 		                    NewTreeLevel };
 
 	Nod make_root(MakeRootAction action) {
-		auto new_pos = m_pager.alloc();
+		auto new_pos = m_pager->alloc();
 		auto new_metadata = [&] {
 			if (action == MakeRootAction::BareInit)
 				return Nod::template metadata_ctor<typename Nod::Leaf>();
@@ -267,18 +281,18 @@ private:
 			old_root.set_parent(new_pos);
 			old_root.set_root_status(Nod::RootStatus::IsInternal);
 
-			auto [midkey, sibling] = node_split(old_root, Nod::SplitBias::DistributeEvenly);
-			auto sibling_pos = m_pager.alloc();
+			auto [midkey, sibling] = node_split(old_root, SplitBias::DistributeEvenly);
+			auto sibling_pos = m_pager->alloc();
 			old_root.set_next_node(sibling_pos);
 
-			m_pager.place(sibling_pos, sibling.make_page());
-			m_pager.place(old_pos, old_root.make_page());
+			m_pager->place(sibling_pos, sibling.make_page());
+			m_pager->place(old_pos, old_root.make_page());
 
 			return Nod::template metadata_ctor<typename Nod::Branch>(std::vector<Ref>{midkey}, std::vector<Position>{old_pos, sibling_pos}, std::vector<LinkStatus>(2, LinkStatus::Valid));
 		}();
 
 		Nod new_root{std::move(new_metadata), new_pos, Nod::RootStatus::IsRoot};
-		m_pager.place(new_pos, new_root.make_page());
+		m_pager->place(new_pos, new_root.make_page());
 		m_rootpos = new_pos;
 		++m_depth;
 
@@ -290,7 +304,7 @@ private:
 		while (true) {
 			const PosNod &path_of_node = visited.top();
 			if (!node)
-				node = Nod::from_page(m_pager.get(path_of_node.node_pos));
+				node = Nod::from_page(m_pager->get(path_of_node.node_pos));
 
 			/// Having the current node valid, means that the upper levels of the tree are fine as well.
 			if (!is_node_over(*node))
@@ -302,13 +316,13 @@ private:
 			}
 
 			auto [midkey, sibling] = node_split(*node, bias);
-			auto sibling_pos = m_pager.alloc();
+			auto sibling_pos = m_pager->alloc();
 			node->set_next_node(sibling_pos);
 			/// TODO: Can 'sibling' already have a right neighbor?
 
 			visited.pop();
 			const PosNod &path_of_parent = visited.top();
-			auto parent = Nod::from_page(m_pager.get(path_of_parent.node_pos));
+			auto parent = Nod::from_page(m_pager->get(path_of_parent.node_pos));
 
 			/// Safety: 'path_of_node.idx_in_parent' is guaranteed to contain a value since '*node' is not root.
 			const auto idx = path_of_node.idx_in_parent.value();
@@ -317,9 +331,9 @@ private:
 			parent.branch().links.insert(parent.branch().links.cbegin() + idx + 1, sibling_pos);
 			parent.branch().link_status.insert(parent.branch().link_status.cbegin() + idx + 1, LinkStatus::Valid);
 
-			m_pager.place(sibling_pos, sibling.make_page());
-			m_pager.place(path_of_node.node_pos, node->make_page());
-			m_pager.place(path_of_parent.node_pos, parent.make_page());
+			m_pager->place(sibling_pos, sibling.make_page());
+			m_pager->place(path_of_node.node_pos, node->make_page());
+			m_pager->place(path_of_parent.node_pos, parent.make_page());
 
 			/// Cache next node that will be looked at
 			node = parent;
@@ -342,7 +356,7 @@ private:
 
 		/// If 'node' was root we would have already returned. Therefore it is safe to assume that
 		/// 'node.parent()' contains a valid Position.
-		Nod parent = Nod::from_page(m_pager.get(node.parent()));
+		Nod parent = Nod::from_page(m_pager->get(node.parent()));
 
 		auto &parent_links = parent.branch().links;
 		auto &parent_link_status = parent.branch().link_status;
@@ -362,7 +376,7 @@ private:
 			const Position sibling_pos = parent_links[sibling_idx];
 			if (parent_link_status[sibling_idx] == LinkStatus::Valid)
 				throw BadTreeRemove(fmt::format(" - link status of pos={} marks it as invalid\n", sibling_pos));
-			Nod sibling = Nod::from_page(m_pager.get(sibling_pos));
+			Nod sibling = Nod::from_page(m_pager->get(sibling_pos));
 
 			if ((sibling.is_branch() && sibling.num_filled() <= min_num_records_branch())
 			    || (sibling.is_leaf() && sibling.num_filled() <= min_num_records_leaf()))
@@ -390,9 +404,9 @@ private:
 			}();
 			parent.items()[*node_idx_in_parent] = new_separator_key;
 
-			m_pager.place(node.parent(), parent.make_page());
-			m_pager.place(node_pos, node.make_page());
-			m_pager.place(sibling_pos, sibling.make_page());
+			m_pager->place(node.parent(), parent.make_page());
+			m_pager->place(node_pos, node.make_page());
+			m_pager->place(sibling_pos, sibling.make_page());
 		};
 
 		if (has_left_sibling)
@@ -415,7 +429,7 @@ private:
 
 		auto make_merged_node_from = [&](const Nod &left, const Nod &right) {
 			if (auto maybe_merged_node = left.merge_with(right); maybe_merged_node) {
-				const auto merged_node_pos = m_pager.alloc();
+				const auto merged_node_pos = m_pager->alloc();
 
 				// Replace previous 'left' link with new merged node
 				parent_links[*node_idx_in_parent - 1] = merged_node_pos;
@@ -426,14 +440,14 @@ private:
 				parent_link_status.erase(parent_link_status.cbegin() + *node_idx_in_parent);
 
 				parent.branch().refs[*node_idx_in_parent - 1] = maybe_merged_node->leaf().keys.back();
-				m_pager.place(merged_node_pos, maybe_merged_node->make_page());
+				m_pager->place(merged_node_pos, maybe_merged_node->make_page());
 			}
 		};
 
 		if (has_left_sibling)
-			make_merged_node_from(Nod::from_page(m_pager.get(*node_idx_in_parent - 1)), node);
+			make_merged_node_from(Nod::from_page(m_pager->get(*node_idx_in_parent - 1)), node);
 		else if (has_right_sibling)
-			make_merged_node_from(node, Nod::from_page(m_pager.get(*node_idx_in_parent + 1)));
+			make_merged_node_from(node, Nod::from_page(m_pager->get(*node_idx_in_parent + 1)));
 
 		rebalance_after_remove(parent, node.parent());
 	}
@@ -445,70 +459,27 @@ private:
 		while (!search_path.empty()) {
 			const PosNod &path_of_curr = search_path.top();
 
-			auto node = Nod::from_page(m_pager.get(path_of_curr.node_pos));
+			auto node = Nod::from_page(m_pager->get(path_of_curr.node_pos));
 			/// Empty nodes should be removed. However, we don't want to delete the root node.
 			/// Keep it empty for potential future insertions.
 			if (!node.is_empty() || node.is_root())
 				return;
 
 			// Delete node
-			m_pager.free(path_of_curr.node_pos);
+			m_pager->free(path_of_curr.node_pos);
 			search_path.pop();
 
 			/// Delete link from parent
 
 			/// Sadly, since we are "iterating" through the tree path bottom-to-top there is no way to backup the parent node.
 			/// This should be fine, expecting that the cache is large enough to fit _at least all branch nodes_.
-			auto parent_node = Nod::from_page(m_pager.get(search_path.top().node_pos));
+			auto parent_node = Nod::from_page(m_pager->get(search_path.top().node_pos));
 
 			auto &parent_links = parent_node.branch().links;
 
 			/// Safety: 'path_of_curr.idx_in_parent' has value which is guaranteed by the fact that the current node is not root
 			parent_links.erase(parent_links.cbegin() + path_of_curr.idx_in_parent.value());
 		}
-	}
-
-	/// Action flag to mark whether a <k,v> pair should be replaced if encountered during '???' operation.
-	/// Used in order to provide a reasonable abstraction for update and insert APIs to call.
-	enum class ActionOnKeyPresent { SubmitChange,
-		                        AbandonChange };
-
-	/// Create new <key, value> entry into the tree.
-	/// Wraps insertion/replacement logic. If the key is already present into the tree, it takes action based
-	/// on the 'action' flag passed. The returned value denotes whether a new entry was put into the tree.
-	/// 'BadTreeInsert' may be thrown if an error occurs.
-	/// It gets called by both 'insert()' and 'update()'.
-
-	struct InsertedEntry {};
-	struct InsertedNothing {};
-	using InsertionReturnMark = std::variant<InsertedEntry, InsertedNothing>;
-
-	[[nodiscard]] InsertionReturnMark place_kv_entry(const Key &key, const Val &val, ActionOnKeyPresent action) {
-		return place_kv_entry(Entry{.key = key, .val = val}, action);
-	}
-
-	[[nodiscard]] InsertionReturnMark place_kv_entry(const Entry &entry, ActionOnKeyPresent action) {
-		/// Locate position
-		auto search_res = search(entry.key);
-
-		if ((action == ActionOnKeyPresent::AbandonChange && search_res.key_is_present)
-		    || (action == ActionOnKeyPresent::SubmitChange && !search_res.key_is_present))
-			return InsertedNothing();
-
-		auto &leaf_node = search_res.node.leaf();
-		/// Insert new element
-		leaf_node.keys.insert(leaf_node.keys.cbegin() + search_res.key_expected_pos, entry.key);
-		leaf_node.vals.insert(leaf_node.vals.cbegin() + search_res.key_expected_pos, entry.val);
-		m_pager.place(search_res.path.top().node_pos, search_res.node.make_page());
-
-		/// Update stats
-		/// TODO:
-		++m_size;
-
-		/// Rebalance
-		rebalance_after_insert(search_res.path, Nod::SplitBias::LeanLeft);
-
-		return InsertedEntry();
 	}
 
 	/// Construct a new empty tree
@@ -522,12 +493,12 @@ private:
 
 		/// Make sure that when a leaf is split, its contents could be distributed among the two branch nodes.
 		/// Number of entries in branch and leaf nodes may differ
-		m_nulinks_branch = BRANCHING_FACTOR_BRANCH > 0
+		m_num_links_branch = BRANCHING_FACTOR_BRANCH > 0
 		        ? BRANCHING_FACTOR_BRANCH
 		        : ::internal::binsearch_primitive(2ul, PAGE_SIZE / 2, [](auto current, auto, auto) {
 			          return nop::Encoding<Nod>::Size({typename Nod::Metadata(typename Nod::Branch(std::vector<Ref>(current), std::vector<Position>(current), std::vector<LinkStatus>(current))), 10, Nod::RootStatus::IsInternal}) - PAGE_SIZE;
 		          }).value_or(0);
-		m_num_records_branch = m_nulinks_branch - 1;
+		m_num_records_branch = m_num_links_branch - 1;
 
 		auto num_records_leaf_candidate = BRANCHING_FACTOR_LEAF > 0
 		        ? BRANCHING_FACTOR_LEAF
@@ -541,13 +512,48 @@ private:
 	}
 
 public:
+	/// Create new <key, value> entry into the tree.
+	/// Wraps insertion/replacement logic. If the key is already present into the tree, it takes action based
+	/// on the 'action' flag passed. The returned value denotes whether a new entry was put into the tree.
+	/// 'BadTreeInsert' may be thrown if an error occurs.
+	/// It gets called by both 'insert()' and 'update()'.
+
+	[[nodiscard]] InsertionReturnMark place_kv_entry(const Key &key, const Val &val, ActionOnKeyPresent action = ActionOnKeyPresent::AbandonChange, SplitBias split_bias = SplitBias::DistributeEvenly) {
+		return place_kv_entry(Entry{.key = key, .val = val}, action, split_bias);
+	}
+
+	[[nodiscard]] InsertionReturnMark place_kv_entry(const Entry &entry, ActionOnKeyPresent action = ActionOnKeyPresent::AbandonChange, SplitBias split_bias = SplitBias::DistributeEvenly) {
+		/// Locate position
+		auto search_res = search(entry.key);
+
+		if ((action == ActionOnKeyPresent::AbandonChange && search_res.key_is_present)
+		    || (action == ActionOnKeyPresent::SubmitChange && !search_res.key_is_present))
+			return InsertedNothing();
+
+		auto &leaf_node = search_res.node.leaf();
+		/// Insert new element
+		leaf_node.keys.insert(leaf_node.keys.cbegin() + search_res.key_expected_pos, entry.key);
+		leaf_node.vals.insert(leaf_node.vals.cbegin() + search_res.key_expected_pos, entry.val);
+		m_pager->place(search_res.path.top().node_pos, search_res.node.make_page());
+
+		/// Update stats
+		/// TODO:
+		++m_size;
+
+		/// Rebalance
+		rebalance_after_insert(search_res.path, split_bias);
+
+		return InsertedEntry();
+	}
+
+public:
 	///
 	/// Properties access API
 	///
 
 	/// Get root node of tree
 	/// Somewhat expensive operation if cache is not hot, since a disk read has to be made.
-	[[nodiscard]] Nod root() { return Nod::from_page(m_pager.get(rootpos())); }
+	[[nodiscard]] Nod root() { return Nod::from_page(m_pager->get(rootpos())); }
 
 	/// Get position of root node
 	[[nodiscard]] const auto &rootpos() const noexcept { return m_rootpos; }
@@ -582,12 +588,12 @@ public:
 	[[nodiscard]] std::size_t depth() { return m_depth; }
 
 	/// Get limits of the size of leaf nodes (leaves contain [min; max] entries)
-	[[nodiscard]] long min_num_records_leaf() const noexcept { return (m_num_records_leaf + 1) / 2; }
-	[[nodiscard]] long max_num_records_leaf() const noexcept { return m_num_records_leaf; }
+	[[nodiscard]] long min_num_records_leaf() const noexcept { return m_num_records_leaf; }
+	[[nodiscard]] long max_num_records_leaf() const noexcept { return m_num_records_leaf * 2 - 1; }
 
 	/// Get limits of the size of branch nodes (branch contain [min; max] entries)
-	[[nodiscard]] long min_num_records_branch() const noexcept { return (m_num_records_branch + 1) / 2; }
-	[[nodiscard]] long max_num_records_branch() const noexcept { return m_num_records_branch; }
+	[[nodiscard]] long min_num_records_branch() const noexcept { return m_num_records_branch; }
+	[[nodiscard]] long max_num_records_branch() const noexcept { return m_num_records_branch * 2 - 1; }
 
 	///
 	/// Operations API
@@ -606,6 +612,112 @@ public:
 
 	constexpr InsertionReturnMark insert(const Entry &entry) {
 		return place_kv_entry(entry, ActionOnKeyPresent::AbandonChange);
+	}
+
+	/// Submit a set of <key, value> entries into the tree, i.e bulk insertion.
+	/// Requires that the entries in 'bulk' are sorted in ascending order.
+	/// Implementation is according to "Concurrency Control and I/O-Optimality in Bulk Insertion".
+	/// FIXME: Adapt 'ActionOnKeyPresent' by adding "AskOnEach" and "ReplaceAllPresent" and "IgnoreAllPresent".
+
+	/// Insertion tree is an in-memory instance of a Btree created during bulk-insertion
+	/// following the algorithm implemented as 'insert_many()'. Check its definiton for
+	/// a more in-depth look.
+	template<typename Key>
+	struct InsertionTree {
+		std::optional<Position> parent_pos;
+		std::unique_ptr<Btree<Config>> tree;
+		Key lofence;
+		Key hifence;
+	};
+
+	std::unordered_map<Key, InsertionReturnMark> insert_many(std::ranges::range auto bulk) {
+		namespace rng = std::ranges;
+
+		std::unordered_map<Key, InsertionReturnMark> results;
+		std::vector<InsertionTree<Key>> insertion_trees;
+
+		if (rng::empty(bulk))
+			return {};
+
+		/// Algorithm "Bulk Insertion Without Rebalancing"
+		for (auto simple_bulk_cbegin = rng::cbegin(bulk); simple_bulk_cbegin != rng::cend(bulk);) {
+			auto search_path = search(simple_bulk_cbegin->key);
+			PosNod path_to_leaf = search_path.path.top();
+			search_path.path.pop();
+
+			const auto leaf_vals_cbegin = search_path.node.leaf().vals.cbegin();
+			const auto leaf_keys_cbegin = search_path.node.leaf().keys.cbegin();
+			const auto leaf_keys_cend = search_path.node.leaf().keys.cend();
+
+			const auto &simple_bulk_cend = [&] {
+				if (leaf_keys_cbegin == leaf_keys_cend) {
+					/// In such case, the leaf is empty, and since that would mean that the tree is not properly balanced, this means that the subtree is empty as well.
+					/// Therefore, the highkey (or the upper fence key) equals +∞, meaning that all entries of the bulk should be located in this leaf.
+					return rng::cend(bulk);
+				}
+				const Key &leaf_highkey = *(leaf_keys_cend - 1);
+				return std::find_if(simple_bulk_cbegin, rng::cend(bulk), [&leaf_highkey](const auto &entry) { return entry.key > leaf_highkey; });
+			}();
+
+			auto entry_of_key_it = [leaf_keys_cbegin, leaf_vals_cbegin](auto it) {
+				return Entry{.key = *it, .val = *(leaf_vals_cbegin + std::distance(leaf_keys_cbegin, it))};
+			};
+
+			auto iterate_over_simple_bulk = [simple_bulk_cit = simple_bulk_cbegin, leaf_keys_cit = leaf_keys_cbegin, simple_bulk_cend, leaf_keys_cend, &entry_of_key_it]() mutable -> cppcoro::generator<const Entry> {
+				while (simple_bulk_cit != simple_bulk_cend && leaf_keys_cit != leaf_keys_cend)
+					co_yield simple_bulk_cit->key < *leaf_keys_cit ? *simple_bulk_cit++ : entry_of_key_it(leaf_keys_cit++);
+				while (leaf_keys_cit != leaf_keys_cend)
+					co_yield entry_of_key_it(leaf_keys_cit++);
+				while (simple_bulk_cit != simple_bulk_cend)
+					co_yield *simple_bulk_cit++;
+			};
+
+			insertion_trees.push_back(InsertionTree{
+			        .parent_pos = search_path.path.empty() ? std::nullopt : std::make_optional(search_path.path.top().node_pos),
+			        .tree = std::make_unique<Btree<Config>>(clone_only_blueprint()),
+			        .lofence = simple_bulk_cbegin->key,
+			        .hifence = simple_bulk_cend > simple_bulk_cbegin ? (simple_bulk_cend - 1)->key : simple_bulk_cbegin->key});
+			auto &insertion_tree = insertion_trees.back();
+
+			rng::for_each(iterate_over_simple_bulk(), [&insertion_tree, &results](const auto &entry) {
+				results[entry.key] = insertion_tree.tree->place_kv_entry(typename Nod::Entry{.key = entry.key, .val = entry.val}, ActionOnKeyPresent::AbandonChange, SplitBias::DistributeEvenly);
+			});
+
+			util::BtreePrinter{*insertion_tree.tree, "/tmp/eugene-tests/btree-bulk-insertion/insert-man-printed"}();
+
+			/// Replace leaf with insertion tree root
+			auto pos = [&] {
+				// No parent, nor siblings => root element
+				// Do not reuse old root pos and do not deallocate it, because the pager is
+				// shared between the insertion trees and the actual Btree we are modifying,
+				// thus already making use of the space located at m_rootpos.
+				if (search_path.path.empty())
+					return (m_rootpos = insertion_tree.tree->rootpos());
+
+				// Replace link value in parent
+				const auto new_pos = m_pager->alloc();
+				auto parent_pos = search_path.path.top().node_pos;
+				auto parent = Nod::from_page(m_pager->get(parent_pos));
+				// Deref safety: We just asserted that the node has a parent
+				parent.branch().links[*path_to_leaf.idx_in_parent] = new_pos;
+				m_pager->place(parent_pos, parent.make_page());
+				// Optionally, replace link value in sibling
+				if (*path_to_leaf.idx_in_parent > 0) {
+					auto prev_sibling_pos = parent.branch().links[*path_to_leaf.idx_in_parent - 1];
+					auto prev_sibling = Nod::from_page(m_pager->get(prev_sibling_pos));
+					prev_sibling.set_next_node(new_pos);
+					m_pager->place(prev_sibling_pos, prev_sibling.make_page());
+				}
+				return new_pos;
+			}();
+
+			m_pager->place(pos, insertion_tree.tree->root().make_page());
+
+			// Update current position in simple bulk
+			simple_bulk_cbegin = simple_bulk_cend;
+		}
+
+		return results;
 	}
 
 	/// Remove an existing <key, value> entry from the tree
@@ -637,7 +749,7 @@ public:
 		/// Erase element
 		node_leaf.keys.erase(node_leaf.keys.cbegin() + search_res.key_expected_pos);
 		node_leaf.vals.erase(node_leaf.vals.cbegin() + search_res.key_expected_pos);
-		m_pager.place(node_path.node_pos, search_res.node.make_page());
+		m_pager->place(node_path.node_pos, search_res.node.make_page());
 
 		/// TODO:
 		/// Update stats
@@ -716,7 +828,7 @@ public:
 				co_yield Entry{.key = key, .val = val};
 			if (!curr.next_node())
 				co_return;
-			curr = Nod::from_page(m_pager.get(*curr.next_node()));
+			curr = Nod::from_page(m_pager->get(*curr.next_node()));
 		}
 	}
 
@@ -754,7 +866,7 @@ public:
 	/// Load tree metadata from storage
 	/// Reads from 'identifier' and 'identifier'-header and initializes the tree's metadata.
 	void load() {
-		if constexpr ( requires { m_pager.load(); }) {
+		if constexpr (requires { m_pager->load(); }) {
 			Header header_;
 
 			nop::Deserializer<nop::StreamReader<std::ifstream>> deserializer{header_name().data()};
@@ -766,21 +878,21 @@ public:
 			m_depth = header_.tree_depth;
 			m_num_records_leaf = header_.tree_num_leaf_records;
 			m_num_records_branch = header_.tree_num_branch_records;
-			m_nulinks_branch = m_num_records_branch + 1;
+			m_num_links_branch = m_num_records_branch + 1;
 
-			m_pager.load();
+			m_pager->load();
 		}
 	}
 
 	/// Store tree metadata to storage
 	/// Stores tree's metadata inside files 'identifier' and 'identifier'-header.
 	void save() {
-		if constexpr ( requires { m_pager.save(); }) {
+		if constexpr (requires { m_pager->save(); }) {
 			nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{header_name().data(), std::ios::trunc};
 			if (!serializer.Write(header()))
 				throw BadWrite();
 
-			m_pager.save();
+			m_pager->save();
 		}
 	}
 
@@ -790,11 +902,11 @@ public:
 	[[nodiscard]] constexpr bool sanity_check() const {
 		return min_num_records_leaf() >= 1
 		        && min_num_records_branch() >= 1
-		        && m_nulinks_branch >= 2;
+		        && m_num_links_branch >= 2;
 	}
 
 public:
-	explicit Btree(std::string_view identifier = "/tmp/eu-btree-default", ActionOnConstruction action_on_construction = ActionOnConstruction::Bare) : m_pager{identifier}, m_identifier{identifier} {
+	explicit Btree(std::string_view identifier = "/tmp/eu-btree-default", ActionOnConstruction action_on_construction = ActionOnConstruction::Bare) : m_pager{std::make_shared<PagerType>(identifier)}, m_identifier{identifier} {
 		using enum ActionOnConstruction;
 
 		// clang-format off
@@ -812,6 +924,13 @@ public:
 	Btree(const Btree &) = default;
 	Btree(Btree &&) noexcept = default;
 
+	/// Copy-constructor which zeroes-out statistics
+	Btree clone_only_blueprint() const noexcept {
+		auto copy = Btree(*this);
+		copy.m_size = copy.m_depth = 0;
+		return copy;
+	}
+
 	Btree &operator=(const Btree &) = default;
 	Btree &operator=(Btree &&) noexcept = default;
 
@@ -820,7 +939,9 @@ public:
 	auto operator<=>(const Btree &) const noexcept = default;
 
 private:
-	PagerType m_pager;
+	/// Shared among insertion trees and other copies of the tree
+	std::shared_ptr<PagerType> m_pager;
+
 	const std::string m_identifier;
 	Position m_rootpos;
 	std::size_t m_size{0};
@@ -831,6 +952,6 @@ private:
 
 	/// Minimum num of records stored in a branch node
 	std::size_t m_num_records_branch{0};
-	std::size_t m_nulinks_branch{0};
+	std::size_t m_num_links_branch{0};
 };
 }// namespace internal::storage::btree

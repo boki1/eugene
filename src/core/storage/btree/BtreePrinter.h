@@ -43,7 +43,7 @@ public:
 	void operator()() noexcept { print(); }
 
 	Nod node_at(Position pos) {
-		return Nod::from_page(m_btree.m_pager.get(pos));
+		return Nod::from_page(m_btree.m_pager->get(pos));
 	}
 
 	void print_node(const Nod node, unsigned level = 1) noexcept {

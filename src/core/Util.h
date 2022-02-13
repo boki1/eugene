@@ -7,6 +7,7 @@
 
 #include <nop/structure.h>
 
+#include <cppcoro/generator.hpp>
 #include <fmt/core.h>
 #include <fmt/format.h>
 
@@ -92,6 +93,21 @@ template<typename T>
 template<typename T, typename V>
 [[nodiscard]] bool collection_contains(const T &collection, V item) {
 	return std::find(collection.cbegin(), collection.cend(), item) != collection.cend();
+}
+
+/// Intertwines two collections iterating over each element in ascending order
+/// Requires that *first_begin <= *secnd_begin
+template<typename T, typename InputIt, typename InputItB>
+[[maybe_unused]] cppcoro::generator<T> intertwine_sorted_iterators(InputIt first_begin, const InputIt first_end, InputIt secnd_begin, const InputIt secnd_end) {
+	while (first_begin != first_end && secnd_begin != secnd_end)
+		if (*first_begin < *secnd_begin)
+			co_yield *first_begin++;
+		else
+			co_yield *secnd_begin++;
+	for (; secnd_begin != secnd_end; ++secnd_begin)
+		co_yield *secnd_begin;
+	for (; first_begin != first_end; ++first_begin)
+		co_yield *first_begin;
 }
 
 #define UNREACHABLE \

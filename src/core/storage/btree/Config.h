@@ -28,6 +28,8 @@ struct Config {
 	static inline constexpr int BRANCHING_FACTOR_LEAF = 0;
 	static inline constexpr int BRANCHING_FACTOR_BRANCH = 0;
 
+	static inline constexpr bool PERSISTENT = true;
+
 	/// Marks whether relaxed rebalancing should be performed on remove operations
 	static inline constexpr bool BTREE_RELAXED_REMOVES = true;
 };
