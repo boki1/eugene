@@ -9,6 +9,13 @@ EU_CONAN_PROFILE ?= ${HOME}/.conan/profiles/default
 
 all: config-test config-bench config build exec-test exec-bench
 
+format:
+	find src \( -name '*.cpp' -o -name '*.h' \) -exec clang-format -i '{}' \;
+	find . -name "CMakeLists.txt" -exec cmake-format -i '{}' \;
+
+lint:
+	run-clang-tidy.py -header-filter='.*' -checks='*'
+
 clean: mrproper
 
 mrproper:
@@ -24,6 +31,7 @@ config: dep-setup
 	cmake -S. -B${EU_BUILD_DIR}/ -GNinja\
 		-DCMAKE_C_COMPILER=${EU_C_COMPILER}\
 		-DCMAKE_CXX_COMPILER=${EU_CXX_COMPILER}\
+		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON\
 		-DCMAKE_BUILD_TYPE=${EU_BUILD_TYPE}\
 		-DEU_BUILD_TESTS=${EU_BUILD_TESTS}\
 		-DEU_BUILD_BENCHMARKS=${EU_BUILD_BENCHMARKS}
