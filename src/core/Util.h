@@ -100,6 +100,9 @@ template<typename T, typename V>
 #define UNIMPLEMENTED \
 	abort();
 
+#define DO_NOTHING \
+	do {} while(0);
+
 ///
 /// Used  primarily in unit tests
 ///
