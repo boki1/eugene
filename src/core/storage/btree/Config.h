@@ -18,8 +18,9 @@ struct Config {
 	using Val = int;
 	using Ref = int;
 
-	using PageAllocatorPolicy = StackSpaceAllocator;
+	using PageAllocatorPolicy = FreeListAllocator;
 	using PageEvictionPolicy = LRUCache;
+	using PagerType = Pager<PageAllocatorPolicy, PageEvictionPolicy>;
 
 	static inline constexpr int PAGE_CACHE_SIZE = 1_MB;
 	static inline constexpr bool APPLY_COMPRESSION = true;

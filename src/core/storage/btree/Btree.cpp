@@ -84,14 +84,19 @@ void check_for_tree_backup_mismatch(Btree<Config> &bpt, const std::map<typename 
 TEST_CASE("Btree operations", "[btree]") {
 	fs::create_directories("/tmp/eugene-tests/btree-operations");
 
-	SECTION("Empty tree") {
+	SECTION("Create tree") {
 		Bt bpt("/tmp/eugene-tests/btree-operations/empty-tree");
-
 		REQUIRE(bpt.contains(42) == false);
 		REQUIRE(bpt.get(42).has_value() == false);
 		REQUIRE(std::holds_alternative<Bt::RemovedNothing>(bpt.remove(42)));
-
 		REQUIRE(bpt.sanity_check());
+
+		Bt mem_bpt("in-memory-tree-#1", ActionOnConstruction::InMemoryOnly);
+		REQUIRE(mem_bpt.contains(42) == false);
+		REQUIRE(mem_bpt.get(42).has_value() == false);
+		REQUIRE(std::holds_alternative<Bt::RemovedNothing>(mem_bpt.remove(42)));
+		REQUIRE(mem_bpt.sanity_check());
+
 	}
 	SECTION("Insertion") {
 		SECTION("Insertion without rebalancing") {

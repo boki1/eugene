@@ -54,8 +54,11 @@ struct BadTreeInsert : std::runtime_error {
 /// Action to undertake on B-tree construction
 /// Denotes whether to load the metadata from storage, or to construct a new
 /// bare one.
-enum class ActionOnConstruction : std::uint8_t { Load,
-	                                         Bare };
+enum class ActionOnConstruction : std::uint8_t {
+	Load,
+	Bare,
+	InMemoryOnly
+};
 
 template<BtreeConfig Config = DefaultConfig>
 class Btree {
@@ -64,9 +67,9 @@ class Btree {
 	using Ref = typename Config::Ref;
 	using Nod = Node<Config>;
 
-//	using PagerAllocatorPolicy = typename Config::PageAllocatorPolicy;
-	using PagerAllocatorPolicy = FreeListAllocator;
+	using PagerAllocatorPolicy = typename Config::PageAllocatorPolicy;
 	using PagerEvictionPolicy = typename Config::PageEvictionPolicy;
+	using PagerType = typename Config::PagerType;
 
 	friend util::BtreePrinter<Config>;
 
@@ -751,49 +754,54 @@ public:
 	/// Load tree metadata from storage
 	/// Reads from 'identifier' and 'identifier'-header and initializes the tree's metadata.
 	void load() {
-		Header header_;
+		if constexpr ( requires { m_pager.load(); }) {
+			Header header_;
 
-		nop::Deserializer<nop::StreamReader<std::ifstream>> deserializer{header_name().data()};
-		if (!deserializer.Read(&header_))
-			throw BadRead();
+			nop::Deserializer<nop::StreamReader<std::ifstream>> deserializer{header_name().data()};
+			if (!deserializer.Read(&header_))
+				throw BadRead();
 
-		m_rootpos = header_.tree_rootpos;
-		m_size = header_.tree_size;
-		m_depth = header_.tree_depth;
-		m_num_records_leaf = header_.tree_num_leaf_records;
-		m_num_records_branch = header_.tree_num_branch_records;
-		m_nulinks_branch = m_num_records_branch + 1;
+			m_rootpos = header_.tree_rootpos;
+			m_size = header_.tree_size;
+			m_depth = header_.tree_depth;
+			m_num_records_leaf = header_.tree_num_leaf_records;
+			m_num_records_branch = header_.tree_num_branch_records;
+			m_nulinks_branch = m_num_records_branch + 1;
 
-		m_pager.load();
+			m_pager.load();
+		}
 	}
 
 	/// Store tree metadata to storage
 	/// Stores tree's metadata inside files 'identifier' and 'identifier'-header.
 	void save() {
-		nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{header_name().data(), std::ios::trunc};
-		if (!serializer.Write(header()))
-			throw BadWrite();
+		if constexpr ( requires { m_pager.save(); }) {
+			nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{header_name().data(), std::ios::trunc};
+			if (!serializer.Write(header()))
+				throw BadWrite();
 
-		m_pager.save();
+			m_pager.save();
+		}
 	}
 
 	/// Validity
 	/// Check whether the tree object is valid
 	/// Returns 'true' if it is alright and 'false' if not.
-	constexpr bool sanity_check() const {
+	[[nodiscard]] constexpr bool sanity_check() const {
 		return min_num_records_leaf() >= 1
 		        && min_num_records_branch() >= 1
 		        && m_nulinks_branch >= 2;
 	}
 
 public:
-	Btree(std::string_view identifier = "/tmp/eu-btree-default", ActionOnConstruction action_on_construction = ActionOnConstruction::Bare) : m_pager{identifier}, m_identifier{identifier} {
+	explicit Btree(std::string_view identifier = "/tmp/eu-btree-default", ActionOnConstruction action_on_construction = ActionOnConstruction::Bare) : m_pager{identifier}, m_identifier{identifier} {
 		using enum ActionOnConstruction;
 
 		// clang-format off
 		switch (action_on_construction) {
 		  break; case Load: load();
-                  break; case Bare: bare();
+		  break; case Bare: bare();
+		  break; case InMemoryOnly: bare();
 		}
 		// clang-format on
 
@@ -812,7 +820,7 @@ public:
 	auto operator<=>(const Btree &) const noexcept = default;
 
 private:
-	Pager<PagerAllocatorPolicy, PagerEvictionPolicy> m_pager;
+	PagerType m_pager;
 	const std::string m_identifier;
 	Position m_rootpos;
 	std::size_t m_size{0};
