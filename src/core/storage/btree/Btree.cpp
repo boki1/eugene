@@ -186,10 +186,9 @@ TEST_CASE("Btree operations", "[btree]") {
 	}
 
 	SECTION("Queries") {
-		Bt tree;
 		Bt bpt("/tmp/eugene-tests/btree-operations/queries");
 		std::vector<Bt::Entry> inserted_entries;
-		const int limit = 100'000;
+		const int limit = 1000;
 		for (const int item : std::ranges::views::iota(0, limit)) {
 			inserted_entries.push_back(Bt::Entry{item, item});
 			bpt.insert(item, item);
