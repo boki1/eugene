@@ -1,5 +1,9 @@
 #include <core/storage/compression/benchmarks/Shared.h>
 
+/// @brief Decompression benchmark
+///
+/// \param st - google benchmark state object that contains the
+///// benchmark parameters
 static void BM_Decompression(benchmark::State &st) {
 	for (auto _ : st) {
 		st.PauseTiming();
@@ -19,14 +23,17 @@ static void BM_Decompression(benchmark::State &st) {
 		decompress();
 
 		st.PauseTiming();
-		clean({{"file_name", file_name.begin()},
-		       {"compressed_file_name", compressed_file_name.begin()}});
+		clean({file_name.begin(), compressed_file_name.begin()});
 		st.ResumeTiming();
 	}
 }
 
+//	67108864 for 1GB ".txt" file
+//  65536 for 1MB ".txt" file
+//  64 for 1KB ".txt" file
 BENCHMARK(BM_Decompression)
 	->Unit(benchmark::kMillisecond)
-	->Arg(16);
+	->Iterations(10)
+	->Arg(65536);
 
 BENCHMARK_MAIN();
