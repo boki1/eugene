@@ -7,7 +7,9 @@ EU_BUILD_TESTS := no
 EU_BUILD_BENCHMARKS := no
 EU_CONAN_PROFILE ?= ${HOME}/.conan/profiles/default
 
-all: config-test config-bench config build exec-test exec-bench
+all: config-test config-bench config build
+
+exec-all: all exec-test exec-bench
 
 format:
 	find src \( -name '*.cpp' -o -name '*.h' \) -exec clang-format -i '{}' \;
@@ -66,4 +68,6 @@ clean-build: clean build
 
 clean-all: clean all
 
-.PHONY: all clean clean-test clean-bench clean-build clean-all test bench
+clean-exec-all: clean-all exec-all
+
+.PHONY: all clean clean-test clean-bench clean-build clean-all clean-exec-all test bench
