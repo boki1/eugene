@@ -229,17 +229,17 @@ TEST_CASE("Btree operations", "[btree]") {
 
 TEST_CASE("Btree bulk insertion", "[btree]") {
 	fs::create_directories("/tmp/eugene-tests/btree-bulk-insertion");
-	Btree<Tree23> bpt("/tmp/eugene-tests/btree-bulk-insertion/insert-many");
+	Btree<DefaultConfig> bpt("/tmp/eugene-tests/btree-bulk-insertion/insert-many");
 
-	static const std::size_t limit = 250;
-	std::vector<Btree<Tree23>::Entry> entries_to_insert;
+	static const std::size_t limit = 10'000;
+	std::vector<Btree<DefaultConfig>::Entry> entries_to_insert;
 	entries_to_insert.reserve(limit);
-	std::generate_n(std::back_inserter(entries_to_insert), limit, [i = 0]() mutable { return Btree<Tree23>::Entry{.key = i, .val = i++}; });
+	std::generate_n(std::back_inserter(entries_to_insert), limit, [i = 0]() mutable { return Btree<DefaultConfig>::Entry{.key = i, .val = i++}; });
 
 	const auto res = bpt.insert_many(entries_to_insert);
 
 	for (auto i = 0ul; i < limit; ++i) {
-		REQUIRE(std::holds_alternative<Btree<Tree23>::InsertedEntry>(res.at(i)));
+		REQUIRE(std::holds_alternative<Btree<DefaultConfig>::InsertedEntry>(res.at(i)));
 		REQUIRE(*bpt.get(entries_to_insert[i].key) == entries_to_insert[i].val);
 	}
 	

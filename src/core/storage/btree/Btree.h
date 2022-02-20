@@ -7,6 +7,7 @@
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <sstream>
 #include <stack>
 #include <stdexcept>
@@ -139,6 +140,20 @@ public:
 	struct InsertedEntry {};
 	struct InsertedNothing {};
 	using InsertionReturnMark = std::variant<InsertedEntry, InsertedNothing>;
+	/// The bulk version of `InsertionReturnMark`
+	using ManyInsertionReturnMarks = std::unordered_map<Key, InsertionReturnMark>;
+
+	/// Insertion tree is an in-memory instance of a Btree created during bulk-insertion
+	/// following the algorithm implemented as 'insert_many()'. Check its definiton for
+	/// a more in-depth look.
+	template<typename Key>
+	struct InsertionTree {
+		TreePath path;
+		Btree<Config> tree;
+		Key lofence;
+		Key hifence;
+		Position leaf_pos;
+	};
 
 private:
 	///
@@ -243,21 +258,31 @@ private:
 	enum class CornerDetail { MIN,
 		                  MAX };
 
-	[[nodiscard]] Nod get_corner_subtree(const Nod &node, CornerDetail corner) {
-		if (node.is_leaf())
-			return node;
+	const static auto LEAF_LEVEL_HEIGHT = 1ul;
 
-		const auto &link_status = node.branch().link_status;
-		const std::size_t index = [&] {
-			if (corner == CornerDetail::MAX)
-				return std::distance(std::cbegin(link_status), std::find(std::crbegin(link_status), std::crend(link_status), LinkStatus::Valid).base()) - 1;
-			assert(corner == CornerDetail::MIN);
-			return std::distance(std::cbegin(link_status), std::find(std::cbegin(link_status), std::cend(link_status), LinkStatus::Valid));
-		}();
-		if (index >= link_status.size() || link_status[index] != LinkStatus::Valid)
-			throw BadTreeSearch(fmt::format(" - no valid link in node marked as branch\n"));
-		const Position pos = node.branch().links[index];
-		return get_corner_subtree(Nod::from_page(m_pager->get(pos)), corner);
+	[[nodiscard]] Nod get_corner_subtree_at_height(const Nod &node_, CornerDetail corner, size_t height = LEAF_LEVEL_HEIGHT) {
+		auto inner = [curr_height = depth(), height, corner, this](const Nod &node) mutable {
+			if (node.is_leaf() || curr_height-- <= height)
+				return node;
+
+			const auto &link_status = node.branch().link_status;
+			const std::size_t index = [&] {
+				if (corner == CornerDetail::MAX)
+					return std::distance(std::cbegin(link_status), std::find(std::crbegin(link_status), std::crend(link_status), LinkStatus::Valid).base()) - 1;
+				assert(corner == CornerDetail::MIN);
+				return std::distance(std::cbegin(link_status), std::find(std::cbegin(link_status), std::cend(link_status), LinkStatus::Valid));
+			}();
+			if (index >= link_status.size() || link_status[index] != LinkStatus::Valid)
+				throw BadTreeSearch(fmt::format(" - no valid link in node marked as branch\n"));
+			const Position pos = node.branch().links[index];
+			return get_corner_subtree(Nod::from_page(m_pager->get(pos)), corner);
+		};
+
+		return inner(node_);
+	}
+
+	[[nodiscard]] Nod get_corner_subtree(const Nod &node, CornerDetail corner) {
+		return get_corner_subtree_at_height(node, corner);
 	}
 
 	/// Make tree root
@@ -337,6 +362,25 @@ private:
 
 			/// Cache next node that will be looked at
 			node = parent;
+		}
+	}
+
+	void rebalance_after_bulk_insert(std::vector<InsertionTree<Key>> &insertion_trees) {
+		// No rebalancing has to be performed, since we are not added any auxiliary nodes
+		for (auto &instree : std::views::filter(insertion_trees, [](auto &instree) { return instree.tree.depth() > 1; })) {
+			const auto path_to_instree_root = instree.path.top();
+			instree.path.pop();
+			auto p = Nod::from_page(m_pager->get(instree.path.top().node_pos));
+
+			for (auto height = 1ul; height <= instree.tree.depth(); ++height) {
+				/// Deref safety: We already fetched its parent
+				auto [midkey, right_sibling_of_p] = p.split(*path_to_instree_root.idx_in_parent, SplitBias::TakeLiterally);
+
+				auto smallest_in_instree = instree.tree.get_corner_subtree_at_height(instree.tree.root(), CornerDetail::MIN, height);
+				auto biggest_in_instree = instree.tree.get_corner_subtree_at_height(instree.tree.root(), CornerDetail::MAX, height);
+				p.fuse_with(smallest_in_instree);
+				right_sibling_of_p.fuse_with(biggest_in_instree);
+			}
 		}
 	}
 
@@ -428,7 +472,7 @@ private:
 		parent.branch().refs.pop_back();
 
 		auto make_merged_node_from = [&](const Nod &left, const Nod &right) {
-			if (auto maybe_merged_node = left.merge_with(right); maybe_merged_node) {
+			if (auto maybe_merged_node = left.fuse_with(right); maybe_merged_node) {
 				const auto merged_node_pos = m_pager->alloc();
 
 				// Replace previous 'left' link with new merged node
@@ -511,7 +555,6 @@ private:
 		        : num_records_leaf_candidate - 1;
 	}
 
-public:
 	/// Create new <key, value> entry into the tree.
 	/// Wraps insertion/replacement logic. If the key is already present into the tree, it takes action based
 	/// on the 'action' flag passed. The returned value denotes whether a new entry was put into the tree.
@@ -544,6 +587,104 @@ public:
 		rebalance_after_insert(search_res.path, split_bias);
 
 		return InsertedEntry();
+	}
+
+	/// Places _many_ <key, value> entries inside the tree.
+	/// Leaves the tree in an unbalanced shape. More efficient version of calling `place_kv_entry` many times.
+	/// Returns return marks for each <key, value> Entry and a collection of all insertion trees that were created.
+	/// The latter is used during rebalancing.
+	/// The client code could take advantage of this, by buffering the insertion/update queries.
+	///
+	/// TODO: For now, nothing differentiates insert from update when calling `insert_many`. Add a specifier with default state.
+	[[nodiscard]] auto place_kv_entries(std::ranges::range auto &&bulk) {
+		namespace rng = std::ranges;
+
+		ManyInsertionReturnMarks insertion_marks;
+		std::vector<InsertionTree<Key>> insertion_trees;
+
+		for (auto simple_bulk_cbegin = rng::cbegin(bulk); simple_bulk_cbegin != rng::cend(bulk);) {
+			auto search_result = search(simple_bulk_cbegin->key);
+			PosNod path_to_leaf = search_result.path.top();
+			search_result.path.pop();
+
+			const auto leaf_vals_cbegin = search_result.node.leaf().vals.cbegin();
+			const auto leaf_keys_cbegin = search_result.node.leaf().keys.cbegin();
+			const auto leaf_keys_cend = search_result.node.leaf().keys.cend();
+
+			const auto &simple_bulk_cend = [&] {
+				if (leaf_keys_cbegin == leaf_keys_cend) {
+					/// In such case, the leaf is empty, and since that would mean that the tree is not properly balanced, this means that the subtree is empty as well.
+					/// Therefore, the highkey (or the upper fence key) equals +∞, meaning that all entries of the bulk should be located in this leaf.
+					return rng::cend(bulk);
+				}
+				const Key &leaf_highkey = *(leaf_keys_cend - 1);
+				return std::find_if(simple_bulk_cbegin, rng::cend(bulk), [&leaf_highkey](const auto &entry) { return entry.key > leaf_highkey; });
+			}();
+
+			auto entry_of_key_it = [leaf_keys_cbegin, leaf_vals_cbegin](auto it) {
+				return Entry{.key = *it, .val = *(leaf_vals_cbegin + std::distance(leaf_keys_cbegin, it))};
+			};
+
+			auto iterate_over_simple_bulk = [simple_bulk_cit = simple_bulk_cbegin, leaf_keys_cit = leaf_keys_cbegin, simple_bulk_cend, leaf_keys_cend, &entry_of_key_it]() mutable -> cppcoro::generator<const Entry> {
+				while (simple_bulk_cit != simple_bulk_cend && leaf_keys_cit != leaf_keys_cend)
+					co_yield simple_bulk_cit->key < *leaf_keys_cit ? *simple_bulk_cit++ : entry_of_key_it(leaf_keys_cit++);
+				while (leaf_keys_cit != leaf_keys_cend)
+					co_yield entry_of_key_it(leaf_keys_cit++);
+				while (simple_bulk_cit != simple_bulk_cend)
+					co_yield *simple_bulk_cit++;
+			};
+
+			insertion_trees.push_back(InsertionTree{
+			        .path = search_result.path,
+			        .tree = clone_only_blueprint(),
+			        .lofence = simple_bulk_cbegin->key,
+			        .hifence = simple_bulk_cend > simple_bulk_cbegin ? (simple_bulk_cend - 1)->key : simple_bulk_cbegin->key,
+			        .leaf_pos = path_to_leaf.node_pos});
+			auto &insertion_tree = insertion_trees.back();
+
+			rng::for_each(iterate_over_simple_bulk(), [&insertion_tree, &insertion_marks](const auto &entry) {
+				insertion_marks[entry.key] = insertion_tree.tree.place_kv_entry(typename Nod::Entry{.key = entry.key, .val = entry.val}, ActionOnKeyPresent::AbandonChange, SplitBias::LeanLeft);
+			});
+
+			/// FIXME: Delete
+			util::BtreePrinter{insertion_tree.tree, "/tmp/eugene-tests/btree-bulk-insertion/insert-man-printed"}();
+
+			/// Replace leaf with insertion tree root
+			auto pos = [&] {
+				// No parent, nor siblings => root element
+				// Do not reuse old root pos and do not deallocate it, because the pager is
+				// shared between the insertion trees and the actual Btree we are modifying,
+				// thus already making use of the space located at m_rootpos.
+				if (search_result.path.empty())
+					return (m_rootpos = insertion_tree.tree.rootpos());
+
+				// Replace link value in parent
+				const auto new_pos = m_pager->alloc();
+				auto parent_pos = search_result.path.top().node_pos;
+				auto parent = Nod::from_page(m_pager->get(parent_pos));
+				// Deref safety: We just asserted that the node has a parent
+				parent.branch().links[*path_to_leaf.idx_in_parent] = new_pos;
+				m_pager->place(parent_pos, parent.make_page());
+				// Optionally, replace link value in sibling
+				if (*path_to_leaf.idx_in_parent > 0) {
+					auto prev_sibling_pos = parent.branch().links[*path_to_leaf.idx_in_parent - 1];
+					auto prev_sibling = Nod::from_page(m_pager->get(prev_sibling_pos));
+					prev_sibling.set_next_node(new_pos);
+					m_pager->place(prev_sibling_pos, prev_sibling.make_page());
+				}
+				return (insertion_tree.leaf_pos = new_pos);
+			}();
+
+			m_pager->place(pos, insertion_tree.tree.root().make_page());
+
+			// Update current position in simple bulk
+			simple_bulk_cbegin = simple_bulk_cend;
+
+			// Return the last record of the path since it was popped earlier.
+			insertion_tree.path.push(path_to_leaf);
+		}
+
+		return std::make_pair(std::move(insertion_marks), std::move(insertion_trees));
 	}
 
 public:
@@ -588,12 +729,12 @@ public:
 	[[nodiscard]] std::size_t depth() { return m_depth; }
 
 	/// Get limits of the size of leaf nodes (leaves contain [min; max] entries)
-	[[nodiscard]] long min_num_records_leaf() const noexcept { return m_num_records_leaf; }
-	[[nodiscard]] long max_num_records_leaf() const noexcept { return m_num_records_leaf * 2 - 1; }
+	[[nodiscard]] long min_num_records_leaf() const noexcept { return (m_num_records_leaf + 1) / 2; }
+	[[nodiscard]] long max_num_records_leaf() const noexcept { return m_num_records_leaf; }
 
 	/// Get limits of the size of branch nodes (branch contain [min; max] entries)
-	[[nodiscard]] long min_num_records_branch() const noexcept { return m_num_records_branch; }
-	[[nodiscard]] long max_num_records_branch() const noexcept { return m_num_records_branch * 2 - 1; }
+	[[nodiscard]] long min_num_records_branch() const noexcept { return (m_num_records_branch + 1) / 2; }
+	[[nodiscard]] long max_num_records_branch() const noexcept { return m_num_records_branch; }
 
 	///
 	/// Operations API
@@ -619,105 +760,16 @@ public:
 	/// Implementation is according to "Concurrency Control and I/O-Optimality in Bulk Insertion".
 	/// FIXME: Adapt 'ActionOnKeyPresent' by adding "AskOnEach" and "ReplaceAllPresent" and "IgnoreAllPresent".
 
-	/// Insertion tree is an in-memory instance of a Btree created during bulk-insertion
-	/// following the algorithm implemented as 'insert_many()'. Check its definiton for
-	/// a more in-depth look.
-	template<typename Key>
-	struct InsertionTree {
-		std::optional<Position> parent_pos;
-		std::unique_ptr<Btree<Config>> tree;
-		Key lofence;
-		Key hifence;
-	};
-
-	std::unordered_map<Key, InsertionReturnMark> insert_many(std::ranges::range auto bulk) {
+	std::unordered_map<Key, InsertionReturnMark> insert_many(std::ranges::range auto &&bulk) {
 		namespace rng = std::ranges;
-
-		std::unordered_map<Key, InsertionReturnMark> results;
-		std::vector<InsertionTree<Key>> insertion_trees;
 
 		if (rng::empty(bulk))
 			return {};
 
-		/// Algorithm "Bulk Insertion Without Rebalancing"
-		for (auto simple_bulk_cbegin = rng::cbegin(bulk); simple_bulk_cbegin != rng::cend(bulk);) {
-			auto search_path = search(simple_bulk_cbegin->key);
-			PosNod path_to_leaf = search_path.path.top();
-			search_path.path.pop();
+		auto &&[insertion_marks, insertion_trees] = place_kv_entries(bulk);
+		rebalance_after_bulk_insert(insertion_trees);
 
-			const auto leaf_vals_cbegin = search_path.node.leaf().vals.cbegin();
-			const auto leaf_keys_cbegin = search_path.node.leaf().keys.cbegin();
-			const auto leaf_keys_cend = search_path.node.leaf().keys.cend();
-
-			const auto &simple_bulk_cend = [&] {
-				if (leaf_keys_cbegin == leaf_keys_cend) {
-					/// In such case, the leaf is empty, and since that would mean that the tree is not properly balanced, this means that the subtree is empty as well.
-					/// Therefore, the highkey (or the upper fence key) equals +∞, meaning that all entries of the bulk should be located in this leaf.
-					return rng::cend(bulk);
-				}
-				const Key &leaf_highkey = *(leaf_keys_cend - 1);
-				return std::find_if(simple_bulk_cbegin, rng::cend(bulk), [&leaf_highkey](const auto &entry) { return entry.key > leaf_highkey; });
-			}();
-
-			auto entry_of_key_it = [leaf_keys_cbegin, leaf_vals_cbegin](auto it) {
-				return Entry{.key = *it, .val = *(leaf_vals_cbegin + std::distance(leaf_keys_cbegin, it))};
-			};
-
-			auto iterate_over_simple_bulk = [simple_bulk_cit = simple_bulk_cbegin, leaf_keys_cit = leaf_keys_cbegin, simple_bulk_cend, leaf_keys_cend, &entry_of_key_it]() mutable -> cppcoro::generator<const Entry> {
-				while (simple_bulk_cit != simple_bulk_cend && leaf_keys_cit != leaf_keys_cend)
-					co_yield simple_bulk_cit->key < *leaf_keys_cit ? *simple_bulk_cit++ : entry_of_key_it(leaf_keys_cit++);
-				while (leaf_keys_cit != leaf_keys_cend)
-					co_yield entry_of_key_it(leaf_keys_cit++);
-				while (simple_bulk_cit != simple_bulk_cend)
-					co_yield *simple_bulk_cit++;
-			};
-
-			insertion_trees.push_back(InsertionTree{
-			        .parent_pos = search_path.path.empty() ? std::nullopt : std::make_optional(search_path.path.top().node_pos),
-			        .tree = std::make_unique<Btree<Config>>(clone_only_blueprint()),
-			        .lofence = simple_bulk_cbegin->key,
-			        .hifence = simple_bulk_cend > simple_bulk_cbegin ? (simple_bulk_cend - 1)->key : simple_bulk_cbegin->key});
-			auto &insertion_tree = insertion_trees.back();
-
-			rng::for_each(iterate_over_simple_bulk(), [&insertion_tree, &results](const auto &entry) {
-				results[entry.key] = insertion_tree.tree->place_kv_entry(typename Nod::Entry{.key = entry.key, .val = entry.val}, ActionOnKeyPresent::AbandonChange, SplitBias::DistributeEvenly);
-			});
-
-			util::BtreePrinter{*insertion_tree.tree, "/tmp/eugene-tests/btree-bulk-insertion/insert-man-printed"}();
-
-			/// Replace leaf with insertion tree root
-			auto pos = [&] {
-				// No parent, nor siblings => root element
-				// Do not reuse old root pos and do not deallocate it, because the pager is
-				// shared between the insertion trees and the actual Btree we are modifying,
-				// thus already making use of the space located at m_rootpos.
-				if (search_path.path.empty())
-					return (m_rootpos = insertion_tree.tree->rootpos());
-
-				// Replace link value in parent
-				const auto new_pos = m_pager->alloc();
-				auto parent_pos = search_path.path.top().node_pos;
-				auto parent = Nod::from_page(m_pager->get(parent_pos));
-				// Deref safety: We just asserted that the node has a parent
-				parent.branch().links[*path_to_leaf.idx_in_parent] = new_pos;
-				m_pager->place(parent_pos, parent.make_page());
-				// Optionally, replace link value in sibling
-				if (*path_to_leaf.idx_in_parent > 0) {
-					auto prev_sibling_pos = parent.branch().links[*path_to_leaf.idx_in_parent - 1];
-					auto prev_sibling = Nod::from_page(m_pager->get(prev_sibling_pos));
-					prev_sibling.set_next_node(new_pos);
-					m_pager->place(prev_sibling_pos, prev_sibling.make_page());
-				}
-				return new_pos;
-			}();
-
-			m_pager->place(pos, insertion_tree.tree->root().make_page());
-
-			// Update current position in simple bulk
-			simple_bulk_cbegin = simple_bulk_cend;
-		}
-
-		return results;
+		return insertion_marks;
 	}
 
 	/// Remove an existing <key, value> entry from the tree

@@ -44,7 +44,8 @@ enum class LinkStatus : uint8_t { Valid,
 /// and Unbiased- that the entries are equally distributed among to the two siblings.
 enum class SplitBias { LeanLeft,
 	               LeanRight,
-	               DistributeEvenly };
+	               DistributeEvenly,
+	               TakeLiterally };
 
 template<BtreeConfig Config = DefaultConfig>
 class Node {
@@ -168,6 +169,7 @@ public:
 	/// Perform a split operation based on some branching factor 'm'.
 	/// Returns a brand new node and the key which is not contained in
 	/// neither of the nodes. It should be put in the parent's list.
+
 	constexpr std::pair<Key, Nod> split(const std::size_t max_num_records, const SplitBias bias) {
 		Node sibling;
 		Key midkey;
@@ -177,6 +179,9 @@ public:
 				break; case SplitBias::LeanLeft: return max_num_records - 1;
 				break; case SplitBias::LeanRight: return std::abs(num_filled() - static_cast<long>(max_num_records)) + 1;
 				break; case SplitBias::DistributeEvenly: return num_filled() / 2;
+				// In such case 'max_num_records' is not the maximum but the actual pivot precalculated.
+				// Note: Using this option is discouraged in regular cases, since it may be an invalid index.
+				break; case SplitBias::TakeLiterally: return max_num_records;
 			}
 			// clang-format on
 			UNREACHABLE
@@ -199,7 +204,7 @@ public:
 	/// Create a new node which is a combination of *this and other.
 	/// The created node is returned as a result and is guaranteed to be a valid node, which conforms to the
 	/// btree requirements for a node.
-	[[maybe_unused]] constexpr std::optional<Node> merge_with(const Node &other) const {
+	[[maybe_unused]] constexpr std::optional<Node> fuse_with(const Node &other) const {
 		// Merge is performed only of nodes which share a parent (are siblings)
 		// Also a sanity check is done ensuring the nodes are at the same level.
 		if (is_leaf() ^ other.is_leaf() && parent() == other.parent())
