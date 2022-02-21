@@ -15,11 +15,11 @@
 namespace internal::storage::btree::util {
 
 template<typename Collection>
-static std::string join(const Collection& collection, std::string_view delim) {
+static std::string join(const Collection &collection, std::string_view delim) {
 	auto begin = std::cbegin(collection);
 	const auto end = std::cend(collection);
-    if (begin == end) {
-        return "";
+	if (begin == end) {
+		return "";
 	}
 
 	std::stringstream ss;
@@ -54,7 +54,8 @@ public:
 		if (node.is_branch() || level == 1)
 			m_out << "keys: ";
 		if (node.is_leaf()) {
-			m_out << '(' << node.leaf().keys.size() << ") [" << join(node.leaf().keys, ", ") << "]\n";
+			//			m_out << '(' << node.leaf().keys.size() << ") [" << join(node.leaf().keys, ", ") << "]\n";
+			m_out << "[" << join(node.leaf().keys, ", ") << "]\n";
 			return;
 		}
 

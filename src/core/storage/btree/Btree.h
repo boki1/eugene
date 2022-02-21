@@ -606,12 +606,13 @@ private:
 			auto search_result = search(simple_bulk_cbegin->key);
 			PosNod path_to_leaf = search_result.path.top();
 			search_result.path.pop();
+			std::optional<Position> parent_pos = search_result.path.empty() ? std::nullopt : std::make_optional(search_result.path.top().node_pos);
 
 			const auto leaf_vals_cbegin = search_result.node.leaf().vals.cbegin();
 			const auto leaf_keys_cbegin = search_result.node.leaf().keys.cbegin();
 			const auto leaf_keys_cend = search_result.node.leaf().keys.cend();
 
-			const auto &simple_bulk_cend = [&] {
+			const auto simple_bulk_cend = [&] {
 				if (leaf_keys_cbegin == leaf_keys_cend) {
 					/// In such case, the leaf is empty, and since that would mean that the tree is not properly balanced, this means that the subtree is empty as well.
 					/// Therefore, the highkey (or the upper fence key) equals +∞, meaning that all entries of the bulk should be located in this leaf.
@@ -627,7 +628,10 @@ private:
 
 			auto iterate_over_simple_bulk = [simple_bulk_cit = simple_bulk_cbegin, leaf_keys_cit = leaf_keys_cbegin, simple_bulk_cend, leaf_keys_cend, &entry_of_key_it]() mutable -> cppcoro::generator<const Entry> {
 				while (simple_bulk_cit != simple_bulk_cend && leaf_keys_cit != leaf_keys_cend)
-					co_yield simple_bulk_cit->key < *leaf_keys_cit ? *simple_bulk_cit++ : entry_of_key_it(leaf_keys_cit++);
+					if (simple_bulk_cit->key < *leaf_keys_cit)
+						co_yield *simple_bulk_cit++;
+					else
+						co_yield entry_of_key_it(leaf_keys_cit++);
 				while (leaf_keys_cit != leaf_keys_cend)
 					co_yield entry_of_key_it(leaf_keys_cit++);
 				while (simple_bulk_cit != simple_bulk_cend)
@@ -643,11 +647,9 @@ private:
 			auto &insertion_tree = insertion_trees.back();
 
 			rng::for_each(iterate_over_simple_bulk(), [&insertion_tree, &insertion_marks](const auto &entry) {
+				fmt::print("entry.key = {}\n", entry.key);
 				insertion_marks[entry.key] = insertion_tree.tree.place_kv_entry(typename Nod::Entry{.key = entry.key, .val = entry.val}, ActionOnKeyPresent::AbandonChange, SplitBias::LeanLeft);
 			});
-
-			/// FIXME: Delete
-			util::BtreePrinter{insertion_tree.tree, "/tmp/eugene-tests/btree-bulk-insertion/insert-man-printed"}();
 
 			/// Replace leaf with insertion tree root
 			auto pos = [&] {
@@ -655,16 +657,15 @@ private:
 				// Do not reuse old root pos and do not deallocate it, because the pager is
 				// shared between the insertion trees and the actual Btree we are modifying,
 				// thus already making use of the space located at m_rootpos.
-				if (search_result.path.empty())
+				if (!parent_pos)
 					return (m_rootpos = insertion_tree.tree.rootpos());
 
 				// Replace link value in parent
 				const auto new_pos = m_pager->alloc();
-				auto parent_pos = search_result.path.top().node_pos;
-				auto parent = Nod::from_page(m_pager->get(parent_pos));
+				auto parent = Nod::from_page(m_pager->get(*parent_pos));
 				// Deref safety: We just asserted that the node has a parent
 				parent.branch().links[*path_to_leaf.idx_in_parent] = new_pos;
-				m_pager->place(parent_pos, parent.make_page());
+				m_pager->place(*parent_pos, parent.make_page());
 				// Optionally, replace link value in sibling
 				if (*path_to_leaf.idx_in_parent > 0) {
 					auto prev_sibling_pos = parent.branch().links[*path_to_leaf.idx_in_parent - 1];
@@ -767,7 +768,7 @@ public:
 			return {};
 
 		auto &&[insertion_marks, insertion_trees] = place_kv_entries(bulk);
-		rebalance_after_bulk_insert(insertion_trees);
+		//		rebalance_after_bulk_insert(insertion_trees);
 
 		return insertion_marks;
 	}
@@ -980,6 +981,7 @@ public:
 	Btree clone_only_blueprint() const noexcept {
 		auto copy = Btree(*this);
 		copy.m_size = copy.m_depth = 0;
+		copy.bare();
 		return copy;
 	}
 
