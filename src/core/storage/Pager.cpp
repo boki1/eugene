@@ -49,11 +49,14 @@ TEST_CASE("Persistent pager", "[pager]") {
 
 	SECTION("Using freelist allocator") {
 		Pager<FreeListAllocator, LRUCache> pr("/tmp/eu-pager-persistent-pager-freelistalloc", ActionOnConstruction::DoNotLoad, 10ul);
-		REQUIRE(pr.allocator().freelist() == std::vector<Position>{36864, 32768, 28672, 24576, 20480, 16384, 12288, 8192, 4096, 0});
+		REQUIRE(pr.allocator().freelist().empty());
+		REQUIRE(pr.allocator().next() == 0ul);
+		REQUIRE(pr.allocator().limit() == 10ul);
 
 		for (int i = 0; i < 10; ++i)
 			REQUIRE(pr.alloc() == i * PAGE_SIZE);
 		REQUIRE(pr.allocator().freelist().empty());
+		REQUIRE(pr.allocator().next() == 10ul);
 
 		for (int i = 0; i < 10; i += 2)
 			REQUIRE_NOTHROW(pr.free(i * PAGE_SIZE));
@@ -64,7 +67,9 @@ TEST_CASE("Persistent pager", "[pager]") {
 		REQUIRE(pr_2.allocator().freelist() == std::vector<Position>{32768, 24576, 16384, 8192, 0});
 
 		Pager<FreeListAllocator, LRUCache> pr_3("/tmp/eu-pager-persistent-pager-freelistalloc", ActionOnConstruction::DoNotLoad, 10ul);
-		REQUIRE(pr_3.allocator().freelist() == std::vector<Position>{36864, 32768, 28672, 24576, 20480, 16384, 12288, 8192, 4096, 0});
+		REQUIRE(pr_3.allocator().freelist().empty());
+		REQUIRE(pr_3.allocator().next() == 0ul);
+		REQUIRE(pr_3.allocator().limit() == 10ul);
 		pr_3.load();
 		REQUIRE(pr_3.allocator().freelist() == std::vector<Position>{32768, 24576, 16384, 8192, 0});
 	}

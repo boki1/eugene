@@ -167,7 +167,7 @@ public:
 		const auto it = std::find_if(m_freelist.begin(), m_freelist.end(), [&](const Position curr) {
 			return curr <= pos;
 		});
-		if (*it == pos && it < m_freelist.end())
+		if (it < m_freelist.end() && *it == pos)
 			throw BadPosition(pos);
 		m_freelist.insert(m_freelist.begin() + std::distance(m_freelist.begin(), it), pos);
 	}
@@ -175,6 +175,8 @@ public:
 	[[nodiscard]] constexpr bool has_allocated(const Position) { return true; }
 
 	[[nodiscard]] const auto &freelist() const noexcept { return m_freelist; }
+	[[nodiscard]] const auto next() const noexcept { return m_next_page; }
+	[[nodiscard]] const auto limit() const noexcept { return m_limit_num_pages; }
 };
 
 using CacheEvictionResult = std::optional<PagePos>;

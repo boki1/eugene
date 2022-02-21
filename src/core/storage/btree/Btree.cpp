@@ -126,7 +126,6 @@ TEST_CASE("Btree operations", "[btree]") {
 			fmt::print("root_node.num_filled() = {}\n", root_node.num_filled());
 		}
 	}
-
 	SECTION("Removal") {
 		SECTION("Removal without rebalancing") {
 			Btree<Tree23> bpt("/tmp/eugene-tests/btree-operations/removal-without-rebalancing");
@@ -167,7 +166,6 @@ TEST_CASE("Btree operations", "[btree]") {
 			util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-operations/difficult-removal-printed-2"}();
 		}
 	}
-
 	SECTION("Update") {
 		Bt bpt("/tmp/eugene-tests/btree-operations/update");
 		static const std::size_t limit = 1000;
@@ -189,7 +187,6 @@ TEST_CASE("Btree operations", "[btree]") {
 
 		check_for_tree_backup_mismatch(bpt, backup);
 	}
-
 	SECTION("Queries") {
 		Bt bpt("/tmp/eugene-tests/btree-operations/queries");
 		std::vector<Bt::Entry> inserted_entries;
@@ -228,7 +225,6 @@ TEST_CASE("Btree operations", "[btree]") {
 }
 
 TEST_CASE("Btree bulk insertion", "[btree]") {
-#if 0
 	SECTION("Empty tree") {
 		fs::create_directories("/tmp/eugene-tests/btree-bulk-insertion");
 		Btree<Tree23> bpt("/tmp/eugene-tests/btree-bulk-insertion/insert-many-empty");
@@ -247,7 +243,7 @@ TEST_CASE("Btree bulk insertion", "[btree]") {
 
 		util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-bulk-insertion/insert-many-empty-printed"}();
 	}
-#endif
+
 	SECTION("Simple bulk insertion without rebalancing") {
 		auto e = [](const auto &k) { return Btree<Tree23>::Entry{.key = k, .val = k}; };
 
