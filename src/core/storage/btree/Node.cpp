@@ -209,3 +209,71 @@ TEST_CASE("Split full nodes", "[btree]") {
 		validate_leaf(leaf_before_split, leaf, leaf_sib_node.leaf(), std::abs(LEAF_LIMIT - LEAF_NUM) + 1, leaf_midkey);
 	}
 }
+
+TEST_CASE("Fuse nodes", "[btree]") {
+	SECTION("Fuse leaves") {
+		static constexpr auto LEAF_NUM = 2;
+		[[maybe_unused]] static constexpr auto LEAF_LIMIT = 5;
+
+		auto leaf_node_left = Nod{Metadata(Leaf(n_random_items<int>(LEAF_NUM), n_random_items<int>(LEAF_NUM))), {}, Nod::RootStatus::IsInternal};
+		auto leaf_node_right = Nod{Metadata(Leaf(n_random_items<int>(LEAF_NUM), n_random_items<int>(LEAF_NUM))), {}, Nod::RootStatus::IsInternal};
+
+		std::sort(leaf_node_left.leaf().keys.begin(), leaf_node_left.leaf().keys.end());
+		std::sort(leaf_node_right.leaf().keys.begin(), leaf_node_right.leaf().keys.end());
+
+		fmt::print("Left: {}\n", fmt::join(leaf_node_left.leaf().keys, ", "));
+		fmt::print("Right: {}\n", fmt::join(leaf_node_right.leaf().keys, ", "));
+
+		auto merged = leaf_node_left.fuse_with(leaf_node_right);
+		fmt::print("Merged: {}\n", fmt::join(merged.leaf().keys, ", "));
+		REQUIRE(std::is_sorted(merged.leaf().keys.cbegin(), merged.leaf().keys.cend()));
+
+		for (const auto &&[k, v] : iter::zip(leaf_node_left.leaf().keys, leaf_node_left.leaf().vals)) {
+				const auto idx = std::find(merged.leaf().keys.cbegin(), merged.leaf().keys.cend(), k) - merged.leaf().keys.cbegin();
+				REQUIRE(merged.leaf().vals[idx] == v);
+		}
+
+		for (const auto &&[k, v] : iter::zip(leaf_node_right.leaf().keys, leaf_node_right.leaf().vals)) {
+				const auto idx = std::find(merged.leaf().keys.cbegin(), merged.leaf().keys.cend(), k) - merged.leaf().keys.cbegin();
+				REQUIRE(merged.leaf().vals[idx] == v);
+		}
+
+		REQUIRE(merged.leaf().keys.size() == leaf_node_left.leaf().keys.size() + leaf_node_right.leaf().keys.size());
+	}
+
+	SECTION("Fuse branches") {
+		static constexpr auto BRANCH_NUM = 2;
+		[[maybe_unused]] static constexpr auto BRANCH_LIMIT = 5;
+
+		std::vector<Position> branch_links_left(BRANCH_NUM + 1);
+		std::iota(branch_links_left.begin(), branch_links_left.end(), static_cast<Position>(0ul));
+
+		std::vector<Position> branch_links_right(BRANCH_NUM + 1);
+		std::iota(branch_links_right.begin(), branch_links_right.end(), static_cast<Position>(0ul));
+
+		auto branch_node_left = Nod{Metadata(n_random_items<int>(BRANCH_NUM), std::move(branch_links_left), std::vector<LinkStatus>(BRANCH_NUM + 1, LinkStatus::Valid)), {}, Nod::RootStatus::IsInternal};
+		auto branch_node_right = Nod{Metadata(n_random_items<int>(BRANCH_NUM), std::move(branch_links_right), std::vector<LinkStatus>(BRANCH_NUM + 1, LinkStatus::Valid)), {}, Nod::RootStatus::IsInternal};
+
+		std::sort(branch_node_left.branch().refs.begin(), branch_node_left.branch().refs.end());
+		std::sort(branch_node_right.branch().refs.begin(), branch_node_right.branch().refs.end());
+
+		fmt::print("Left: {}\n", fmt::join(branch_node_left.branch().refs, ", "));
+		fmt::print("Right: {}\n", fmt::join(branch_node_right.branch().refs, ", "));
+
+		auto merged = branch_node_left.fuse_with(branch_node_right);
+		fmt::print("Merged: {}\n", fmt::join(merged.branch().refs, ", "));
+		REQUIRE(std::is_sorted(merged.branch().refs.cbegin(), merged.branch().refs.cend()));
+
+		for (const auto &&[k, v] : iter::zip(branch_node_left.branch().refs, branch_node_left.branch().links)) {
+				const auto idx = std::find(merged.branch().refs.cbegin(), merged.branch().refs.cend(), k) - merged.branch().refs.cbegin();
+				REQUIRE(merged.branch().links[idx] == v);
+		}
+
+		for (const auto &&[k, v] : iter::zip(branch_node_right.branch().refs, branch_node_right.branch().links)) {
+				const auto idx = std::find(merged.branch().refs.cbegin(), merged.branch().refs.cend(), k) - merged.branch().refs.cbegin();
+				REQUIRE(merged.branch().links[idx] == v);
+		}
+
+		REQUIRE(merged.branch().refs.size() == branch_node_right.branch().refs.size() + branch_node_left.branch().refs.size());
+	}
+}

@@ -110,6 +110,37 @@ template<typename T, typename InputIt, typename InputItB>
 		co_yield *first_begin;
 }
 
+// Merge ranges based on fun
+[[maybe_unused]] void merge_many(std::ranges::range auto self, std::ranges::range auto diff, auto fun) {
+	auto self_begin = std::cbegin(self);
+	auto diff_begin = std::cbegin(diff);
+	while (self_begin < std::cend(self) && diff_begin < std::cend(diff)) {
+		const auto self_is_bigger = *self_begin > *diff_begin;
+		std::size_t idx = self_is_bigger
+		        ? std::distance(std::cbegin(self), self_begin++)
+		        : std::distance(std::cbegin(diff), diff_begin++);
+		fun(self_is_bigger, idx);
+	}
+	while (self_begin < std::cend(self))
+		fun(true, std::distance(std::cbegin(self), self_begin++));
+	while (diff_begin < std::cend(diff))
+		fun(false, std::distance(std::cbegin(diff), diff_begin++));
+}
+
+/// Pop and return the last element of a collection
+template<typename T, typename Ts>
+[[maybe_unused]] T consume_back(Ts &ts) {
+	if constexpr (requires { ts.top(); }) {
+		const auto t = ts.top();
+		ts.pop();
+		return t;
+	} else if constexpr (requires { ts.back(); }) {
+		const auto t = ts.back();
+		ts.pop_back();
+		return t;
+	}
+}
+
 #define UNREACHABLE \
 	abort();
 

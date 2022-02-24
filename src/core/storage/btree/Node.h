@@ -47,6 +47,13 @@ enum class SplitBias { LeanLeft,
 	               DistributeEvenly,
 	               TakeLiterally };
 
+/// Denotes how split operations deal with the midkey.
+/// Normally, branch nodes remove the midkey from the resulting 2 nodes and propagate it upwards.
+/// ExplodeOnly will not do that and the midkey is only a copy. - split(| 1 2 3 4 |) -> | 1 2 |, | 3 4 |.
+/// ExcludeMid does what is considered the normal behaviour, described earlier.
+enum class SplitType { ExplodeOnly,
+	               ExcludeMid };
+
 template<BtreeConfig Config = DefaultConfig>
 class Node {
 	friend Btree<Config>;
@@ -134,7 +141,7 @@ public:
 	constexpr Node(Node &&) noexcept = default;
 	constexpr Node(const Node &) = default;
 
-	constexpr Node &operator=(const Node &) = delete;
+	constexpr Node &operator=(const Node &) = default;
 	constexpr Node &operator=(Node &&) noexcept = default;
 
 	constexpr auto operator==(const Node &rhs) const noexcept {
@@ -170,7 +177,7 @@ public:
 	/// Returns a brand new node and the key which is not contained in
 	/// neither of the nodes. It should be put in the parent's list.
 
-	constexpr std::pair<Key, Nod> split(const std::size_t max_num_records, const SplitBias bias) {
+	constexpr std::pair<Key, Nod> split(const std::size_t max_num_records, const SplitBias bias, const SplitType type = SplitType::ExcludeMid) {
 		Node sibling;
 		Key midkey;
 		const auto pivot = [max_num_records, bias, this]() -> std::size_t {
@@ -191,7 +198,8 @@ public:
 			auto &b = branch();
 			midkey = b.refs[pivot];
 			sibling = {metadata_ctor<Branch>(break_at_index(b.refs, pivot + 1), break_at_index(b.links, pivot + 1), break_at_index(b.link_status, pivot + 1)), parent()};
-			b.refs.pop_back();// Branch nodes do not copy mid-keys
+			if (type == SplitType::ExcludeMid)
+				b.refs.pop_back();// Branch nodes do not copy mid-keys
 		} else {
 			auto &l = leaf();
 			sibling = {metadata_ctor<Leaf>(break_at_index(l.keys, pivot), break_at_index(l.vals, pivot)), parent()};
@@ -204,24 +212,36 @@ public:
 	/// Create a new node which is a combination of *this and other.
 	/// The created node is returned as a result and is guaranteed to be a valid node, which conforms to the
 	/// btree requirements for a node.
-	[[maybe_unused]] constexpr std::optional<Node> fuse_with(const Node &other) const {
-		// Merge is performed only of nodes which share a parent (are siblings)
-		// Also a sanity check is done ensuring the nodes are at the same level.
-		if (is_leaf() ^ other.is_leaf() && parent() == other.parent())
-			return {};
-
-		Node merged{*this};
-
+	[[maybe_unused]] constexpr Nod fuse_with(const Node &other) const {
+		Metadata m;
 		if (is_leaf()) {
-			vector_extend(merged.leaf().keys, other.leaf().keys);
-			vector_extend(merged.leaf().vals, other.leaf().vals);
-		} else {
-			vector_extend(merged.branch().refs, other.branch().refs);
-			vector_extend(merged.branch().links, other.branch().links);
-			vector_extend(merged.branch().link_status, other.branch().link_status);
+			auto l = Leaf();
+			merge_many(leaf().keys, other.leaf().keys, [&](const bool self_is_bigger, const std::size_t idx) {
+				if (self_is_bigger) {
+					l.keys.push_back(*(other.leaf().keys.cbegin() + idx));
+					l.vals.push_back(*(other.leaf().vals.cbegin() + idx));
+				} else {
+					l.keys.push_back(*(leaf().keys.cbegin() + idx));
+					l.vals.push_back(*(leaf().vals.cbegin() + idx));
+				}
+			});
+			m = l;
+		} else if (is_branch()) {
+			auto b = Branch();
+			merge_many(branch().refs, other.branch().refs, [&](const bool self_is_bigger, const std::size_t idx) {
+				if (self_is_bigger) {
+					b.refs.push_back(*(other.branch().refs.cbegin() + idx));
+					b.links.push_back(*(other.branch().links.cbegin() + idx));
+					b.link_status.push_back(*(other.branch().link_status.cbegin() + idx));
+				} else {
+					b.refs.push_back(*(branch().refs.cbegin() + idx));
+					b.links.push_back(*(branch().links.cbegin() + idx));
+					b.link_status.push_back(*(branch().link_status.cbegin() + idx));
+				}
+			});
+			m = b;
 		}
-
-		return std::make_optional<Node>(std::move(merged));
+		return Nod(std::move(m), 0, m_is_root ? RootStatus::IsRoot : RootStatus::IsInternal);
 	}
 
 	///
