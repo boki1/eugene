@@ -85,7 +85,7 @@ TEST_CASE("Page stack allocator", "[pager]") {
 
 TEST_CASE("Page free list", "[pager]") {
 	Pager<FreeListAllocator, LRUCache> pr("/tmp/eu-pager-freelist-alloc", ActionOnConstruction::DoNotLoad, 10ul);
-	REQUIRE(pr.allocator().freelist() == std::vector<Position>{36864, 32768, 28672, 24576, 20480, 16384, 12288, 8192, 4096, 0});
+	REQUIRE(pr.allocator().freelist().empty());
 
 	for (int i = 0; i < 10; ++i)
 		REQUIRE(pr.alloc() == i * PAGE_SIZE);
