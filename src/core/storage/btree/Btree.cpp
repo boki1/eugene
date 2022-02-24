@@ -17,6 +17,10 @@ using namespace internal;
 using namespace internal::storage::btree;
 using internal::storage::Position;
 using Bt = Btree<DefaultConfig>;
+using Nod = Node<DefaultConfig>;
+using Metadata = Nod::Metadata;
+using Branch = Nod::Branch;
+using Leaf = Nod::Leaf;
 
 ///
 /// Various tree configuration used in the tests below
@@ -224,6 +228,7 @@ TEST_CASE("Btree operations", "[btree]") {
 	}
 }
 
+#if 0
 TEST_CASE("Btree bulk insertion", "[btree]") {
 #if 0
 	SECTION("Empty tree") {
@@ -258,6 +263,8 @@ TEST_CASE("Btree bulk insertion", "[btree]") {
 		util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-bulk-insertion/insert-many-without-rebalancing-printed"}();
 	}
 }
+
+#endif
 
 TEST_CASE("Btree persistence", "[btree]") {
 	fs::create_directories("/tmp/eugene-tests/btree-persistence");
@@ -353,5 +360,60 @@ TEST_CASE("Btree configs") {
 
 		util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-configs/aggregate-types-printed"}();
 		check_for_tree_backup_mismatch(bpt, backup);
+	}
+}
+
+TEST_CASE("Btree utils") {
+	static constexpr auto BRANCH_NUM = 100;
+
+	SECTION("Node associated") {
+		Btree<DefaultConfig> bpt{"/tmp/eugene-tests/btree-utils/node-associated"};
+
+		std::vector<Position> branch_links_left(BRANCH_NUM + 1);
+		std::generate(branch_links_left.begin(), branch_links_left.end(), [&] { return bpt.pager().alloc(); });
+
+		std::vector<Position> branch_links_right(BRANCH_NUM + 1);
+		std::generate(branch_links_right.begin(), branch_links_right.end(), [&] { return bpt.pager().alloc(); });
+
+		auto branch_node_left  = Nod{Metadata(Branch(n_random_items<int>(BRANCH_NUM), std::move(branch_links_left), std::vector<LinkStatus>(BRANCH_NUM + 1, LinkStatus::Valid))), {}, Nod::RootStatus::IsInternal};
+		auto branch_node_right = Nod{Metadata(Branch(n_random_items<int>(BRANCH_NUM), std::move(branch_links_right), std::vector<LinkStatus>(BRANCH_NUM + 1, LinkStatus::Valid))), {}, Nod::RootStatus::IsInternal};
+		branch_node_left.branch().link_status[17] = LinkStatus::Inval;
+		branch_node_left.branch().link_status[38] = LinkStatus::Inval;
+		branch_node_left.branch().link_status[46] = LinkStatus::Inval;
+		branch_node_right.branch().link_status[27] = LinkStatus::Inval;
+		branch_node_right.branch().link_status[36] = LinkStatus::Inval;
+		branch_node_right.branch().link_status[78] = LinkStatus::Inval;
+
+		std::sort(branch_node_left.branch().refs.begin(), branch_node_left.branch().refs.end());
+		std::sort(branch_node_right.branch().refs.begin(), branch_node_right.branch().refs.end());
+
+		auto merged = branch_node_left.fuse_with(branch_node_right);
+		const auto merge_pos = bpt.pager().alloc();
+		bpt.pager().place(merge_pos, merged.make_page());
+
+		auto link_status_cbegin = merged.branch().links.cbegin();
+		auto empty_node = Nod{Metadata(Branch()), {}, Nod::RootStatus::IsInternal};
+		for (auto link_cbegin = merged.branch().links.cbegin(); link_cbegin != merged.branch().links.cend(); ++link_cbegin) {
+			if (*link_status_cbegin)
+				bpt.pager().place(*link_cbegin, empty_node.make_page());
+			++link_status_cbegin;
+		}
+
+		bpt.fix_sibling_links(merged, {0xABCD});
+
+		std::vector<Position> sibling_links;
+
+		std::vector<Position> parent_links{merged.branch().links};
+		for (const auto link : std::vector<Position>{
+		             branch_node_left.branch().links[17],
+		             branch_node_left.branch().links[38],
+		             branch_node_left.branch().links[46],
+		             branch_node_right.branch().links[27],
+		             branch_node_right.branch().links[36],
+		             branch_node_right.branch().links[78]}) {
+			parent_links.erase(std::find(parent_links.cbegin(), parent_links.cend(), link));
+		}
+		parent_links.push_back(0xABCD);
+		REQUIRE(std::equal(sibling_links.cbegin(), sibling_links.cend(), parent_links.cbegin()));
 	}
 }

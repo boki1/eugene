@@ -216,27 +216,29 @@ public:
 		Metadata m;
 		if (is_leaf()) {
 			auto l = Leaf();
-			merge_many(leaf().keys, other.leaf().keys, [&](const bool self_is_bigger, const std::size_t idx) {
-				if (self_is_bigger) {
-					l.keys.push_back(*(other.leaf().keys.cbegin() + idx));
-					l.vals.push_back(*(other.leaf().vals.cbegin() + idx));
-				} else {
+			merge_many(leaf().keys, other.leaf().keys, [&](const bool use_self, const std::size_t idx) {
+				if (use_self) {
+					fmt::print("Adding {}\n", *(leaf().keys.cbegin() + idx));
 					l.keys.push_back(*(leaf().keys.cbegin() + idx));
 					l.vals.push_back(*(leaf().vals.cbegin() + idx));
+				} else {
+					fmt::print("Adding {}\n", *(other.leaf().keys.cbegin() + idx));
+					l.keys.push_back(*(other.leaf().keys.cbegin() + idx));
+					l.vals.push_back(*(other.leaf().vals.cbegin() + idx));
 				}
 			});
 			m = l;
 		} else if (is_branch()) {
 			auto b = Branch();
-			merge_many(branch().refs, other.branch().refs, [&](const bool self_is_bigger, const std::size_t idx) {
-				if (self_is_bigger) {
-					b.refs.push_back(*(other.branch().refs.cbegin() + idx));
-					b.links.push_back(*(other.branch().links.cbegin() + idx));
-					b.link_status.push_back(*(other.branch().link_status.cbegin() + idx));
-				} else {
+			merge_many(branch().refs, other.branch().refs, [&](const bool use_self, const std::size_t idx) {
+				if (use_self) {
 					b.refs.push_back(*(branch().refs.cbegin() + idx));
 					b.links.push_back(*(branch().links.cbegin() + idx));
 					b.link_status.push_back(*(branch().link_status.cbegin() + idx));
+				} else {
+					b.refs.push_back(*(other.branch().refs.cbegin() + idx));
+					b.links.push_back(*(other.branch().links.cbegin() + idx));
+					b.link_status.push_back(*(other.branch().link_status.cbegin() + idx));
 				}
 			});
 			m = b;

@@ -68,8 +68,6 @@ template<typename T>
 constexpr std::vector<T> break_at_index(std::vector<T> &target, uint32_t pivot) {
 	assert(target.size() >= 2);
 
-//	fmt::print("Breaking target '{}' with pivot={} into ", fmt::join(target, ", "), pivot);
-
 	std::vector<T> second;
 	second.reserve(target.size() - pivot);
 
@@ -78,7 +76,6 @@ constexpr std::vector<T> break_at_index(std::vector<T> &target, uint32_t pivot) 
 	          std::back_inserter(second));
 	target.resize(pivot);
 
-//	fmt::print("'{}' and '{}'\n", fmt::join(target, ", "), fmt::join(second, ", "));
 	return second;
 }
 
@@ -95,36 +92,22 @@ template<typename T, typename V>
 	return std::find(collection.cbegin(), collection.cend(), item) != collection.cend();
 }
 
-/// Intertwines two collections iterating over each element in ascending order
-/// Requires that *first_begin <= *secnd_begin
-template<typename T, typename InputIt, typename InputItB>
-[[maybe_unused]] cppcoro::generator<T> intertwine_sorted_iterators(InputIt first_begin, const InputIt first_end, InputIt secnd_begin, const InputIt secnd_end) {
-	while (first_begin != first_end && secnd_begin != secnd_end)
-		if (*first_begin < *secnd_begin)
-			co_yield *first_begin++;
-		else
-			co_yield *secnd_begin++;
-	for (; secnd_begin != secnd_end; ++secnd_begin)
-		co_yield *secnd_begin;
-	for (; first_begin != first_end; ++first_begin)
-		co_yield *first_begin;
-}
-
 // Merge ranges based on fun
 [[maybe_unused]] void merge_many(std::ranges::range auto self, std::ranges::range auto diff, auto fun) {
 	auto self_begin = std::cbegin(self);
 	auto diff_begin = std::cbegin(diff);
 	while (self_begin < std::cend(self) && diff_begin < std::cend(diff)) {
-		const auto self_is_bigger = *self_begin > *diff_begin;
-		std::size_t idx = self_is_bigger
+		const auto use_self = *self_begin < *diff_begin;
+		fmt::print("{} < {} ??? {}\n", *self_begin, *diff_begin, use_self);
+		std::size_t idx = use_self
 		        ? std::distance(std::cbegin(self), self_begin++)
 		        : std::distance(std::cbegin(diff), diff_begin++);
-		fun(self_is_bigger, idx);
+		fun(use_self, idx);
 	}
-	while (self_begin < std::cend(self))
-		fun(true, std::distance(std::cbegin(self), self_begin++));
 	while (diff_begin < std::cend(diff))
 		fun(false, std::distance(std::cbegin(diff), diff_begin++));
+	while (self_begin < std::cend(self))
+		fun(true, std::distance(std::cbegin(self), self_begin++));
 }
 
 /// Pop and return the last element of a collection

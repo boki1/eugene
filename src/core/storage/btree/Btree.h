@@ -181,6 +181,42 @@ private:
 		return node.split(max_num_records_leaf(), bias);
 	}
 
+public:
+	void fix_sibling_links(std::variant<Nod, Position> node_or_position, std::optional<Position> next_ = {}) {
+		namespace rng = std::ranges;
+		auto node = [&] {
+			if (std::holds_alternative<Nod>(node_or_position))
+				return std::get<Nod>(node_or_position);
+			if (std::holds_alternative<Position>(node_or_position))
+				return Nod::from_page(m_pager->get(std::get<Position>(node_or_position)));
+			throw BadTreeAccess("node_or_position is neither node nor position");
+		}();
+		if (!node.is_branch())
+			return;
+
+		auto &br = node.branch();
+		auto link_cbegin = br.links.cbegin();
+		for (auto link_status_cbegin = br.link_status.cbegin(); std::distance(link_status_cbegin, br.link_status.cend()) > 1; ++link_status_cbegin) {
+			if (*link_status_cbegin == LinkStatus::Valid) {
+				auto curr_child = Nod::from_page(m_pager->get(*link_cbegin));
+				auto maybe_curr_child_sibling_pos = [&]() -> std::optional<Position> {
+					const std::size_t idx = std::find(br.link_status.cbegin(), br.link_status.cend(), LinkStatus::Valid) - br.link_status.cbegin();
+					if (idx < br.link_status.size())
+						return {br.links.at(idx)};
+					if (next_)
+						return {*next_};
+					return std::nullopt;
+				}();
+				if (maybe_curr_child_sibling_pos)
+					curr_child.set_next_node(*maybe_curr_child_sibling_pos);
+				else
+					break;
+				++link_cbegin;
+			}
+		}
+	}
+
+private:
 	/// Tree search logic
 	/// Given a node, traverse it searching for a 'target_key' in the leaves below it. During the top-down traversal
 	/// keep track of the visited nodes using a 'TreePath' instance. The return value contains the node where the
@@ -387,6 +423,8 @@ private:
 				auto biggest_in_instree = instree.tree.get_corner_subtree_at_height(instree.tree.root(), CornerDetail::MAX, height);
 				p = p.fuse_with(smallest_in_instree);
 				right_sibling_of_p = biggest_in_instree.fuse_with(right_sibling_of_p);
+				fix_sibling_links({right_sibling_of_p_pos});
+				fix_sibling_links(right_sibling_of_p);
 
 				m_pager->place(right_sibling_of_p_pos, right_sibling_of_p.make_page());
 				m_pager->place(ppos, p.make_page());
@@ -756,6 +794,9 @@ public:
 	/// Get limits of the size of branch nodes (branch contain [min; max] entries)
 	[[nodiscard]] long min_num_records_branch() const noexcept { return (m_num_records_branch + 1) / 2; }
 	[[nodiscard]] long max_num_records_branch() const noexcept { return m_num_records_branch; }
+
+	/// Get the internal pager
+	[[nodiscard]] PagerType &pager() noexcept { return *m_pager.get(); }
 
 	///
 	/// Operations API

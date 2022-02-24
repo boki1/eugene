@@ -251,8 +251,8 @@ TEST_CASE("Fuse nodes", "[btree]") {
 		std::vector<Position> branch_links_right(BRANCH_NUM + 1);
 		std::iota(branch_links_right.begin(), branch_links_right.end(), static_cast<Position>(0ul));
 
-		auto branch_node_left = Nod{Metadata(n_random_items<int>(BRANCH_NUM), std::move(branch_links_left), std::vector<LinkStatus>(BRANCH_NUM + 1, LinkStatus::Valid)), {}, Nod::RootStatus::IsInternal};
-		auto branch_node_right = Nod{Metadata(n_random_items<int>(BRANCH_NUM), std::move(branch_links_right), std::vector<LinkStatus>(BRANCH_NUM + 1, LinkStatus::Valid)), {}, Nod::RootStatus::IsInternal};
+		auto branch_node_left = Nod{Metadata(Branch(n_random_items<int>(BRANCH_NUM), std::move(branch_links_left), std::vector<LinkStatus>(BRANCH_NUM + 1, LinkStatus::Valid))), {}, Nod::RootStatus::IsInternal};
+		auto branch_node_right=Nod{Metadata(Branch(n_random_items<int>(BRANCH_NUM), std::move(branch_links_right), std::vector<LinkStatus>(BRANCH_NUM + 1, LinkStatus::Valid))), {}, Nod::RootStatus::IsInternal};
 
 		std::sort(branch_node_left.branch().refs.begin(), branch_node_left.branch().refs.end());
 		std::sort(branch_node_right.branch().refs.begin(), branch_node_right.branch().refs.end());
