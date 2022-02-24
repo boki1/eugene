@@ -258,13 +258,12 @@ private:
 	enum class CornerDetail { MIN,
 		                  MAX };
 
-	const static auto LEAF_LEVEL_HEIGHT = 1ul;
+	const static auto LEAF_LEVEL_HEIGHT = 0ul;
 
 	[[nodiscard]] Nod get_corner_subtree_at_height(const Nod &node_, CornerDetail corner, size_t height = LEAF_LEVEL_HEIGHT) {
-		auto inner = [curr_height = depth(), height, corner, this](const Nod &node) mutable {
-			if (node.is_leaf() || curr_height-- <= height)
-				return node;
-
+		auto curr_height = depth() - 1;
+		auto node = node_;
+		while (!(node.is_leaf() || curr_height-- <= height)) {
 			const auto &link_status = node.branch().link_status;
 			const std::size_t index = [&] {
 				if (corner == CornerDetail::MAX)
@@ -275,10 +274,9 @@ private:
 			if (index >= link_status.size() || link_status[index] != LinkStatus::Valid)
 				throw BadTreeSearch(fmt::format(" - no valid link in node marked as branch\n"));
 			const Position pos = node.branch().links[index];
-			return get_corner_subtree(Nod::from_page(m_pager->get(pos)), corner);
-		};
-
-		return inner(node_);
+			node = Nod::from_page(m_pager->get(pos));
+		}
+		return node;
 	}
 
 	[[nodiscard]] Nod get_corner_subtree(const Nod &node, CornerDetail corner) {
@@ -293,7 +291,8 @@ private:
 
 	/// Flag denoting whether to make an initial root, or to make it from the existing one.
 	enum class MakeRootAction { BareInit,
-		                    NewTreeLevel };
+		                    NewTreeLevel,
+		                    DuringBulkRebalancing };
 
 	Nod make_root(MakeRootAction action) {
 		auto new_pos = m_pager->alloc();
@@ -367,19 +366,40 @@ private:
 
 	void rebalance_after_bulk_insert(std::vector<InsertionTree<Key>> &insertion_trees) {
 		// No rebalancing has to be performed, since we are not added any auxiliary nodes
-		for (auto &instree : std::views::filter(insertion_trees, [](auto &instree) { return instree.tree.depth() > 1; })) {
-			const auto path_to_instree_root = instree.path.top();
-			instree.path.pop();
-			auto p = Nod::from_page(m_pager->get(instree.path.top().node_pos));
+		for (auto &instree : std::views::filter(insertion_trees, [](auto &instree) {
+			     // We do not perform rebalancing on insertion trees with max depth = 1, since not additional nodes are emplaced
+			     // and insertion trees whose root element has no parent- this means that the bulk is placed in an initially empty
+			     // (or almost empty) tree.
+			     return instree.tree.depth() > 1 && instree.path.size() > 1;
+		     })) {
+			const PosNod path_to_instree_root = consume_back<PosNod, TreePath>(instree.path);
+			const PosNod path_to_p = consume_back<PosNod, TreePath>(instree.path);
+			auto ppos = path_to_p.node_pos;
+			auto p = Nod::from_page(m_pager->get(ppos));
 
-			for (auto height = 1ul; height <= instree.tree.depth(); ++height) {
-				/// Deref safety: We already fetched its parent
-				auto [midkey, right_sibling_of_p] = p.split(*path_to_instree_root.idx_in_parent, SplitBias::TakeLiterally);
+			for (auto height = 1ul; height < instree.tree.depth() - 1; ++height) {
+				/// Deref safety: We already filtered insertion trees without parents and fetched this insertion tree's parent
+				auto [_, right_sibling_of_p] = p.split(*path_to_instree_root.idx_in_parent, SplitBias::TakeLiterally, SplitType::ExplodeOnly);
+				auto right_sibling_of_p_pos = m_pager->alloc();
+				p.set_next_node(right_sibling_of_p_pos);
 
 				auto smallest_in_instree = instree.tree.get_corner_subtree_at_height(instree.tree.root(), CornerDetail::MIN, height);
 				auto biggest_in_instree = instree.tree.get_corner_subtree_at_height(instree.tree.root(), CornerDetail::MAX, height);
-				p.fuse_with(smallest_in_instree);
-				right_sibling_of_p.fuse_with(biggest_in_instree);
+				p = p.fuse_with(smallest_in_instree);
+				right_sibling_of_p = biggest_in_instree.fuse_with(right_sibling_of_p);
+
+				m_pager->place(right_sibling_of_p_pos, right_sibling_of_p.make_page());
+				m_pager->place(ppos, p.make_page());
+
+				if (instree.path.empty()) {
+					auto new_p = make_root(MakeRootAction::NewTreeLevel);
+				} else {
+					const auto new_p_pos = instree.path.top().node_pos;
+					auto new_p = Nod::from_page(m_pager->get(new_p_pos));
+					// insert and rebalance there.
+				}
+
+				instree.path.push(path_to_p);
 			}
 		}
 	}
@@ -768,7 +788,7 @@ public:
 			return {};
 
 		auto &&[insertion_marks, insertion_trees] = place_kv_entries(bulk);
-		//		rebalance_after_bulk_insert(insertion_trees);
+		rebalance_after_bulk_insert(insertion_trees);
 
 		return insertion_marks;
 	}

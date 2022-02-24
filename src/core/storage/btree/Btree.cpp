@@ -225,6 +225,7 @@ TEST_CASE("Btree operations", "[btree]") {
 }
 
 TEST_CASE("Btree bulk insertion", "[btree]") {
+#if 0
 	SECTION("Empty tree") {
 		fs::create_directories("/tmp/eugene-tests/btree-bulk-insertion");
 		Btree<Tree23> bpt("/tmp/eugene-tests/btree-bulk-insertion/insert-many-empty");
@@ -243,7 +244,7 @@ TEST_CASE("Btree bulk insertion", "[btree]") {
 
 		util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-bulk-insertion/insert-many-empty-printed"}();
 	}
-
+#endif
 	SECTION("Simple bulk insertion without rebalancing") {
 		auto e = [](const auto &k) { return Btree<Tree23>::Entry{.key = k, .val = k}; };
 
@@ -254,6 +255,7 @@ TEST_CASE("Btree bulk insertion", "[btree]") {
 
 		for (const auto &entry : std::vector<Btree<Tree23>::Entry>{e(7), e(8), e(10), e(28), e(31), e(48), e(50), e(51), e(13), e(15), e(16), e(17), e(18), e(19), e(20), e(23), e(32), e(35), e(36), e(37), e(38), e(39), e(40), e(41)})
 			REQUIRE(bpt.get(entry.key).value() == entry.val);
+		util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-bulk-insertion/insert-many-without-rebalancing-printed"}();
 	}
 }
 
