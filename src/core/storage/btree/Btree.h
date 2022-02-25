@@ -296,9 +296,10 @@ private:
 
 	const static auto LEAF_LEVEL_HEIGHT = 0ul;
 
-	[[nodiscard]] Nod get_corner_subtree_at_height(const Nod &node_, CornerDetail corner, size_t height = LEAF_LEVEL_HEIGHT) {
+	[[nodiscard]] std::pair<Nod, Position> get_corner_subtree_at_height(const Nod &node_, CornerDetail corner, size_t height = LEAF_LEVEL_HEIGHT) {
 		auto curr_height = depth() - 1;
 		auto node = node_;
+		Position node_pos;
 		while (!(node.is_leaf() || curr_height-- <= height)) {
 			const auto &link_status = node.branch().link_status;
 			const std::size_t index = [&] {
@@ -309,14 +310,14 @@ private:
 			}();
 			if (index >= link_status.size() || link_status[index] != LinkStatus::Valid)
 				throw BadTreeSearch(fmt::format(" - no valid link in node marked as branch\n"));
-			const Position pos = node.branch().links[index];
-			node = Nod::from_page(m_pager->get(pos));
+			node_pos = node.branch().links[index];
+			node = Nod::from_page(m_pager->get(node_pos));
 		}
-		return node;
+		return {std::move(node), node_pos};
 	}
 
 	[[nodiscard]] Nod get_corner_subtree(const Nod &node, CornerDetail corner) {
-		return get_corner_subtree_at_height(node, corner);
+		return get_corner_subtree_at_height(node, corner).first;
 	}
 
 	/// Make tree root
@@ -409,35 +410,95 @@ private:
 			     return instree.tree.depth() > 1 && instree.path.size() > 1;
 		     })) {
 			const PosNod path_to_instree_root = consume_back<PosNod, TreePath>(instree.path);
+			auto instree_root = Nod::from_page(m_pager->get(path_to_instree_root.node_pos));
+			fmt::print("path_to_instree_root = {}\n", path_to_instree_root.node_pos);
+			if (instree_root.is_branch())
+			fmt::print("[ {} ]\n", fmt::join(instree_root.branch().refs, ", "));
+			else
+			fmt::print("[ {} ]\n", fmt::join(instree_root.leaf().keys, ", "));
 			const PosNod path_to_p = consume_back<PosNod, TreePath>(instree.path);
 			auto ppos = path_to_p.node_pos;
 			auto p = Nod::from_page(m_pager->get(ppos));
+			fmt::print("Starting SBR for tree rooted just below @{}\n", ppos);
 
 			for (auto height = 1ul; height < instree.tree.depth() - 1; ++height) {
 				/// Deref safety: We already filtered insertion trees without parents and fetched this insertion tree's parent
-				auto [_, right_sibling_of_p] = p.split(*path_to_instree_root.idx_in_parent, SplitBias::TakeLiterally, SplitType::ExplodeOnly);
+				const auto idx = std::min(*path_to_instree_root.idx_in_parent - 1, 0ul);
+				auto [_, right_sibling_of_p] = p.split(idx, SplitBias::TakeLiterally, SplitType::ExplodeOnly);
 				auto right_sibling_of_p_pos = m_pager->alloc();
 				p.set_next_node(right_sibling_of_p_pos);
 
-				auto smallest_in_instree = instree.tree.get_corner_subtree_at_height(instree.tree.root(), CornerDetail::MIN, height);
-				auto biggest_in_instree = instree.tree.get_corner_subtree_at_height(instree.tree.root(), CornerDetail::MAX, height);
+				// FIXME: This is questionable
+				// Removes the insertion tree link from its parent 'p'
+				right_sibling_of_p.branch().links.erase(right_sibling_of_p.branch().links.cbegin());
+
+				auto [smallest_in_instree, smallest_in_instree_pos] = instree.tree.get_corner_subtree_at_height(instree.tree.root(), CornerDetail::MIN, height);
+				auto [biggest_in_instree, biggest_in_instree_pos] = instree.tree.get_corner_subtree_at_height(instree.tree.root(), CornerDetail::MAX, height);
 				p = p.fuse_with(smallest_in_instree);
 				right_sibling_of_p = biggest_in_instree.fuse_with(right_sibling_of_p);
+
 				fix_sibling_links({right_sibling_of_p_pos});
 				fix_sibling_links(right_sibling_of_p);
 
-				m_pager->place(right_sibling_of_p_pos, right_sibling_of_p.make_page());
-				m_pager->place(ppos, p.make_page());
-
-				if (instree.path.empty()) {
-					auto new_p = make_root(MakeRootAction::NewTreeLevel);
-				} else {
-					const auto new_p_pos = instree.path.top().node_pos;
-					auto new_p = Nod::from_page(m_pager->get(new_p_pos));
-					// insert and rebalance there.
+#define DEBUG
+#if defined(DEBUG)
+				fmt::print("Nodes children of node [ {} ], @{}:\n", fmt::join(p.branch().refs, ", "), ppos);
+				for (const auto link : p.branch().links) {
+					[[maybe_unused]] auto nod = Nod::from_page(m_pager->get(link));
+					if (nod.is_branch())
+						fmt::print("Node [ {} ], @{}:\n", fmt::join(nod.branch().refs, ", "), link);
+					else if (nod.is_leaf())
+						fmt::print("Node [ {} ], @{}:\n", fmt::join(nod.leaf().keys, ", "), link);
 				}
 
-				instree.path.push(path_to_p);
+				fmt::print("\n");
+				fmt::print("Nodes children of node [ {} ], @{}:\n", fmt::join(right_sibling_of_p.branch().refs, ", "), ppos);
+				for (const auto link : right_sibling_of_p.branch().links) {
+					[[maybe_unused]] auto nod = Nod::from_page(m_pager->get(link));
+					if (nod.is_branch())
+						fmt::print("Node [ {} ], @{}:\n", fmt::join(nod.branch().refs, ", "), link);
+					else if (nod.is_leaf())
+						fmt::print("Node [ {} ], @{}:\n", fmt::join(nod.leaf().keys, ", "), link);
+				}
+				fmt::print("---------\n");
+#endif
+
+				auto &l = instree_root.branch().links;
+				fmt::print("after level-linking: instree_root.branch().refs = [ {} ]\n", fmt::join(instree_root.branch().refs, ", "));
+				fmt::print("before removal of ql and qr\n");
+				for (const auto link : l){
+					[[maybe_unused]] auto nod = Nod::from_page(m_pager->get(link));
+					if (nod.is_branch())
+						fmt::print("  Node [ {} ], @{}:\n", fmt::join(nod.branch().refs, ", "), link);
+					else if (nod.is_leaf())
+						fmt::print("  Node [ {} ], @{}:\n", fmt::join(nod.leaf().keys, ", "), link);
+				}
+
+				if (auto fr = std::find(l.cbegin(), l.cend(), smallest_in_instree_pos); fr != l.cend())
+					l.erase(fr);
+				if (auto fr = std::find(l.cbegin(), l.cend(), biggest_in_instree_pos); fr != l.cend())
+					l.erase(fr);
+				fmt::print("after removal of ql and qr\n");
+				for (const auto link : l){
+					[[maybe_unused]] auto nod = Nod::from_page(m_pager->get(link));
+					if (nod.is_branch())
+						fmt::print("  Node [ {} ], @{}:\n", fmt::join(nod.branch().refs, ", "), link);
+					else if (nod.is_leaf())
+						fmt::print("  Node [ {} ], @{}:\n", fmt::join(nod.leaf().keys, ", "), link);
+				}
+
+				l.push_back(ppos);
+				l.push_back(right_sibling_of_p_pos);
+
+				if (p.is_root()) {
+					p.set_root_status(Nod::RootStatus::IsInternal);
+					m_rootpos = path_to_instree_root.node_pos;
+					instree_root.set_root_status(Nod::RootStatus::IsRoot);
+				}
+
+				m_pager->place(right_sibling_of_p_pos, right_sibling_of_p.make_page());
+				m_pager->place(ppos, p.make_page());
+				m_pager->place(path_to_instree_root.node_pos, instree_root.make_page());
 			}
 		}
 	}
@@ -662,8 +723,7 @@ private:
 
 		for (auto simple_bulk_cbegin = rng::cbegin(bulk); simple_bulk_cbegin != rng::cend(bulk);) {
 			auto search_result = search(simple_bulk_cbegin->key);
-			PosNod path_to_leaf = search_result.path.top();
-			search_result.path.pop();
+			PosNod path_to_leaf = consume_back<PosNod>(search_result.path);
 			std::optional<Position> parent_pos = search_result.path.empty() ? std::nullopt : std::make_optional(search_result.path.top().node_pos);
 
 			const auto leaf_vals_cbegin = search_result.node.leaf().vals.cbegin();
@@ -704,10 +764,20 @@ private:
 			        .leaf_pos = path_to_leaf.node_pos});
 			auto &insertion_tree = insertion_trees.back();
 
-			rng::for_each(iterate_over_simple_bulk(), [&insertion_tree, &insertion_marks](const auto &entry) {
+			rng::for_each(iterate_over_simple_bulk(), [&insertion_tree, &insertion_marks, this](const auto &entry) {
 				fmt::print("entry.key = {}\n", entry.key);
+				[[maybe_unused]] auto instree_root_node = Nod::from_page(m_pager->get(insertion_tree.tree.rootpos()));
+				if (instree_root_node.is_branch())
+				fmt::print("#1 In 'simple bulk insertion: instree root is branch :[ {} ] @{}\n", fmt::join(instree_root_node.branch().refs, ", "), insertion_tree.tree.rootpos());
+				else
+				fmt::print("#1 In 'simple bulk insertion: instree root is leaf : [ {} ] @{}\n", fmt::join(instree_root_node.leaf().keys, ", "), insertion_tree.tree.rootpos());
 				insertion_marks[entry.key] = insertion_tree.tree.place_kv_entry(typename Nod::Entry{.key = entry.key, .val = entry.val}, ActionOnKeyPresent::AbandonChange, SplitBias::LeanLeft);
 			});
+				[[maybe_unused]] auto instree_root_node = Nod::from_page(m_pager->get(insertion_tree.tree.rootpos()));
+				if (instree_root_node.is_branch())
+				fmt::print("#1 In 'simple bulk insertion: instree root is branch :[ {} ] @{}\n", fmt::join(instree_root_node.branch().refs, ", "), insertion_tree.tree.rootpos());
+				else
+				fmt::print("#1 In 'simple bulk insertion: instree root is leaf : [ {} ] @{}\n", fmt::join(instree_root_node.leaf().keys, ", "), insertion_tree.tree.rootpos());
 
 			/// Replace leaf with insertion tree root
 			auto pos = [&] {
@@ -734,12 +804,15 @@ private:
 				return (insertion_tree.leaf_pos = new_pos);
 			}();
 
+			fmt::print("#2 In 'simple bulk insertion: instree root is [ {} ] @{}\n", fmt::join(insertion_tree.tree.root().branch().refs, ", "), pos);
 			m_pager->place(pos, insertion_tree.tree.root().make_page());
 
 			// Update current position in simple bulk
 			simple_bulk_cbegin = simple_bulk_cend;
 
 			// Return the last record of the path since it was popped earlier.
+			// However, update its nodepos to the current 'rootpos()' of the insertion tree.
+			path_to_leaf.node_pos = insertion_tree.tree.rootpos();
 			insertion_tree.path.push(path_to_leaf);
 		}
 

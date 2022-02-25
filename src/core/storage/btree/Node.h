@@ -212,7 +212,7 @@ public:
 	/// Create a new node which is a combination of *this and other.
 	/// The created node is returned as a result and is guaranteed to be a valid node, which conforms to the
 	/// btree requirements for a node.
-	[[maybe_unused]] constexpr Nod fuse_with(const Node &other) const {
+	[[maybe_unused]] constexpr Nod fuse_with(const Node &other) {
 		Metadata m;
 		if (is_leaf()) {
 			auto l = Leaf();
@@ -235,12 +235,25 @@ public:
 					b.refs.push_back(*(branch().refs.cbegin() + idx));
 					b.links.push_back(*(branch().links.cbegin() + idx));
 					b.link_status.push_back(*(branch().link_status.cbegin() + idx));
+					fmt::print("Adding {} and link to @{}\n", b.refs.back(), b.links.back());
+					if (idx == branch().refs.size() - 1 && branch().links.size() > branch().refs.size()) {
+						fmt::print("Last ref, adding right link and link to @{}\n", branch().links.back());
+						b.links.push_back(branch().links.back());
+						b.link_status.push_back(branch().link_status.back());
+					}
 				} else {
 					b.refs.push_back(*(other.branch().refs.cbegin() + idx));
 					b.links.push_back(*(other.branch().links.cbegin() + idx));
 					b.link_status.push_back(*(other.branch().link_status.cbegin() + idx));
+					fmt::print("Adding {} and link to @{}\n", b.refs.back(), b.links.back());
+					if (idx == other.branch().refs.size() - 1 && other.branch().links.size() > other.branch().refs.size()) {
+						fmt::print("Last ref, adding right link and link to @{}\n", other.branch().links.back());
+						b.links.push_back(other.branch().links.back());
+						b.link_status.push_back(other.branch().link_status.back());
+					}
 				}
 			});
+
 			m = b;
 		}
 		return Nod(std::move(m), 0, m_is_root ? RootStatus::IsRoot : RootStatus::IsInternal);
