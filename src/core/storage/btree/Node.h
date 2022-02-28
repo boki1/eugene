@@ -17,14 +17,14 @@
 #include <nop/utility/buffer_writer.h>
 #include <nop/utility/die.h>
 
+#include <core/Config.h>
 #include <core/storage/Pager.h>
-#include <core/storage/btree/Config.h>
 
 #include <fmt/core.h>
 
 namespace internal::storage::btree {
 
-template<BtreeConfig Config>
+template<EugeneConfig _>
 class Btree;
 
 struct BadTreeAccess : std::runtime_error {
@@ -54,7 +54,7 @@ enum class SplitBias { LeanLeft,
 enum class SplitType { ExplodeOnly,
 	               ExcludeMid };
 
-template<BtreeConfig Config = DefaultConfig>
+template<EugeneConfig Config = Config>
 class Node {
 	friend Btree<Config>;
 

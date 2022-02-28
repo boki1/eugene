@@ -28,8 +28,7 @@ set(LibEugeneBtree_SRC
         storage/btree/Btree.cpp
         storage/btree/BenchBtree.cpp
         storage/btree/Node.h
-        storage/btree/BtreePrinter.h
-        storage/btree/Config.h)
+        storage/btree/BtreePrinter.h)
 
 set(LibEugenePager_SRC
         storage/Pager.h
@@ -41,7 +40,7 @@ set(LibEugeneCompression_SRC
         storage/compression/Compression.cpp)
 
 set(LibEugeneCore_SRC
-        Util.h Util.cpp SizeMetrics.h Logger.h
+        Config.h Util.h Util.cpp SizeMetrics.h Logger.h
         ${LibEugeneBtree_SRC}
         ${LibEugenePager_SRC}
         ${LibEugeneCompression_SRC})

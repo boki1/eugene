@@ -7,9 +7,9 @@
 #include <utility>
 #include <vector>
 
+#include <core/Config.h>
 #include <core/storage/Pager.h>
 #include <core/storage/btree/Btree.h>
-#include <core/storage/btree/Config.h>
 #include <core/storage/btree/Node.h>
 
 namespace internal::storage::btree::util {
@@ -29,7 +29,7 @@ static std::string join(const Collection &collection, std::string_view delim) {
 	return ss.str();
 }
 
-template<BtreeConfig Config>
+template<EugeneConfig Config>
 class BtreePrinter {
 	using Bt = Btree<Config>;
 	using Nod = Node<Config>;

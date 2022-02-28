@@ -28,15 +28,26 @@
 #include <nop/utility/stream_reader.h>
 #include <nop/utility/stream_writer.h>
 
+#include <core/Config.h>
 #include <core/Util.h>
 #include <core/storage/Pager.h>
-#include <core/storage/btree/Config.h>
 #include <core/storage/btree/Node.h>
+
+/// Define configuration for a Btree of order m.
+/// Used primarily in unit tests as of now, but it may come in handy in other situtations too.
+/// Simple example usage:
+///
+/// class MyConfig : Config {
+///     BTREE_OF_ORDER(3);
+/// };
+#define BTREE_OF_ORDER(m)\
+	static inline constexpr int BRANCHING_FACTOR_LEAF = (m);\
+	static inline constexpr int BRANCHING_FACTOR_BRANCH = (m)
 
 namespace internal::storage::btree {
 
 namespace util {
-template<BtreeConfig Config = DefaultConfig>
+template<EugeneConfig Config = Config>
 class BtreePrinter;
 }
 
@@ -66,7 +77,7 @@ enum class ActionOnConstruction : std::uint8_t {
 enum class ActionOnKeyPresent { SubmitChange,
 	                        AbandonChange };
 
-template<BtreeConfig Config = DefaultConfig>
+template<EugeneConfig Config = Config>
 class Btree {
 	using Key = typename Config::Key;
 	using Val = typename Config::Val;

@@ -16,8 +16,8 @@ namespace fs = std::filesystem;
 using namespace internal;
 using namespace internal::storage::btree;
 using internal::storage::Position;
-using Bt = Btree<DefaultConfig>;
-using Nod = Node<DefaultConfig>;
+using Bt = Btree<Config>;
+using Nod = Node<Config>;
 using Metadata = Nod::Metadata;
 using Branch = Nod::Branch;
 using Leaf = Nod::Leaf;
@@ -26,7 +26,7 @@ using Leaf = Nod::Leaf;
 /// Various tree configuration used in the tests below
 ///
 
-struct SmallstrToPerson : DefaultConfig {
+struct SmallstrToPerson : Config {
 	using Key = smallstr;
 	using Val = person;
 	using Ref = smallstr;
@@ -36,11 +36,11 @@ struct SmallstrToPerson : DefaultConfig {
 };
 
 /// 2-3 tree: https://en.wikipedia.org/wiki/2-3_tree
-struct Tree23 : DefaultConfig {
+struct Tree23 : Config {
 	BTREE_OF_ORDER(4);
 };
 
-struct DoubleToLong : DefaultConfig {
+struct DoubleToLong : Config {
 	using Key = double;
 	using Val = long;
 	using Ref = double;
@@ -50,7 +50,7 @@ struct DoubleToLong : DefaultConfig {
 /// Utility functions
 ///
 
-template<BtreeConfig Config>
+template<EugeneConfig Config>
 auto fill_tree_with_random_items(Btree<Config> &bpt, const std::size_t limit = 1000) {
 	using Key = typename Config::Key;
 	using Val = typename Config::Val;
@@ -72,7 +72,7 @@ auto fill_tree_with_random_items(Btree<Config> &bpt, const std::size_t limit = 1
 	return backup;
 }
 
-template<BtreeConfig Config>
+template<EugeneConfig Config>
 void check_for_tree_backup_mismatch(Btree<Config> &bpt, const std::map<typename Config::Key, typename Config::Val> &backup) {
 	REQUIRE(bpt.size() == backup.size());
 	[[maybe_unused]] std::size_t i = 1;
@@ -265,7 +265,7 @@ TEST_CASE("Btree persistence", "[btree]") {
 	fs::create_directories("/tmp/eugene-tests/btree-persistence");
 
 	SECTION("Loading and recovery") {
-		std::map<typename DefaultConfig::Key, typename DefaultConfig::Val> backup;
+		std::map<typename Config::Key, typename Config::Val> backup;
 		Position rootpos;
 		{
 			if constexpr (NDEBUG)
@@ -362,7 +362,7 @@ TEST_CASE("Btree utils") {
 	static constexpr auto BRANCH_NUM = 100;
 
 	SECTION("Node associated") {
-		Btree<DefaultConfig> bpt{"/tmp/eugene-tests/btree-utils/node-associated"};
+		Btree<Config> bpt{"/tmp/eugene-tests/btree-utils/node-associated"};
 
 		std::vector<Position> branch_links_left(BRANCH_NUM + 1);
 		std::generate(branch_links_left.begin(), branch_links_left.end(), [&] { return bpt.pager().alloc(); });
