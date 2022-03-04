@@ -12,10 +12,13 @@ add_compile_options(
         -Werror
         -pedantic
         -ggdb3
+		-Wfatal-errors
         -fdiagnostics-color)
 
 enable_testing()
 include(FetchContent)
+
+add_compile_definitions(NDEBUG="true")
 
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup(TARGETS)
@@ -29,16 +32,12 @@ set(LibEugeneBtree_SRC
         storage/btree/Config.h)
 
 set(LibEugenePager_SRC
-        storage/Position.h
-        storage/PageCache.h
-        storage/PageCache.cpp
-        storage/Page.h
-        storage/Page.cpp)
+        storage/Pager.h
+        storage/Pager.cpp)
 
 set(LibEugeneCompression_SRC
         storage/compression/Compressor.h
-        storage/compression/Decompressor.h
-        storage/compression/Compression.cpp)
+        storage/compression/Decompressor.h)
 
 set(LibEugeneCore_SRC
         Util.h Util.cpp SizeMetrics.h Logger.h
@@ -56,9 +55,7 @@ target_link_libraries(LibEugeneCore
         CONAN_PKG::catch2
         CONAN_PKG::spdlog
         CONAN_PKG::libnop
-        CONAN_PKG::benchmark
-        CONAN_PKG::catch2
-        CONAN_PKG::cppbenchmark)
+        CONAN_PKG::catch2)
 
 if (DEFINED EU_BUILD_TESTS)
 	message(STATUS "EU_BUILD_TESTS = " ${EU_BUILD_TESTS})

@@ -7,8 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include <core/storage/PageCache.h>
-#include <core/storage/Position.h>
+#include <core/storage/Pager.h>
 #include <core/storage/btree/Btree.h>
 #include <core/storage/btree/Config.h>
 #include <core/storage/btree/Node.h>
@@ -17,9 +16,13 @@ namespace internal::storage::btree::util {
 
 template<typename Collection>
 static std::string join(const Collection& collection, std::string_view delim) {
-	std::stringstream ss;
 	auto begin = std::cbegin(collection);
 	const auto end = std::cend(collection);
+    if (begin == end) {
+        return "";
+	}
+
+	std::stringstream ss;
 	while (begin < end - 1)
 		ss << *begin++ << delim;
 	ss << *begin;
@@ -32,7 +35,7 @@ class BtreePrinter {
 	using Nod = Node<Config>;
 
 public:
-	explicit BtreePrinter(const Bt &bt, std::string_view ofname = "/tmp/bpt_view")
+	explicit BtreePrinter(Bt &bt, std::string_view ofname = "/tmp/bpt_view")
 	    : m_ofname{ofname},
 	      m_btree{bt},
 	      m_out{m_ofname, std::ios::out | std::ios::trunc} {}
@@ -40,7 +43,7 @@ public:
 	void operator()() noexcept { print(); }
 
 	Nod node_at(Position pos) {
-		return Nod::from_page(m_btree.m_pgcache.get_page(pos));
+		return Nod::from_page(m_btree.m_pager.get(pos));
 	}
 
 	void print_node(const Nod node, unsigned level = 1) noexcept {
@@ -56,13 +59,17 @@ public:
 		}
 
 		m_out << '[' << join(node.branch().m_refs, ", ") << "]\n";
-		m_out << indentation << (level > 1 ? "  " : "") << "children: \n";
-		for (const auto pos : node.branch().m_links)
-			print_node(node_at(pos), level + 1);
+		m_out << indentation << (level > 1 ? "  " : "") << "children:\n";
+		for (std::size_t i = 0; i < node.branch().m_links.size(); ++i)
+			if (node.branch().m_link_status[i] == LinkStatus::Inval)
+				fmt::print("- Empty\n");
+			else
+				print_node(node_at(node.branch().m_links[i]), level + 1);
 	}
 
 	void print() noexcept {
-		m_out << "keys_per_block: " << m_btree.num_records_leaf() << '\n';
+		m_out << "keys-in-leaves: [" << m_btree.min_num_records_leaf() << "; " << m_btree.max_num_records_leaf() << "]\n";
+		m_out << "keys-in-branches: [" << m_btree.min_num_records_branch() << "; " << m_btree.max_num_records_branch() << "]\n";
 		m_out << "tree:\n";
 
 		print_node(node_at(m_btree.rootpos()));
@@ -70,7 +77,7 @@ public:
 
 private:
 	std::string m_ofname;
-	const Bt &m_btree;
+	Bt &m_btree;
 	std::ofstream m_out;
 };
 
