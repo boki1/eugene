@@ -1,13 +1,14 @@
 [requires]
-catch2/2.13.7
 fmt/8.0.1
-spdlog/1.9.2
 ms-gsl/3.1.0
+catch2/2.13.7
+spdlog/1.9.2
 libnop/cci.20200728
-cppbenchmark/cci.20201029
+andreasbuhr-cppcoro/cci.20210113
 benchmark/1.6.0
 andreasbuhr-cppcoro/cci.20210113
 cppitertools/2.1
+
 
 [generators]
 cmake

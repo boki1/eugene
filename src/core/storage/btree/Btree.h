@@ -11,7 +11,6 @@
 #include <stack>
 #include <stdexcept>
 #include <utility>
-#include <variant>
 
 #include <fmt/core.h>
 #include <fmt/ranges.h>
