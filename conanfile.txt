@@ -6,6 +6,8 @@ spdlog/1.9.2
 libnop/cci.20200728
 andreasbuhr-cppcoro/cci.20210113
 benchmark/1.6.0
+andreasbuhr-cppcoro/cci.20210113
+cppitertools/2.1
 
 
 [generators]

@@ -2,15 +2,11 @@
 
 #include <benchmark/benchmark.h>
 
+#include <core/Util.h>
 #include <core/storage/btree/Btree.h>
-using namespace internal::storage::btree;
 
-auto item() {
-	static std::random_device dev;
-	static std::mt19937 rng(dev());
-	static std::uniform_int_distribution<std::mt19937::result_type> dist(1, 10000000);
-	return dist(rng);
-}
+using namespace internal::storage::btree;
+using namespace internal;
 
 static void BM_BtreeInsertion(benchmark::State &state) {
 	Btree bpt("/tmp/eu-btree-bench");
@@ -19,7 +15,7 @@ static void BM_BtreeInsertion(benchmark::State &state) {
 	for (auto i : state) {
 		(void) i;
 		for (std::size_t j = 0; j < num_insertions; ++j) {
-			bpt.put(item(), item());
+			bpt.insert(random_item<DefaultConfig::Key>(), random_item<DefaultConfig::Key>());
 		}
 	}
 }

@@ -1,317 +1,321 @@
+#include <filesystem>
 #include <map>
-#include <random>
+#include <ranges>
 #include <string>
+#include <variant>
 #include <vector>
 
-#include <catch2/catch.hpp>
-#include <fmt/core.h>
-#include <fmt/format.h>
-#include <nop/structure.h>
+namespace fs = std::filesystem;
 
+#include <catch2/catch.hpp>
+
+#include <core/Util.h>
 #include <core/storage/btree/Btree.h>
 #include <core/storage/btree/BtreePrinter.h>
 
+using namespace internal;
 using namespace internal::storage::btree;
 using internal::storage::Position;
+using Bt = Btree<DefaultConfig>;
 
-#undef EU_PRINTING_TESTS
+///
+/// Various tree configuration used in the tests below
+///
 
-template<typename T>
-T item();
+struct SmallstrToPerson : DefaultConfig {
+	using Key = smallstr;
+	using Val = person;
+	using Ref = smallstr;
 
-template<>
-int item<int>() {
-	static std::random_device dev;
-	static std::mt19937 rng(dev());
-	static std::uniform_int_distribution<std::mt19937::result_type> dist(1, 10000000);
-	return dist(rng);
-}
+	static inline constexpr int BRANCHING_FACTOR_LEAF = 83;
+	static inline constexpr int BRANCHING_FACTOR_BRANCH = 84;
+};
 
-template<>
-float item<float>() {
-	return static_cast<float>(item<int>()) / static_cast<float>(item<int>());
-}
+/// 2-3 tree: https://en.wikipedia.org/wiki/2-3_tree
+struct Tree23 : DefaultConfig { BTREE_OF_ORDER(3); };
 
-template<>
-bool item<bool>() {
-	return item<int>() % 2 == 0;
-}
+struct DoubleToLong : DefaultConfig {
+	using Key = double;
+	using Val = long;
+	using Ref = double;
+};
+
+///
+/// Utility functions
+///
 
 template<BtreeConfig Config>
-auto fill_tree(Btree<Config> &bpt, std::size_t limit = 1000) {
+auto fill_tree_with_random_items(Btree<Config> &bpt, const std::size_t limit = 1000) {
 	using Key = typename Config::Key;
 	using Val = typename Config::Val;
 	std::map<Key, Val> backup;
-#ifdef EU_PRINTING_TESTS
-	int i = 0;
-#endif
+	[[maybe_unused]] int i = 0;
 
 	while (backup.size() != limit) {
-		auto key = item<Key>();
-		auto val = item<Val>();
+		auto key = random_item<Key>();
+		auto val = random_item<Val>();
 		if (backup.contains(key)) {
 			REQUIRE(bpt.contains(key));
 			continue;
 		}
 
-#ifdef EU_PRINTING_TESTS
-		fmt::print("Element #{} inserted.\n", ++i);
-#endif
-
-		bpt.put(key, val);
+		bpt.insert(key, val);
 		backup.emplace(key, val);
 	}
 
-	REQUIRE(bpt.size() == limit);
 	return backup;
 }
 
 template<BtreeConfig Config>
-void valid_tree(Btree<Config> &bpt, const std::map<typename Config::Key, typename Config::Val> &backup) {
+void check_for_tree_backup_mismatch(Btree<Config> &bpt, const std::map<typename Config::Key, typename Config::Val> &backup) {
 	REQUIRE(bpt.size() == backup.size());
-#ifdef EU_PRINTING_TESTS
-	std::size_t i = 1;
-#endif
+	[[maybe_unused]] std::size_t i = 1;
 	for (const auto &[key, val] : backup) {
-#ifdef EU_PRINTING_TESTS
-		fmt::print(" [{}]: '{}' => '{}'\n", i++, key, val);
-#endif
+		if constexpr (NDEBUG)
+			fmt::print(" [{}]: '{}' => '{}'\n", i++, key, val);
 		REQUIRE(bpt.get(key).value() == val);
 	}
 }
 
-void truncate_file(std::string_view fname) {
-	std::ofstream of{std::string{fname}, std::ios::trunc};
-}
-
-struct smallstr {
-	static constexpr inline auto sz = 10;
-	smallstr(std::string &&s) {
-		assert(s.size() == sz);
-		std::memcpy(m_str, s.data(), sz);
-	}
-
-	smallstr() = default;
-
-	auto operator<=>(const smallstr &) const noexcept = default;
-
-	friend std::ostream &operator<<(std::ostream &os, const smallstr &str) {
-		os << static_cast<const char *>(str.m_str);
-		return os;
-	}
-
-	char m_str[sz];
-	NOP_STRUCTURE(smallstr, m_str);
-};
-
-template<>
-std::string item<std::string>() {
-	static std::random_device dev;
-	static std::mt19937 rng(dev());
-	static std::uniform_int_distribution<std::mt19937::result_type> dist10(1, 10);
-
-	static const char alphanum[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-	static std::uniform_int_distribution<std::mt19937::result_type> dist_alphanum(0, sizeof(alphanum) - 1);
-
-	auto len = dist10(rng);
-	std::string str;
-	str.reserve(len);
-	for (auto i = 0ul; i < len; ++i)
-		str += alphanum[dist_alphanum(rng)];
-	return str;
-}
-
-template<>
-smallstr item<smallstr>() {
-	static std::random_device dev;
-	static std::mt19937 rng(dev());
-	static std::uniform_int_distribution<std::mt19937::result_type> dist10(1, 10);
-
-	static const char alphanum[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-	static std::uniform_int_distribution<std::mt19937::result_type> dist_alphanum(0, sizeof(alphanum) - 1);
-
-	std::string str;
-	str.reserve(smallstr::sz);
-	for (int i = 0; i < smallstr::sz; ++i)
-		str += alphanum[dist_alphanum(rng)];
-	return smallstr{std::move(str)};
-}
+///
+/// Unit tests
+///
 
 TEST_CASE("Btree operations", "[btree]") {
-	truncate_file("/tmp/eu-btree-ops");
-	Btree bpt("/tmp/eu-btree-ops");
-	REQUIRE(bpt.contains(42) == false);
-	REQUIRE(bpt.get(42).has_value() == false);
+	fs::create_directories("/tmp/eugene-tests/btree-operations");
 
-#ifdef EU_PRINTING_TESTS
-	fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
-	fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
-#endif
+	SECTION("Empty tree") {
+		Bt bpt("/tmp/eugene-tests/btree-operations/empty-tree");
 
-	static const std::size_t limit = 1000;
-	auto backup = fill_tree(bpt, limit);
+		REQUIRE(bpt.contains(42) == false);
+		REQUIRE(bpt.get(42).has_value() == false);
+		REQUIRE(std::holds_alternative<Bt::RemovedNothing>(bpt.remove(42)));
 
-	util::BtreePrinter{bpt, "/tmp/eu-btree-ops-printed"}();
-	valid_tree(bpt, backup);
+		REQUIRE(bpt.sanity_check());
+	}
+	SECTION("Insertion") {
+		SECTION("Insertion without rebalancing") {
+			Bt bpt("/tmp/eugene-tests/btree-operations/insertion-without-rebalancing");
+			fmt::print("Bt::max_num_records_leaf() = {}\n", bpt.max_num_records_leaf());
+			static const std::size_t limit = bpt.max_num_records_leaf();
+			auto backup = fill_tree_with_random_items(bpt, limit);
+
+			 if constexpr (NDEBUG)
+				util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-operations/insertion-without-rebalancing-printed"}();
+
+			check_for_tree_backup_mismatch(bpt, backup);
+		}
+		SECTION("Difficult insertion") {
+			Bt bpt("/tmp/eugene-tests/btree-operations/difficult-insertion");
+			[[maybe_unused]] static const std::size_t limit = 1'000;
+			fmt::print("keys-in-leaf: [{}]; [{}]\n", bpt.min_num_records_leaf(), bpt.max_num_records_leaf());
+			fmt::print("keys-in-branch: [{}]; [{}]\n", bpt.min_num_records_branch(), bpt.max_num_records_branch());
+			auto backup = fill_tree_with_random_items(bpt, limit);
+
+			if constexpr (NDEBUG)
+				util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-operations/difficult-insertion-printed"}();
+
+			check_for_tree_backup_mismatch(bpt, backup);
+			const auto root_node = bpt.root();
+			fmt::print("root_node.num_filled() = {}\n", root_node.num_filled());
+		}
+	}
+
+	SECTION("Removal") {
+		SECTION("Removal without rebalancing") {
+			Btree<Tree23> bpt("/tmp/eugene-tests/btree-operations/removal-without-rebalancing");
+			for (int key = 0; key < bpt.max_num_records_leaf(); ++key)
+				bpt.insert(key, key);
+
+			for (int key = 0; key < bpt.max_num_records_leaf() / 2; ++key) {
+				const auto removed = bpt.remove(key);
+				REQUIRE(std::holds_alternative<Btree<Tree23>::RemovedVal>(removed));
+				REQUIRE(std::get<Btree<Tree23>::RemovedVal>(removed).val == key);
+			}
+		}
+		SECTION("Difficult removal") {
+			Btree<Tree23> bpt("/tmp/eugene-tests/btree-operations/difficult-removal");
+			[[maybe_unused]] static const std::size_t limit = 10;
+			auto backup = fill_tree_with_random_items(bpt, limit);
+
+			util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-operations/difficult-removal-printed-1"}();
+
+			for (auto i = 0ul; i < limit; ++i) {
+				auto random_key = [&] {
+					std::random_device dev;
+					std::mt19937_64 rng(dev());
+
+					std::uniform_int_distribution<size_t> dist(0, backup.size() - 1);
+					auto random_pair = backup.begin();
+					std::advance(random_pair, dist(rng));
+					return random_pair->first;
+				}();
+				const auto removed = bpt.remove(random_key);
+				REQUIRE(std::holds_alternative<Btree<Tree23>::RemovedVal>(removed));
+				REQUIRE(std::get<Btree<Tree23>::RemovedVal>(removed).val == backup.at(random_key));
+				backup.erase(random_key);
+			}
+
+			REQUIRE(bpt.empty());
+
+			util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-operations/difficult-removal-printed-2"}();
+
+		}
+	}
+
+	SECTION("Update") {
+		Bt bpt("/tmp/eugene-tests/btree-operations/update");
+		static const std::size_t limit = 1000;
+		auto backup = fill_tree_with_random_items(bpt, limit);
+
+		for (int i = 0; i < 100; ++i) {
+			if (random_item<bool>())
+				continue;
+			const auto key = random_item<int>();
+			REQUIRE(backup.contains(key) == bpt.contains(key));
+			if (!backup.contains(key))
+				continue;
+			const auto old_val = *bpt.get(key);
+			bpt.update(key, key - 1);
+			backup[key] = key - 1;
+			if constexpr (NDEBUG)
+				fmt::print("Updating tree entry <{}, {}> to <{}, {}>\n", key, old_val, key, *bpt.get(key));
+		}
+
+		check_for_tree_backup_mismatch(bpt, backup);
+	}
+
+	SECTION("Queries") {
+		Bt tree;
+		Bt bpt("/tmp/eugene-tests/btree-operations/queries");
+		std::vector<Bt::Entry> inserted_entries;
+		const int limit = 100'000;
+		for (const int item : std::ranges::views::iota(0, limit)) {
+			inserted_entries.push_back(Bt::Entry{item, item});
+			bpt.insert(item, item);
+		}
+
+		REQUIRE(*bpt.get_min_entry() == Bt::Entry{.key = 0, .val = 0});
+		REQUIRE(*bpt.get_max_entry() == Bt::Entry{.key = limit - 1, .val = limit - 1});
+
+		std::vector<Bt::Entry> fetched_entries;
+		for (const Bt::Entry &item : bpt.get_all_entries())
+			fetched_entries.push_back(item);
+		REQUIRE(std::ranges::equal(fetched_entries, inserted_entries));
+
+		std::vector<Bt::Entry> inserted_entries_with_odd_keys{inserted_entries};
+		std::erase_if(inserted_entries_with_odd_keys, [](const Bt::Entry &entry) { return entry.key % 2 == 0; });
+
+		std::vector<Bt::Entry> fetched_entries_with_odd_keys;
+		for (const Bt::Entry &item : bpt.get_all_entries_filtered([](const Bt::Entry entry) { return entry.key % 2 != 0; }))
+			fetched_entries_with_odd_keys.push_back(item);
+
+		REQUIRE(std::ranges::equal(fetched_entries_with_odd_keys, inserted_entries_with_odd_keys));
+
+		std::vector<Bt::Entry> inserted_entries_in_given_range{inserted_entries};
+		std::erase_if(inserted_entries_in_given_range, [](const Bt::Entry &entry) { return entry.key < 65'900 || entry.key >= 66'000; });
+
+		std::vector<Bt::Entry> fetched_entries_in_given_range;
+		for (const Bt::Entry &item : bpt.get_all_entries_in_key_range(65'900, 66'000))
+			fetched_entries_in_given_range.push_back(item);
+
+		REQUIRE(std::ranges::equal(fetched_entries_in_given_range, inserted_entries_in_given_range));
+	}
 }
 
-TEST_CASE("Header operations", "[btree]") {
-	truncate_file("/tmp/eu-headerops");
-	truncate_file("/tmp/eu-headerops-header");
-	Btree bpt("/tmp/eu-headerops");
-	bpt.save();
+TEST_CASE("Btree persistence", "[btree]") {
+	fs::create_directories("/tmp/eugene-tests/btree-persistence");
 
-	Btree bpt2("/tmp/eu-headerops");
-	bpt2.header().size() = 100;
-	bpt2.header().depth() = 1;
+	SECTION("Loading and recovery") {
+		std::map<typename DefaultConfig::Key, typename DefaultConfig::Val> backup;
+		Position rootpos;
+		{
+			if constexpr (NDEBUG)
+				fmt::print(" --- Btree #1 start\n");
+			Bt bpt("/tmp/eugene-tests/btree-persistence/loading-and-recovery", ActionOnConstruction::Bare);
+			backup = fill_tree_with_random_items(bpt, 1000);
+			check_for_tree_backup_mismatch(bpt, backup);
 
-	bpt2.load();
+			bpt.save();
+			rootpos = bpt.rootpos();
+			if constexpr (NDEBUG)
+				fmt::print(" --- Btree #1 saved\n");
+		}
+		{
+			if constexpr (NDEBUG)
+				fmt::print(" --- Btree #2 start\n");
 
-	REQUIRE(bpt.header() == bpt2.header());
-}
+			Bt bpt("/tmp/eugene-tests/btree-persistence/loading-and-recovery", ActionOnConstruction::Load);
 
-TEST_CASE("Persistent tree", "[btree]") {
-	truncate_file("/tmp/eu-persistent-btree");
-	truncate_file("/tmp/eu-persistent-btree-header");
+			REQUIRE(bpt.rootpos() == rootpos);
+			check_for_tree_backup_mismatch(bpt, backup);
+			if constexpr (NDEBUG)
+				fmt::print(" --- Btree #2 end (no save)\n");
+		}
+		{
+			if constexpr (NDEBUG)
+				fmt::print(" --- Btree #3 start\n");
+			Bt bpt("/tmp/eugene-tests/btree-persistence/loading-and-recovery", ActionOnConstruction::Bare);
+			REQUIRE(bpt.size() == 0);
+			for (auto &[key, _] : backup)
+				REQUIRE(!bpt.contains(key));
+			if constexpr (NDEBUG)
+				fmt::print(" --- Btree #3 end (no save)\n");
+		}
+	}
 
-	std::map<typename DefaultConfig::Key, typename DefaultConfig::Val> backup;
-	Position rootpos;
-	{
-		fmt::print(" --- Btree #1 start\n");
-		Btree bpt("/tmp/eu-persistent-btree");
-		fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
-		fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
-		backup = fill_tree(bpt, 1000);
-		valid_tree(bpt, backup);
-
+	SECTION("Header operations") {
+		Bt bpt("/tmp/eugene-tests/btree-persistence/header-operations");
 		bpt.save();
-		rootpos = bpt.rootpos();
-		fmt::print(" --- Btree #1 saved\n");
-	}
 
-	{
-		fmt::print(" --- Btree #2 start\n");
-		Btree bpt("/tmp/eu-persistent-btree", true);
+		Bt bpt2("/tmp/eugene-tests/btree-persistence/header-operations");
 
-		REQUIRE(bpt.rootpos() == rootpos);
-		valid_tree(bpt, backup);
-		fmt::print(" --- Btree #2 end (no save)\n");
-	}
+		for (int i = 0; i < bpt2.max_num_records_leaf() + 1; ++i)
+			bpt2.insert(i, i);
+		REQUIRE(bpt.header().tree_size != bpt2.header().tree_size);
+		REQUIRE(bpt.header().tree_depth != bpt2.header().tree_depth);
 
-	{
-		fmt::print(" --- Btree #3 start\n");
-		Btree bpt("/tmp/eu-persistent-btree");
-		REQUIRE(bpt.size() == 0);
-		for (auto &[key, _] : backup)
-			REQUIRE(!bpt.contains(key));
-		fmt::print(" --- Btree #3 end (no save)\n");
+		bpt2.load();
+		REQUIRE(bpt.header().tree_size == bpt2.header().tree_size);
+		REQUIRE(bpt.header().tree_depth == bpt2.header().tree_depth);
 	}
 }
 
-struct CustomConfigPrimitives : DefaultConfig {
-	using Key = double;
-	using Val = long long;
-	using Ref = double;
-};
+TEST_CASE("Btree configs") {
+	fs::create_directories("/tmp/eugene-tests/btree-configs");
 
-TEST_CASE("Custom Config Btree Primitive Type", "[btree]") {
-	truncate_file("/tmp/eu-btree-ops-custom-types");
-	Btree<CustomConfigPrimitives> bpt("/tmp/eu-btree-ops-custom-types");
-	static const std::size_t limit = 1000;
+	SECTION("Primitive types") {
+		Btree<DoubleToLong> bpt("/tmp/eugene-tests/btree-configs/primitive-types");
+		static const std::size_t limit = 100;
 
-#ifdef EU_PRINTING_TESTS
-	fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
-	fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
-#endif
+		std::map<DoubleToLong::Key, DoubleToLong::Val> backup;
+		while (backup.size() != limit) {
+			double key = random_item<float>();
+			long long val = random_item<int>();
+			bpt.insert(key, val);
+			backup.emplace(key, val);
+		}
 
-	std::map<CustomConfigPrimitives::Key, CustomConfigPrimitives::Val> backup;
-	while (backup.size() != limit) {
-		double key = item<float>();
-		long long val = item<int>();
-		bpt.put(key, val);
-		backup.emplace(key, val);
+		util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-configs/primitive-types-printed"}();
+
+		REQUIRE(bpt.size() == limit);
+
+		[[maybe_unused]] std::size_t i = 1;
+
+		for (const auto &[key, val] : backup) {
+			if constexpr (NDEBUG)
+				fmt::print(" [{}]: '{}' => '{}'\n", i++, key, val);
+			REQUIRE(bpt.get(key).value() == val);
+		}
 	}
 
-	util::BtreePrinter{bpt, "/tmp/eu-btree-ops-custom-types-printed"}();
+	SECTION("User-defined types") {
+		Btree<SmallstrToPerson> bpt{"/tmp/eugene-tests/btree-configs/aggregate-types"};
 
-	REQUIRE(bpt.size() == limit);
+		static const std::size_t limit = 100;
+		auto backup = fill_tree_with_random_items(bpt, limit);
 
-#ifdef EU_PRINTING_TESTS
-	std::size_t i = 1;
-#endif
-
-	for (const auto &[key, val] : backup) {
-#ifdef EU_PRINTING_TESTS
-		fmt::print(" [{}]: '{}' => '{}'\n", i++, key, val);
-#endif
-		REQUIRE(bpt.get(key).value() == val);
+		util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-configs/aggregate-types-printed"}();
+		check_for_tree_backup_mismatch(bpt, backup);
 	}
-}
-
-struct Person {
-	smallstr name;
-	int age{};
-	smallstr email;
-
-	auto operator<=>(const Person &) const noexcept = default;
-
-	NOP_STRUCTURE(Person, name, age, email);
-};
-
-// Make Person printable
-template<>
-struct fmt::formatter<Person> {
-	template<typename ParseContext>
-	constexpr auto parse(ParseContext &ctx) {
-		return ctx.begin();
-	}
-
-	template<typename FormatContext>
-	auto format(const Person &p, FormatContext &ctx) {
-		return fmt::format_to(ctx.out(), "Person{{ .name='{}', .age={}, .email='{}' }}", p.name, p.age, p.email);
-	}
-};
-
-template<>
-struct fmt::formatter<smallstr> {
-	template<typename ParseContext>
-	constexpr auto parse(ParseContext &ctx) {
-		return ctx.begin();
-	}
-
-	template<typename FormatContext>
-	auto format(const smallstr &s, FormatContext &ctx) {
-		return fmt::format_to(ctx.out(), "{}", fmt::join(s.m_str, ""));
-	}
-};
-
-template<>
-Person item<Person>() {
-	return Person{
-	        .name = item<smallstr>(),
-	        .age = item<int>(),
-	        .email = item<smallstr>()};
-}
-
-struct CustomConfigAggregate : DefaultConfig {
-	using Key = smallstr;
-	using Val = Person;
-	using Ref = smallstr;
-};
-
-TEST_CASE("Custom Config Btree Aggregate Type", "[btree]") {
-	truncate_file("/tmp/eu-btree-custom-config");
-	Btree<CustomConfigAggregate> bpt{"/tmp/eu-btree-custom-config"};
-	bpt.NUM_RECORDS_LEAF = 83;
-
-#ifdef EU_PRINTING_TESTS
-	fmt::print("NUM_RECORDS_LEAF = {}\n", bpt.num_records_leaf());
-	fmt::print("NUM_RECORDS_BRANCH = {}\n", bpt.num_records_branch());
-#endif
-
-	static const std::size_t limit = 1000;
-	auto backup = fill_tree(bpt, limit);
-
-	util::BtreePrinter{bpt, "/tmp/eu-btree-aggregatetype-printed"}();
-	valid_tree(bpt, backup);
 }

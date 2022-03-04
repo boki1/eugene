@@ -10,6 +10,8 @@
 #include <string_view>
 #include <unordered_map>
 #include <deque>
+#include <filesystem>
+namespace fs = std::filesystem;
 
 #include <cppcoro/generator.hpp>
 
@@ -22,7 +24,6 @@
 #include <nop/utility/stream_reader.h>
 #include <nop/utility/stream_writer.h>
 
-#include <core/SizeMetrics.h>
 #include <core/Util.h>
 
 namespace internal::storage {
@@ -142,6 +143,8 @@ public:
         m_freelist.insert(m_freelist.begin() + std::distance(m_freelist.begin(), it), pos);
     }
 
+    [[nodiscard]] constexpr bool has_allocated(const Position) { return true; }
+
     [[nodiscard]] const auto &freelist() const noexcept { return m_freelist; }
 };
 
@@ -164,7 +167,7 @@ public:
 		assert(m_limit >= 1);
 	}
 
-	[[nodiscard]] constexpr optional_ref<Page> get(Position pos) {
+	[[nodiscard]] optional_ref<Page> get(Position pos) {
 		if (!m_index.contains(pos))
 			return {};
 
@@ -273,11 +276,19 @@ public:
 	template <typename ...Args>
 	explicit Pager(std::string_view identifier, const ActionOnConstruction action = ActionOnConstruction::DoNotLoad, Args&& ...args)
 	    : m_allocator{std::forward<Args>(args)...},
-		  m_identifier{identifier},
-	      m_disk{identifier.data()} {
-		using enum ActionOnConstruction;
-		if (action == Load)
+		  m_identifier{identifier} {
+		if (action == ActionOnConstruction::Load)
 			load();
+		else if (!fs::exists(identifier.data()))
+			/// Create an empty storage iff we should not load and the storage does not yet exist.
+			m_disk.open(identifier.data(), std::ios::trunc | std::ios::in | std::ios::out);
+		else
+			m_disk.open(identifier.data(), std::ios::in | std::ios::out);
+	}
+
+	virtual ~Pager() noexcept {
+		/// Close storage manually since it is not using RAII
+		m_disk.close();
 	}
 
 	constexpr Pager(const Pager &pager) = default;

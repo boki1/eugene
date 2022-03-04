@@ -16,9 +16,13 @@ namespace internal::storage::btree::util {
 
 template<typename Collection>
 static std::string join(const Collection& collection, std::string_view delim) {
-	std::stringstream ss;
 	auto begin = std::cbegin(collection);
 	const auto end = std::cend(collection);
+    if (begin == end) {
+        return "";
+	}
+
+	std::stringstream ss;
 	while (begin < end - 1)
 		ss << *begin++ << delim;
 	ss << *begin;
@@ -55,13 +59,17 @@ public:
 		}
 
 		m_out << '[' << join(node.branch().m_refs, ", ") << "]\n";
-		m_out << indentation << (level > 1 ? "  " : "") << "children: \n";
-		for (const auto pos : node.branch().m_links)
-			print_node(node_at(pos), level + 1);
+		m_out << indentation << (level > 1 ? "  " : "") << "children:\n";
+		for (std::size_t i = 0; i < node.branch().m_links.size(); ++i)
+			if (node.branch().m_link_status[i] == LinkStatus::Inval)
+				fmt::print("- Empty\n");
+			else
+				print_node(node_at(node.branch().m_links[i]), level + 1);
 	}
 
 	void print() noexcept {
-		m_out << "keys_per_block: " << m_btree.num_records_leaf() << '\n';
+		m_out << "keys-in-leaves: [" << m_btree.min_num_records_leaf() << "; " << m_btree.max_num_records_leaf() << "]\n";
+		m_out << "keys-in-branches: [" << m_btree.min_num_records_branch() << "; " << m_btree.max_num_records_branch() << "]\n";
 		m_out << "tree:\n";
 
 		print_node(node_at(m_btree.rootpos()));

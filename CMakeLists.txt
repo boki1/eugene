@@ -12,10 +12,13 @@ add_compile_options(
         -Werror
         -pedantic
         -ggdb3
+		-Wfatal-errors
         -fdiagnostics-color)
 
 enable_testing()
 include(FetchContent)
+
+add_compile_definitions(NDEBUG="true")
 
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup(TARGETS)
@@ -52,9 +55,10 @@ target_link_libraries(LibEugeneCore
         CONAN_PKG::catch2
         CONAN_PKG::spdlog
         CONAN_PKG::libnop
+        CONAN_PKG::catch2
+		CONAN_PKG::cppitertools
         CONAN_PKG::andreasbuhr-cppcoro
         CONAN_PKG::benchmark)
-
 
 if (DEFINED ENV{EUGENE_BUILD_TESTS})
     macro(eugene_test component path_prefix)
