@@ -41,7 +41,7 @@ set(LibEugeneCompression_SRC
         storage/compression/Compression.cpp)
 
 set(LibEugeneCore_SRC
-        Util.h Util.cpp SizeMetrics.h Logger.h
+        Util.h Util.cpp Logger.h
         ${LibEugeneBtree_SRC}
         ${LibEugenePager_SRC}
         ${LibEugeneCompression_SRC})
