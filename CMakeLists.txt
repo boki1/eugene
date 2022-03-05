@@ -37,8 +37,7 @@ set(LibEugenePager_SRC
 
 set(LibEugeneCompression_SRC
         storage/compression/Compressor.h
-        storage/compression/Decompressor.h
-        storage/compression/Compression.cpp)
+        storage/compression/Decompressor.h)
 
 set(LibEugeneCore_SRC
         Util.h Util.cpp Logger.h
@@ -56,11 +55,7 @@ target_link_libraries(LibEugeneCore
         CONAN_PKG::catch2
         CONAN_PKG::spdlog
         CONAN_PKG::libnop
-		CONAN_PKG::andreasbuhr-cppcoro
-        CONAN_PKG::benchmark
-        CONAN_PKG::catch2
-        CONAN_PKG::cppbenchmark
-		CONAN_PKG::cppitertools)
+        CONAN_PKG::catch2)
 
 if (DEFINED EU_BUILD_TESTS)
 	message(STATUS "EU_BUILD_TESTS = " ${EU_BUILD_TESTS})

@@ -1,6 +1,8 @@
 #include <array>
 #include <fstream>
 #include <vector>
+#include <algorithm>
+#include <filesystem>
 
 #include <catch2/catch.hpp>
 
