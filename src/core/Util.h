@@ -7,6 +7,7 @@
 
 #include <nop/structure.h>
 
+#include <cppcoro/generator.hpp>
 #include <fmt/core.h>
 #include <fmt/format.h>
 
@@ -67,8 +68,6 @@ template<typename T>
 constexpr std::vector<T> break_at_index(std::vector<T> &target, uint32_t pivot) {
 	assert(target.size() >= 2);
 
-//	fmt::print("Breaking target '{}' with pivot={} into ", fmt::join(target, ", "), pivot);
-
 	std::vector<T> second;
 	second.reserve(target.size() - pivot);
 
@@ -77,7 +76,6 @@ constexpr std::vector<T> break_at_index(std::vector<T> &target, uint32_t pivot) 
 	          std::back_inserter(second));
 	target.resize(pivot);
 
-//	fmt::print("'{}' and '{}'\n", fmt::join(target, ", "), fmt::join(second, ", "));
 	return second;
 }
 
@@ -94,11 +92,46 @@ template<typename T, typename V>
 	return std::find(collection.cbegin(), collection.cend(), item) != collection.cend();
 }
 
+// Merge ranges based on fun
+[[maybe_unused]] void merge_many(std::ranges::range auto self, std::ranges::range auto diff, auto fun) {
+	auto self_begin = std::cbegin(self);
+	auto diff_begin = std::cbegin(diff);
+	while (self_begin < std::cend(self) && diff_begin < std::cend(diff)) {
+		const auto use_self = *self_begin < *diff_begin;
+		fmt::print("{} < {} ??? {}\n", *self_begin, *diff_begin, use_self);
+		std::size_t idx = use_self
+		        ? std::distance(std::cbegin(self), self_begin++)
+		        : std::distance(std::cbegin(diff), diff_begin++);
+		fun(use_self, idx);
+	}
+	while (diff_begin < std::cend(diff))
+		fun(false, std::distance(std::cbegin(diff), diff_begin++));
+	while (self_begin < std::cend(self))
+		fun(true, std::distance(std::cbegin(self), self_begin++));
+}
+
+/// Pop and return the last element of a collection
+template<typename T, typename Ts>
+[[maybe_unused]] T consume_back(Ts &ts) {
+	if constexpr (requires { ts.top(); }) {
+		const auto t = ts.top();
+		ts.pop();
+		return t;
+	} else if constexpr (requires { ts.back(); }) {
+		const auto t = ts.back();
+		ts.pop_back();
+		return t;
+	}
+}
+
 #define UNREACHABLE \
 	abort();
 
 #define UNIMPLEMENTED \
 	abort();
+
+#define DO_NOTHING \
+	do {} while(0);
 
 ///
 /// Used  primarily in unit tests

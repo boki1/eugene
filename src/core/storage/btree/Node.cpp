@@ -25,10 +25,10 @@ using Branch = Nod::Branch;
 using Leaf = Nod::Leaf;
 
 #define PRINT_LEAF(node) \
-	fmt::print(#node" = (keys: {}, vals: {})\n", fmt::join(node.m_keys, " "), fmt::join(node.m_vals, " "))
+	fmt::print(#node" = (keys: {}, vals: {})\n", fmt::join(node.keys, " "), fmt::join(node.vals, " "))
 
 #define PRINT_BRANCH(node) \
-	fmt::print(#node" = (refs: {}, links: {})\n", fmt::join(node.m_refs, " "), fmt::join(node.m_links, " "))
+	fmt::print(#node" = (refs: {}, links: {})\n", fmt::join(node.refs, " "), fmt::join(node.links, " "))
 
 namespace internal {
 template<>
@@ -159,13 +159,13 @@ TEST_CASE("Split full nodes", "[btree]") {
 			fmt::print("\n");
 		}
 
-		REQUIRE(midkey == branch_before_split.m_refs[pivot_idx]);
-		REQUIRE(std::equal(branch_before_split.m_refs.cbegin(), branch_before_split.m_refs.cbegin() + pivot_idx, left.m_refs.cbegin()));
-		REQUIRE(std::equal(branch_before_split.m_links.cbegin(), branch_before_split.m_links.cbegin() + pivot_idx + 1, left.m_links.cbegin()));
-		REQUIRE(std::equal(branch_before_split.m_link_status.cbegin(), branch_before_split.m_link_status.cbegin() + pivot_idx + 1, left.m_link_status.cbegin()));
-		REQUIRE(std::equal(branch_before_split.m_refs.cbegin() + pivot_idx + 1, branch_before_split.m_refs.cend(), right.m_refs.cbegin()));
-		REQUIRE(std::equal(branch_before_split.m_links.cbegin() + pivot_idx + 1, branch_before_split.m_links.cend(), right.m_links.cbegin()));
-		REQUIRE(std::equal(branch_before_split.m_link_status.cbegin() + pivot_idx + 1, branch_before_split.m_link_status.cend(), right.m_link_status.cbegin()));
+		REQUIRE(midkey == branch_before_split.refs[pivot_idx]);
+		REQUIRE(std::equal(branch_before_split.refs.cbegin(), branch_before_split.refs.cbegin() + pivot_idx, left.refs.cbegin()));
+		REQUIRE(std::equal(branch_before_split.links.cbegin(), branch_before_split.links.cbegin() + pivot_idx + 1, left.links.cbegin()));
+		REQUIRE(std::equal(branch_before_split.link_status.cbegin(), branch_before_split.link_status.cbegin() + pivot_idx + 1, left.link_status.cbegin()));
+		REQUIRE(std::equal(branch_before_split.refs.cbegin() + pivot_idx + 1, branch_before_split.refs.cend(), right.refs.cbegin()));
+		REQUIRE(std::equal(branch_before_split.links.cbegin() + pivot_idx + 1, branch_before_split.links.cend(), right.links.cbegin()));
+		REQUIRE(std::equal(branch_before_split.link_status.cbegin() + pivot_idx + 1, branch_before_split.link_status.cend(), right.link_status.cbegin()));
 	};
 
 	auto validate_leaf = [](const Nod::Leaf &leaf_before_split, const Nod::Leaf &left, const Nod::Leaf &right, const std::size_t pivot_idx, const auto midkey) {
@@ -178,34 +178,105 @@ TEST_CASE("Split full nodes", "[btree]") {
 			fmt::print("\n");
 		}
 
- 		REQUIRE(midkey == leaf_before_split.m_keys[pivot_idx]);
-		REQUIRE(std::equal(leaf_before_split.m_keys.cbegin(), leaf_before_split.m_keys.cbegin() + pivot_idx + 1, left.m_keys.cbegin()));
-		REQUIRE(std::equal(leaf_before_split.m_vals.cbegin(), leaf_before_split.m_vals.cbegin() + pivot_idx + 1, left.m_vals.cbegin()));
-		REQUIRE(std::equal(leaf_before_split.m_keys.cbegin() + pivot_idx, leaf_before_split.m_keys.cend(), right.m_keys.cbegin()));
-		REQUIRE(std::equal(leaf_before_split.m_vals.cbegin() + pivot_idx, leaf_before_split.m_vals.cend(), right.m_vals.cbegin()));
+ 		REQUIRE(midkey == leaf_before_split.keys[pivot_idx]);
+		REQUIRE(std::equal(leaf_before_split.keys.cbegin(), leaf_before_split.keys.cbegin() + pivot_idx + 1, left.keys.cbegin()));
+		REQUIRE(std::equal(leaf_before_split.vals.cbegin(), leaf_before_split.vals.cbegin() + pivot_idx + 1, left.vals.cbegin()));
+		REQUIRE(std::equal(leaf_before_split.keys.cbegin() + pivot_idx, leaf_before_split.keys.cend(), right.keys.cbegin()));
+		REQUIRE(std::equal(leaf_before_split.vals.cbegin() + pivot_idx, leaf_before_split.vals.cend(), right.vals.cbegin()));
 	};
 
 	SECTION("Even distribution of entries") {
-		auto [branch_midkey, branch_sib_node] = branch_node.split(BRANCH_LIMIT, Nod::SplitBias::DistributeEvenly);
+		auto [branch_midkey, branch_sib_node] = branch_node.split(BRANCH_LIMIT, SplitBias::DistributeEvenly);
 		validate_branch(branch_before_split, branch, branch_sib_node.branch(), (BRANCH_LIMIT + 1) / 2, branch_midkey);
 
-		auto [leaf_midkey, leaf_sib_node] = leaf_node.split(LEAF_LIMIT, Nod::SplitBias::DistributeEvenly);
+		auto [leaf_midkey, leaf_sib_node] = leaf_node.split(LEAF_LIMIT, SplitBias::DistributeEvenly);
 		validate_leaf(leaf_before_split, leaf, leaf_sib_node.leaf(), (LEAF_LIMIT + 1) / 2, leaf_midkey);
 	}
 
 	SECTION("Left leaning distribution of entries") {
-		auto [branch_midkey, branch_sib_node] = branch_node.split(BRANCH_LIMIT, Nod::SplitBias::LeanLeft);
+		auto [branch_midkey, branch_sib_node] = branch_node.split(BRANCH_LIMIT, SplitBias::LeanLeft);
 		validate_branch(branch_before_split, branch, branch_sib_node.branch(), BRANCH_LIMIT - 1, branch_midkey);
 
-		auto [leaf_midkey, leaf_sib_node] = leaf_node.split(LEAF_LIMIT, Nod::SplitBias::LeanLeft);
+		auto [leaf_midkey, leaf_sib_node] = leaf_node.split(LEAF_LIMIT, SplitBias::LeanLeft);
 		validate_leaf(leaf_before_split, leaf, leaf_sib_node.leaf(), LEAF_LIMIT - 1, leaf_midkey);
 	}
 
 	SECTION("Right leaning distribution of entries") {
-		auto [branch_midkey, branch_sib_node] = branch_node.split(BRANCH_LIMIT, Nod::SplitBias::LeanRight);
+		auto [branch_midkey, branch_sib_node] = branch_node.split(BRANCH_LIMIT, SplitBias::LeanRight);
 		validate_branch(branch_before_split, branch, branch_sib_node.branch(), std::abs(BRANCH_LIMIT - BRANCH_NUM) + 1, branch_midkey);
 
-		auto [leaf_midkey, leaf_sib_node] = leaf_node.split(LEAF_LIMIT, Nod::SplitBias::LeanRight);
+		auto [leaf_midkey, leaf_sib_node] = leaf_node.split(LEAF_LIMIT, SplitBias::LeanRight);
 		validate_leaf(leaf_before_split, leaf, leaf_sib_node.leaf(), std::abs(LEAF_LIMIT - LEAF_NUM) + 1, leaf_midkey);
+	}
+}
+
+TEST_CASE("Fuse nodes", "[btree]") {
+	SECTION("Fuse leaves") {
+		static constexpr auto LEAF_NUM = 2;
+		[[maybe_unused]] static constexpr auto LEAF_LIMIT = 5;
+
+		auto leaf_node_left = Nod{Metadata(Leaf(n_random_items<int>(LEAF_NUM), n_random_items<int>(LEAF_NUM))), {}, Nod::RootStatus::IsInternal};
+		auto leaf_node_right = Nod{Metadata(Leaf(n_random_items<int>(LEAF_NUM), n_random_items<int>(LEAF_NUM))), {}, Nod::RootStatus::IsInternal};
+
+		std::sort(leaf_node_left.leaf().keys.begin(), leaf_node_left.leaf().keys.end());
+		std::sort(leaf_node_right.leaf().keys.begin(), leaf_node_right.leaf().keys.end());
+
+		fmt::print("Left: {}\n", fmt::join(leaf_node_left.leaf().keys, ", "));
+		fmt::print("Right: {}\n", fmt::join(leaf_node_right.leaf().keys, ", "));
+
+		auto merged = leaf_node_left.fuse_with(leaf_node_right);
+		fmt::print("Merged: {}\n", fmt::join(merged.leaf().keys, ", "));
+		REQUIRE(std::is_sorted(merged.leaf().keys.cbegin(), merged.leaf().keys.cend()));
+
+		for (const auto &&[k, v] : iter::zip(leaf_node_left.leaf().keys, leaf_node_left.leaf().vals)) {
+				const auto idx = std::find(merged.leaf().keys.cbegin(), merged.leaf().keys.cend(), k) - merged.leaf().keys.cbegin();
+				REQUIRE(merged.leaf().vals[idx] == v);
+		}
+
+		for (const auto &&[k, v] : iter::zip(leaf_node_right.leaf().keys, leaf_node_right.leaf().vals)) {
+				const auto idx = std::find(merged.leaf().keys.cbegin(), merged.leaf().keys.cend(), k) - merged.leaf().keys.cbegin();
+				REQUIRE(merged.leaf().vals[idx] == v);
+		}
+
+		REQUIRE(merged.leaf().keys.size() == leaf_node_left.leaf().keys.size() + leaf_node_right.leaf().keys.size());
+	}
+
+	SECTION("Fuse branches") {
+		static constexpr auto BRANCH_NUM = 100;
+		[[maybe_unused]] static constexpr auto BRANCH_LIMIT = 5;
+
+		std::vector<Position> branch_links_left(BRANCH_NUM + 1);
+		std::iota(branch_links_left.begin(), branch_links_left.end(), static_cast<Position>(0ul));
+
+		std::vector<Position> branch_links_right(BRANCH_NUM + 1);
+		std::iota(branch_links_right.begin(), branch_links_right.end(), static_cast<Position>(0ul));
+
+		auto branch_node_left = Nod{Metadata(Branch(n_random_items<int>(BRANCH_NUM), std::move(branch_links_left), std::vector<LinkStatus>(BRANCH_NUM + 1, LinkStatus::Valid))), {}, Nod::RootStatus::IsInternal};
+		auto branch_node_right=Nod{Metadata(Branch(n_random_items<int>(BRANCH_NUM), std::move(branch_links_right), std::vector<LinkStatus>(BRANCH_NUM + 1, LinkStatus::Valid))), {}, Nod::RootStatus::IsInternal};
+
+		std::sort(branch_node_left.branch().refs.begin(), branch_node_left.branch().refs.end());
+		std::sort(branch_node_right.branch().refs.begin(), branch_node_right.branch().refs.end());
+
+		fmt::print("Left: {}\n", fmt::join(branch_node_left.branch().refs, ", "));
+		fmt::print("Right: {}\n", fmt::join(branch_node_right.branch().refs, ", "));
+
+		auto merged = branch_node_left.fuse_with(branch_node_right);
+		fmt::print("Merged: {}\n", fmt::join(merged.branch().refs, ", "));
+		REQUIRE(std::is_sorted(merged.branch().refs.cbegin(), merged.branch().refs.cend()));
+
+		/*
+		for (const auto &&[k, v] : iter::zip(branch_node_left.branch().refs, branch_node_left.branch().links)) {
+				const auto idx = std::find(merged.branch().refs.cbegin(), merged.branch().refs.cend(), k) - merged.branch().refs.cbegin();
+				// REQUIRE(merged.branch().links[idx] == v);
+		}
+
+		for (const auto &&[k, v] : iter::zip(branch_node_right.branch().refs, branch_node_right.branch().links)) {
+				const auto idx = std::find(merged.branch().refs.cbegin(), merged.branch().refs.cend(), k) - merged.branch().refs.cbegin();
+				// REQUIRE(merged.branch().links[idx] == v);
+		}
+		*/
+
+		REQUIRE(merged.branch().refs.size() == branch_node_right.branch().refs.size() + branch_node_left.branch().refs.size());
+		REQUIRE(merged.branch().links.size() == branch_node_right.branch().links.size() + branch_node_left.branch().links.size());
 	}
 }

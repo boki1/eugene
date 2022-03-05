@@ -40,7 +40,7 @@ set(LibEugeneCompression_SRC
         storage/compression/Decompressor.h)
 
 set(LibEugeneCore_SRC
-        Util.h Util.cpp SizeMetrics.h Logger.h
+        Util.h Util.cpp Logger.h
         ${LibEugeneBtree_SRC}
         ${LibEugenePager_SRC}
         ${LibEugeneCompression_SRC})
@@ -75,8 +75,7 @@ if (DEFINED EU_BUILD_TESTS)
 		eugene_test(Compression src/core/storage/compression)
 		eugene_test(Btree src/core/storage/btree)
 		eugene_test(Node src/core/storage/btree)
-		eugene_test(Page src/core/storage)
-		eugene_test(PageCache src/core/storage)
+		eugene_test(Pager src/core/storage)
 		eugene_test(Util src/core)
 	endif()
 endif ()

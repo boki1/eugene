@@ -3,23 +3,22 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <list>
 #include <optional>
 #include <string_view>
 #include <unordered_map>
-#include <deque>
-#include <filesystem>
 namespace fs = std::filesystem;
 
 #include <cppcoro/generator.hpp>
 
+#include <nop/base/vector.h>
 #include <nop/serializer.h>
 #include <nop/status.h>
 #include <nop/structure.h>
 #include <nop/types/variant.h>
-#include <nop/base/vector.h>
 #include <nop/utility/die.h>
 #include <nop/utility/stream_reader.h>
 #include <nop/utility/stream_writer.h>
@@ -30,6 +29,12 @@ namespace internal::storage {
 
 constexpr static std::size_t PAGE_SIZE = 4_KB;
 constexpr static std::size_t PAGECACHE_SIZE = 1_MB;
+
+/// FIXME:
+//constexpr static std::size_t PAGECACHE_SIZE_UNLIMITED = 0;
+constexpr static std::size_t PAGECACHE_SIZE_UNLIMITED = 100;
+
+constexpr static std::size_t DEFAULT_NUM_PAGES = 256;
 
 using Position = unsigned long int;
 using Page = std::array<std::uint8_t, PAGE_SIZE>;
@@ -54,7 +59,7 @@ enum class ActionOnConstruction : uint8_t {
 /// This could be the result of 1) incorrectly executed allocation algorithm, 2) calling alloc/free on allocators which
 /// do not support the specific operation.
 struct BadAlloc : std::runtime_error {
-	explicit BadAlloc() : std::runtime_error{"Eugene: Bad allocation"} {}
+	explicit BadAlloc(std::string msg = "") : std::runtime_error{fmt::format("Eugene: Bad allocation - {}", msg)} {}
 };
 
 /// Bad position
@@ -84,9 +89,14 @@ struct BadWrite : std::runtime_error {
 /// Allocation is Θ(1). Freeing is not supported. Checking whether a page has been allocated is Θ(1).
 class StackSpaceAllocator {
 	Position m_cursor = 0;
+	const std::size_t m_limit_num_pages;
 	NOP_STRUCTURE(StackSpaceAllocator, m_cursor);
 
 public:
+	explicit StackSpaceAllocator(const std::size_t limit_num_pages = DEFAULT_NUM_PAGES) : m_limit_num_pages{limit_num_pages} {}
+	StackSpaceAllocator(const StackSpaceAllocator &) = default;
+	StackSpaceAllocator &operator=(const StackSpaceAllocator &);
+
 	[[nodiscard]] constexpr Position alloc() {
 		auto tmp = m_cursor;
 		m_cursor += PAGE_SIZE;
@@ -100,7 +110,7 @@ public:
 	/// If the page is below the cursor, it is considered as allocated since there is no "official" way of freeing
 	/// pages using this allocator.
 	/// Note: The implementation does track whether the pos is actually identifing a valid page.
-	constexpr bool has_allocated(const Position pos) const noexcept {
+	[[nodiscard]] constexpr bool has_allocated(const Position pos) const noexcept {
 		return pos < m_cursor;
 	}
 
@@ -118,34 +128,55 @@ public:
 /// TODO: Optimize space usage. Maybe something like a range selector: From 0x0 to 0x100000 is free, rather than keeping
 /// every page in this range.
 class FreeListAllocator {
-    std::vector<Position> m_freelist;
-	NOP_STRUCTURE(FreeListAllocator, m_freelist);
+	std::vector<Position> m_freelist;
+	std::size_t m_next_page{0};
+	std::size_t m_limit_num_pages;
+	NOP_STRUCTURE(FreeListAllocator, m_freelist, m_next_page, m_limit_num_pages);
 
 public:
-    explicit FreeListAllocator(std::size_t num_pages = 256) {
-        std::generate_n(std::back_inserter(m_freelist), num_pages, [pg = num_pages - 1]() mutable { return pg-- * PAGE_SIZE; });
-    }
+	explicit FreeListAllocator(std::size_t limit_num_pages = DEFAULT_NUM_PAGES) : m_limit_num_pages{limit_num_pages} {}
 
-    [[nodiscard]] Position alloc() {
-        const Position pos = m_freelist.back();
-        m_freelist.pop_back();
-        return pos;
-    }
+	FreeListAllocator(const FreeListAllocator &) = default;
+	FreeListAllocator &operator=(const FreeListAllocator &) = default;
 
-    void free(const Position pos) {
-        if (pos % PAGE_SIZE != 0)
-            throw BadPosition(pos);
+	/// Allocate space using the freelist allocator
+	/// Tries to release the first accessible page, using the freelist.
+	/// If it is empty increments cursor allocator until the end is reached.
+	[[nodiscard]] Position alloc() {
+		if (!m_freelist.empty()) {
+			const Position pos = m_freelist.back();
+			m_freelist.pop_back();
+			return pos;
+		}
+
+		if (m_next_page >= m_limit_num_pages)
+			throw BadAlloc(fmt::format(" - FreeListAllocator out of space. Already returned limit amount of pages (={})\n", m_limit_num_pages));
+
+		return m_next_page++ * PAGE_SIZE;
+	}
+
+	void free(const Position pos) {
+		if (pos % PAGE_SIZE != 0)
+			throw BadPosition(pos);
+
+		if (pos / PAGE_SIZE == m_next_page - 1) {
+			--m_next_page;
+			return;
+		}
+
 		const auto it = std::find_if(m_freelist.begin(), m_freelist.end(), [&](const Position curr) {
 			return curr <= pos;
 		});
-        if (*it == pos && it < m_freelist.end())
-            throw BadPosition(pos);
-        m_freelist.insert(m_freelist.begin() + std::distance(m_freelist.begin(), it), pos);
-    }
+		if (it < m_freelist.end() && *it == pos)
+			throw BadPosition(pos);
+		m_freelist.insert(m_freelist.begin() + std::distance(m_freelist.begin(), it), pos);
+	}
 
-    [[nodiscard]] constexpr bool has_allocated(const Position) { return true; }
+	[[nodiscard]] constexpr bool has_allocated(const Position) { return true; }
 
-    [[nodiscard]] const auto &freelist() const noexcept { return m_freelist; }
+	[[nodiscard]] const auto &freelist() const noexcept { return m_freelist; }
+	[[nodiscard]] const auto next() const noexcept { return m_next_page; }
+	[[nodiscard]] const auto limit() const noexcept { return m_limit_num_pages; }
 };
 
 using CacheEvictionResult = std::optional<PagePos>;
@@ -163,9 +194,8 @@ class PageCache {
 	};
 
 public:
-	constexpr explicit PageCache(std::size_t limit = PAGECACHE_SIZE / PAGE_SIZE) : m_limit{limit} {
-		assert(m_limit >= 1);
-	}
+	constexpr explicit PageCache(std::size_t limit = PAGECACHE_SIZE / PAGE_SIZE)
+	    : m_limit{limit > 0 ? limit : std::numeric_limits<decltype(m_limit)>::max()} {}
 
 	[[nodiscard]] optional_ref<Page> get(Position pos) {
 		if (!m_index.contains(pos))
@@ -195,7 +225,7 @@ public:
 		}
 
 		m_index[pos] = CacheEntry{
-		        .m_page = std::move(page),
+		        .m_page = page,
 		        .m_cit = m_tracker.cend(),
 		        .m_dirty = true};
 
@@ -213,6 +243,8 @@ private:
 	std::list<Position> m_tracker;
 };
 
+/// Evict the least-recently used page from cache
+/// If it has been modified, store it first.
 struct LRUCache {
 	[[nodiscard]] static CacheEvictionResult evict(PageCache<LRUCache> &cache) {
 		CacheEvictionResult res;
@@ -226,24 +258,130 @@ struct LRUCache {
 	}
 };
 
+/// Cache which never evicts. Used for the InMemoryPager since the pages
+/// are supposed to be contained entirely in memory and the PageCache is
+/// used for this purpose.
+struct NeverEvictCache {
+	[[nodiscard]] static CacheEvictionResult evict(PageCache<NeverEvictCache> &) {
+		DO_NOTHING
+		return {};
+	}
+};
+
 template<typename AllocatorPolicy = StackSpaceAllocator,
          typename CacheEvictionPolicy = LRUCache>
-class Pager final {
+class GenericPager {
 	friend AllocatorPolicy;
+
+public:
+	template<typename... AllocatorArgs>
+	constexpr explicit GenericPager(std::size_t limit_num_pages = PAGECACHE_SIZE / PAGE_SIZE, AllocatorArgs &&...allocator_args) : m_allocator{limit_num_pages, std::forward<AllocatorArgs>(allocator_args)...},
+	                                                                                                                               m_cache{limit_num_pages} {}
+	constexpr GenericPager(const GenericPager &) = default;
+
+	constexpr GenericPager &operator=(const GenericPager &) = default;
+
+	virtual ~GenericPager() noexcept = default;
+
+	constexpr auto operator<=>(const GenericPager &) const noexcept = default;
+
+	///
+	/// Allocation API
+	///
+
+	[[nodiscard]] virtual Position alloc() = 0;
+
+	virtual void free(Position pos) = 0;
+
+	///
+	/// Page operations API
+	///
+
+	[[nodiscard]] virtual Page get(const Position pos) = 0;
+
+	virtual void place(const Position pos, Page &&page) = 0;
+
+	///
+	/// Properties
+	///
+
+	[[nodiscard]] virtual constexpr const AllocatorPolicy &allocator() const noexcept { return m_allocator; }
+
+	[[nodiscard]] virtual constexpr const PageCache<CacheEvictionPolicy> &cache() const noexcept { return m_cache; }
+
+protected:
+	AllocatorPolicy m_allocator;
+	PageCache<CacheEvictionPolicy> m_cache;
+};
+
+///
+/// Persistent pager interface
+class IPersistentPager {
+
+public:
+	virtual void save() = 0;
+	virtual void load() = 0;
+};
+
+template<typename AllocatorPolicy = StackSpaceAllocator,
+         typename CacheEvictionPolicy = LRUCache>
+class Pager : public GenericPager<AllocatorPolicy, CacheEvictionPolicy>,
+              public IPersistentPager {
+	using Super = GenericPager<AllocatorPolicy, CacheEvictionPolicy>;
 
 	[[nodiscard]] static constexpr bool at_page_boundary(const Position pos) { return pos % PAGE_SIZE == 0; }
 
 public:
-	[[nodiscard]] std::size_t size() noexcept { return std::filesystem::file_size(m_identifier); }
+	/// The Pager class conforms to the Rule of Three
 
-	[[nodiscard]] const AllocatorPolicy &allocator() const noexcept { return m_allocator; }
+	template<typename... Args>
+	explicit Pager(std::string_view identifier, const ActionOnConstruction action = ActionOnConstruction::DoNotLoad, std::size_t limit_page_cache_size = PAGECACHE_SIZE / PAGE_SIZE, Args &&...args)
+	    : Super{limit_page_cache_size, std::forward<Args>(args)...}, m_identifier{identifier} {
+		if (action == ActionOnConstruction::Load)
+			load();
+		else if (!fs::exists(identifier.data()))
+			/// Create an empty storage iff we should not load and the storage does not yet exist.
+			m_disk.open(identifier.data(), std::ios::trunc | std::ios::in | std::ios::out);
+		else
+			m_disk.open(identifier.data(), std::ios::in | std::ios::out);
+	}
 
-private:
+	virtual ~Pager() noexcept {
+		/// Close storage manually since it is not using RAII
+		m_disk.close();
+	}
+
+	constexpr Pager(const Pager &pager) = default;
+
+	constexpr auto operator<=>(const Pager &) const noexcept = default;
+
+	///
+	/// Allocation API
+	///
+
+	/// Allocate a new page and return its position.
+	/// The AllocatorPolicy of the class is used as an algorithm.
+	[[nodiscard]] Position alloc() override {
+		return this->m_allocator.alloc();
+	}
+
+	/// Free a page identified by its position.
+	/// The AllocatorPolicy of the class is used as an algorithm.
+	/// Note: Some allocators do not implement a `free` method are require that its definition is not called. BadAlloc
+	/// is thrown otherwise.
+	void free(const Position pos) override {
+		return this->m_allocator.free(pos);
+	}
+
+	///
+	/// Page operations
+	///
+
 	/// Read a page off a given position
 	/// Position is expected to be 1) associated with a page and, 2) the page which is allocated.
 	/// If that is not adhered to, BadRead is thrown.
 	[[nodiscard]] Page read(Position pos) {
-		if (!at_page_boundary(pos) || !m_allocator.has_allocated(pos))
+		if (!at_page_boundary(pos) || !this->m_allocator.has_allocated(pos))
 			throw BadRead{};
 
 		Page page;
@@ -270,87 +408,116 @@ private:
 		return write(page, alloc());
 	}
 
-public:
-	/// The Pager class conforms to the Rule of Three
-
-	template <typename ...Args>
-	explicit Pager(std::string_view identifier, const ActionOnConstruction action = ActionOnConstruction::DoNotLoad, Args&& ...args)
-	    : m_allocator{std::forward<Args>(args)...},
-		  m_identifier{identifier} {
-		if (action == ActionOnConstruction::Load)
-			load();
-		else if (!fs::exists(identifier.data()))
-			/// Create an empty storage iff we should not load and the storage does not yet exist.
-			m_disk.open(identifier.data(), std::ios::trunc | std::ios::in | std::ios::out);
-		else
-			m_disk.open(identifier.data(), std::ios::in | std::ios::out);
-	}
-
-	virtual ~Pager() noexcept {
-		/// Close storage manually since it is not using RAII
-		m_disk.close();
-	}
-
-	constexpr Pager(const Pager &pager) = default;
-
-	constexpr auto operator<=>(const Pager &) const noexcept = default;
-
-	/// Allocate a new page and return its position.
-	/// The AllocatorPolicy of the class is used as an algorithm.
-	[[nodiscard]] Position alloc() {
-		return m_allocator.alloc();
-	}
-
-	/// Free a page identified by its position.
-	/// The AllocatorPolicy of the class is used as an algorithm.
-	/// Note: Some allocators do not implement a `free` method are require that its definition is not called. BadAlloc
-	/// is thrown otherwise.
-	void free(const Position pos) {
-		return m_allocator.free(pos);
-	}
-
 	/// Acquire the page, placed at a given position.
 	/// May fail if either `read` or `write` throw an error.
-	[[nodiscard]] Page get(Position pos) {
-		if (auto p = m_cache.get(pos); p)
+	[[nodiscard]] Page get(Position pos) override {
+		if (auto p = this->m_cache.get(pos); p)
 			return p->get();
 		Page p = read(pos);
-		if (auto evict_res = m_cache.place(pos, Page(p)); evict_res)
+		if (auto evict_res = this->m_cache.place(pos, Page(p)); evict_res)
 			write(evict_res->page, evict_res->pos);
 		return p;
 	}
 
 	/// Placed a page at a given position.
 	/// May fail if `write` throws an error.
-	void place(Position pos, Page &&page) {
-		if (auto evict_res = m_cache.place(pos, std::move(page)); evict_res)
+	void place(Position pos, Page &&page) override {
+		if (auto evict_res = this->m_cache.place(pos, Page(page)); evict_res)
 			write(evict_res->page, evict_res->pos);
 	}
 
-	void save() {
+	///
+	/// Persistence API
+	///
+
+	void save() override {
 		// Store allocator state
 		nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{fmt::format("{}-alloc", m_identifier.data()), std::ios::trunc | std::ios::out};
-		if (!serializer.Write(m_allocator))
+		if (!serializer.Write(this->m_allocator))
 			throw BadWrite();
 
 		// Flush cache
-		for (auto evict_res : m_cache.flush())
+		for (auto evict_res : this->m_cache.flush())
 			if (evict_res)
 				write(evict_res->page, evict_res->pos);
 	}
 
-	void load() {
+	void load() override {
 		// Load allocator state
 		nop::Deserializer<nop::StreamReader<std::ifstream>> deserializer{fmt::format("{}-alloc", m_identifier.data())};
-		if (!deserializer.Read(&m_allocator))
+		if (!deserializer.Read(&this->m_allocator))
 			throw BadRead();
 	}
 
+public:
+	[[nodiscard]] std::string_view identifier() const noexcept { return m_identifier; }
+
 private:
-	AllocatorPolicy m_allocator;
-	PageCache<CacheEvictionPolicy> m_cache;
 	std::string_view m_identifier;
 	std::fstream m_disk;
+};
+
+template<typename AllocatorPolicy = StackSpaceAllocator>
+class InMemoryPager : protected GenericPager<AllocatorPolicy, NeverEvictCache> {
+	using Super = GenericPager<AllocatorPolicy, NeverEvictCache>;
+
+public:
+	/// The InMemoryPager class conforms to the Rule of Three
+
+	template<typename... Args>
+	explicit InMemoryPager(std::string_view identifier, std::size_t limit_page_cache_size = PAGECACHE_SIZE_UNLIMITED) : Super{limit_page_cache_size}, m_identifier{identifier} {}
+
+	~InMemoryPager() noexcept override = default;
+
+	constexpr InMemoryPager(const InMemoryPager &pager) = default;
+
+	constexpr auto operator<=>(const InMemoryPager &) const noexcept = default;
+
+	///
+	/// Allocation API
+	///
+
+	/// Allocate a new page and return its position.
+	/// The AllocatorPolicy of the class is used as an algorithm.
+	[[nodiscard]] Position alloc() override {
+		return this->m_allocator.alloc();
+	}
+
+	/// Free a page identified by its position.
+	/// The AllocatorPolicy of the class is used as an algorithm.
+	/// Note: Some allocators do not implement a `free` method are require that its definition is not called. BadAlloc
+	/// is thrown otherwise.
+	void free(const Position) override {
+		DO_NOTHING
+	}
+
+	///
+	/// Page operations
+	///
+
+public:
+	/// Acquire the page, placed at a given position.
+	/// May fail if either `read` or `write` throw an error.
+	[[nodiscard]] Page get(Position pos) override {
+		auto p = this->m_cache.get(pos);
+
+		// InMemoryPager stores all pages in the cache.
+		assert(p.has_value());
+		return *p;
+	}
+
+	/// Placed a page at a given position.
+	/// May fail if `write` throws an error.
+	void place(Position pos, Page &&page) override {
+		if (auto evict_res = this->m_cache.place(pos, page); evict_res)
+			UNREACHABLE
+	}
+
+public:
+	[[nodiscard]] std::string_view identifier() const noexcept { return m_identifier; }
+
+private:
+	std::string_view m_identifier;
 };
 
 }// namespace internal::storage

@@ -39,6 +39,21 @@ struct BadTreeAccess : std::runtime_error {
 enum class LinkStatus : uint8_t { Valid,
 	                          Inval };
 
+/// Denotes how split operations distributes the entries of the overflowed node.
+/// LeanLeft means that the left node is kept full, LeanRight- that the right node is kept full,
+/// and Unbiased- that the entries are equally distributed among to the two siblings.
+enum class SplitBias { LeanLeft,
+	               LeanRight,
+	               DistributeEvenly,
+	               TakeLiterally };
+
+/// Denotes how split operations deal with the midkey.
+/// Normally, branch nodes remove the midkey from the resulting 2 nodes and propagate it upwards.
+/// ExplodeOnly will not do that and the midkey is only a copy. - split(| 1 2 3 4 |) -> | 1 2 |, | 3 4 |.
+/// ExcludeMid does what is considered the normal behaviour, described earlier.
+enum class SplitType { ExplodeOnly,
+	               ExcludeMid };
+
 template<BtreeConfig Config = DefaultConfig>
 class Node {
 	friend Btree<Config>;
@@ -61,38 +76,46 @@ public:
 	/// status- check the definition of 'LinkStatus' for the details. This type is serializable (persistent) and
 	/// comparable.
 	struct Branch {
-		std::vector<Ref> m_refs;
-		std::vector<Position> m_links;
-		std::vector<LinkStatus> m_link_status;
+		std::vector<Ref> refs;
+		std::vector<Position> links;
+		std::vector<LinkStatus> link_status;
 
 		constexpr Branch() = default;
 		constexpr Branch(std::vector<Ref> &&refs, std::vector<Position> &&links, std::vector<LinkStatus> &&link_status)
-		    : m_refs{std::move(refs)}, m_links{std::move(links)}, m_link_status{std::move(link_status)} {}
+		    : refs{std::move(refs)}, links{std::move(links)}, link_status{std::move(link_status)} {}
 
-		constexpr Branch(const Branch&) = default;
-		constexpr Branch& operator=(const Branch&) = default;
+		constexpr Branch(const Branch &) = default;
+		constexpr Branch &operator=(const Branch &) = default;
 
 		auto operator<=>(const Branch &) const noexcept = default;
-		NOP_STRUCTURE(Branch, m_refs, m_links, m_link_status);
+		NOP_STRUCTURE(Branch, refs, links, link_status);
 	};
 
 	/// Data specific to leaf nodes.
 	/// Each such node contains a list of keys ('keys') and a list of values ('vals').
 	/// This is whether the entry association is done (<key, val>).
 	/// This type is serializable (persistent) and comparable.
+
+	struct Entry {
+		Key key;
+		Val val;
+
+		[[nodiscard]] auto operator<=>(const Entry &) const noexcept = default;
+	};
+
 	struct Leaf {
-		std::vector<Key> m_keys;
-		std::vector<Val> m_vals;
+		std::vector<Key> keys;
+		std::vector<Val> vals;
 
 		constexpr Leaf() = default;
 		constexpr Leaf(std::vector<Key> &&keys, std::vector<Val> &&vals)
-		    : m_keys{std::move(keys)}, m_vals{std::move(vals)} {}
+		    : keys{std::move(keys)}, vals{std::move(vals)} {}
 
-		constexpr Leaf(const Leaf&) = default;
-		constexpr Leaf& operator=(const Leaf&) = default;
+		constexpr Leaf(const Leaf &) = default;
+		constexpr Leaf &operator=(const Leaf &) = default;
 
 		auto operator<=>(const Leaf &) const noexcept = default;
-		NOP_STRUCTURE(Leaf, m_keys, m_vals);
+		NOP_STRUCTURE(Leaf, keys, vals);
 	};
 
 	/// Each node contains either a Branch or Leaf specific data.
@@ -118,7 +141,7 @@ public:
 	constexpr Node(Node &&) noexcept = default;
 	constexpr Node(const Node &) = default;
 
-	constexpr Node &operator=(const Node &) = delete;
+	constexpr Node &operator=(const Node &) = default;
 	constexpr Node &operator=(Node &&) noexcept = default;
 
 	constexpr auto operator==(const Node &rhs) const noexcept {
@@ -150,17 +173,11 @@ public:
 		return p;
 	}
 
-	/// Denotes how split operations distributes the entries of the overflowed node.
-	/// LeanLeft means that the left node is kept full, LeanRight- that the right node is kept full,
-	/// and Unbiased- that the entries are equally distributed among to the two siblings.
-	enum class SplitBias { LeanLeft,
-		               LeanRight,
-		               DistributeEvenly };
-
 	/// Perform a split operation based on some branching factor 'm'.
 	/// Returns a brand new node and the key which is not contained in
 	/// neither of the nodes. It should be put in the parent's list.
-	constexpr std::pair<Key, Nod> split(const std::size_t max_num_records, const SplitBias bias) {
+
+	constexpr std::pair<Key, Nod> split(const std::size_t max_num_records, const SplitBias bias, const SplitType type = SplitType::ExcludeMid) {
 		Node sibling;
 		Key midkey;
 		const auto pivot = [max_num_records, bias, this]() -> std::size_t {
@@ -169,6 +186,9 @@ public:
 				break; case SplitBias::LeanLeft: return max_num_records - 1;
 				break; case SplitBias::LeanRight: return std::abs(num_filled() - static_cast<long>(max_num_records)) + 1;
 				break; case SplitBias::DistributeEvenly: return num_filled() / 2;
+				// In such case 'max_num_records' is not the maximum but the actual pivot precalculated.
+				// Note: Using this option is discouraged in regular cases, since it may be an invalid index.
+				break; case SplitBias::TakeLiterally: return max_num_records;
 			}
 			// clang-format on
 			UNREACHABLE
@@ -176,13 +196,14 @@ public:
 
 		if (is_branch()) {
 			auto &b = branch();
-			midkey = b.m_refs[pivot];
-			sibling = {metadata_ctor<Branch>(break_at_index(b.m_refs, pivot + 1), break_at_index(b.m_links, pivot + 1), break_at_index(b.m_link_status, pivot + 1)), parent()};
-			b.m_refs.pop_back(); // Branch nodes do not copy mid-keys
+			midkey = b.refs[pivot];
+			sibling = {metadata_ctor<Branch>(break_at_index(b.refs, pivot + 1), break_at_index(b.links, pivot + 1), break_at_index(b.link_status, pivot + 1)), parent()};
+			if (type == SplitType::ExcludeMid)
+				b.refs.pop_back();// Branch nodes do not copy mid-keys
 		} else {
 			auto &l = leaf();
-			sibling = {metadata_ctor<Leaf>(break_at_index(l.m_keys, pivot), break_at_index(l.m_vals, pivot)), parent()};
-			midkey = sibling.leaf().m_keys.front();
+			sibling = {metadata_ctor<Leaf>(break_at_index(l.keys, pivot), break_at_index(l.vals, pivot)), parent()};
+			midkey = sibling.leaf().keys.front();
 		}
 
 		return std::make_pair<Key, Nod>(std::move(midkey), std::move(sibling));
@@ -191,24 +212,51 @@ public:
 	/// Create a new node which is a combination of *this and other.
 	/// The created node is returned as a result and is guaranteed to be a valid node, which conforms to the
 	/// btree requirements for a node.
-	[[maybe_unused]] constexpr std::optional<Node> merge_with(const Node &other) const {
-		// Merge is performed only of nodes which share a parent (are siblings)
-		// Also a sanity check is done ensuring the nodes are at the same level.
-		if (is_leaf() ^ other.is_leaf() && parent() == other.parent())
-			return {};
-
-		Node merged{*this};
-
+	[[maybe_unused]] constexpr Nod fuse_with(const Node &other) {
+		Metadata m;
 		if (is_leaf()) {
-			vector_extend(merged.leaf().m_keys, other.leaf().m_keys);
-			vector_extend(merged.leaf().m_vals, other.leaf().m_vals);
-		} else {
-			vector_extend(merged.branch().m_refs, other.branch().m_refs);
-			vector_extend(merged.branch().m_links, other.branch().m_links);
-			vector_extend(merged.branch().m_link_status, other.branch().m_link_status);
-		}
+			auto l = Leaf();
+			merge_many(leaf().keys, other.leaf().keys, [&](const bool use_self, const std::size_t idx) {
+				if (use_self) {
+					fmt::print("Adding {}\n", *(leaf().keys.cbegin() + idx));
+					l.keys.push_back(*(leaf().keys.cbegin() + idx));
+					l.vals.push_back(*(leaf().vals.cbegin() + idx));
+				} else {
+					fmt::print("Adding {}\n", *(other.leaf().keys.cbegin() + idx));
+					l.keys.push_back(*(other.leaf().keys.cbegin() + idx));
+					l.vals.push_back(*(other.leaf().vals.cbegin() + idx));
+				}
+			});
+			m = l;
+		} else if (is_branch()) {
+			auto b = Branch();
+			merge_many(branch().refs, other.branch().refs, [&](const bool use_self, const std::size_t idx) {
+				if (use_self) {
+					b.refs.push_back(*(branch().refs.cbegin() + idx));
+					b.links.push_back(*(branch().links.cbegin() + idx));
+					b.link_status.push_back(*(branch().link_status.cbegin() + idx));
+					fmt::print("Adding {} and link to @{}\n", b.refs.back(), b.links.back());
+					if (idx == branch().refs.size() - 1 && branch().links.size() > branch().refs.size()) {
+						fmt::print("Last ref, adding right link and link to @{}\n", branch().links.back());
+						b.links.push_back(branch().links.back());
+						b.link_status.push_back(branch().link_status.back());
+					}
+				} else {
+					b.refs.push_back(*(other.branch().refs.cbegin() + idx));
+					b.links.push_back(*(other.branch().links.cbegin() + idx));
+					b.link_status.push_back(*(other.branch().link_status.cbegin() + idx));
+					fmt::print("Adding {} and link to @{}\n", b.refs.back(), b.links.back());
+					if (idx == other.branch().refs.size() - 1 && other.branch().links.size() > other.branch().refs.size()) {
+						fmt::print("Last ref, adding right link and link to @{}\n", other.branch().links.back());
+						b.links.push_back(other.branch().links.back());
+						b.link_status.push_back(other.branch().link_status.back());
+					}
+				}
+			});
 
-		return std::make_optional<Node>(std::move(merged));
+			m = b;
+		}
+		return Nod(std::move(m), 0, m_is_root ? RootStatus::IsRoot : RootStatus::IsInternal);
 	}
 
 	///
@@ -252,11 +300,11 @@ public:
 
 	[[nodiscard]] constexpr bool is_root() const noexcept { return m_is_root; }
 
-	[[nodiscard]] constexpr long num_filled() const noexcept { return is_leaf() ? leaf().m_keys.size() : branch().m_refs.size(); }
+	[[nodiscard]] constexpr long num_filled() const noexcept { return is_leaf() ? leaf().keys.size() : branch().refs.size(); }
 
-	[[nodiscard]] constexpr const auto &items() const noexcept { return is_leaf() ? leaf().m_keys : branch().m_refs; }
+	[[nodiscard]] constexpr const auto &items() const noexcept { return is_leaf() ? leaf().keys : branch().refs; }
 
-	[[nodiscard]] constexpr auto &items() noexcept { return is_leaf() ? leaf().m_keys : branch().m_refs; }
+	[[nodiscard]] constexpr auto &items() noexcept { return is_leaf() ? leaf().keys : branch().refs; }
 
 	[[nodiscard]] constexpr bool is_over(long m) const noexcept { return num_filled() > m; }
 

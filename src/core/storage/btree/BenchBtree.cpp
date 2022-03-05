@@ -1,5 +1,11 @@
 #include <benchmark/benchmark.h>
 
+#include <core/Util.h>
+#include <core/storage/btree/Btree.h>
+
+using namespace internal::storage::btree;
+using namespace internal;
+
 // FIXME:
 // Will get implemented once merged with 'btree-crud' branch
 

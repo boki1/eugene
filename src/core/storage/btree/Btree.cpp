@@ -17,6 +17,10 @@ using namespace internal;
 using namespace internal::storage::btree;
 using internal::storage::Position;
 using Bt = Btree<DefaultConfig>;
+using Nod = Node<DefaultConfig>;
+using Metadata = Nod::Metadata;
+using Branch = Nod::Branch;
+using Leaf = Nod::Leaf;
 
 ///
 /// Various tree configuration used in the tests below
@@ -32,7 +36,9 @@ struct SmallstrToPerson : DefaultConfig {
 };
 
 /// 2-3 tree: https://en.wikipedia.org/wiki/2-3_tree
-struct Tree23 : DefaultConfig { BTREE_OF_ORDER(3); };
+struct Tree23 : DefaultConfig {
+	BTREE_OF_ORDER(4);
+};
 
 struct DoubleToLong : DefaultConfig {
 	using Key = double;
@@ -84,14 +90,18 @@ void check_for_tree_backup_mismatch(Btree<Config> &bpt, const std::map<typename 
 TEST_CASE("Btree operations", "[btree]") {
 	fs::create_directories("/tmp/eugene-tests/btree-operations");
 
-	SECTION("Empty tree") {
+	SECTION("Create tree") {
 		Bt bpt("/tmp/eugene-tests/btree-operations/empty-tree");
-
 		REQUIRE(bpt.contains(42) == false);
 		REQUIRE(bpt.get(42).has_value() == false);
 		REQUIRE(std::holds_alternative<Bt::RemovedNothing>(bpt.remove(42)));
-
 		REQUIRE(bpt.sanity_check());
+
+		Bt mem_bpt("in-memory-tree-#1", ActionOnConstruction::InMemoryOnly);
+		REQUIRE(mem_bpt.contains(42) == false);
+		REQUIRE(mem_bpt.get(42).has_value() == false);
+		REQUIRE(std::holds_alternative<Bt::RemovedNothing>(mem_bpt.remove(42)));
+		REQUIRE(mem_bpt.sanity_check());
 	}
 	SECTION("Insertion") {
 		SECTION("Insertion without rebalancing") {
@@ -100,14 +110,14 @@ TEST_CASE("Btree operations", "[btree]") {
 			static const std::size_t limit = bpt.max_num_records_leaf();
 			auto backup = fill_tree_with_random_items(bpt, limit);
 
-			 if constexpr (NDEBUG)
+			if constexpr (NDEBUG)
 				util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-operations/insertion-without-rebalancing-printed"}();
 
 			check_for_tree_backup_mismatch(bpt, backup);
 		}
 		SECTION("Difficult insertion") {
-			Bt bpt("/tmp/eugene-tests/btree-operations/difficult-insertion");
-			[[maybe_unused]] static const std::size_t limit = 1'000;
+			Btree<Tree23> bpt("/tmp/eugene-tests/btree-operations/difficult-insertion");
+			[[maybe_unused]] static const std::size_t limit = 10;
 			fmt::print("keys-in-leaf: [{}]; [{}]\n", bpt.min_num_records_leaf(), bpt.max_num_records_leaf());
 			fmt::print("keys-in-branch: [{}]; [{}]\n", bpt.min_num_records_branch(), bpt.max_num_records_branch());
 			auto backup = fill_tree_with_random_items(bpt, limit);
@@ -120,7 +130,6 @@ TEST_CASE("Btree operations", "[btree]") {
 			fmt::print("root_node.num_filled() = {}\n", root_node.num_filled());
 		}
 	}
-
 	SECTION("Removal") {
 		SECTION("Removal without rebalancing") {
 			Btree<Tree23> bpt("/tmp/eugene-tests/btree-operations/removal-without-rebalancing");
@@ -159,10 +168,8 @@ TEST_CASE("Btree operations", "[btree]") {
 			REQUIRE(bpt.empty());
 
 			util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-operations/difficult-removal-printed-2"}();
-
 		}
 	}
-
 	SECTION("Update") {
 		Bt bpt("/tmp/eugene-tests/btree-operations/update");
 		static const std::size_t limit = 1000;
@@ -184,12 +191,10 @@ TEST_CASE("Btree operations", "[btree]") {
 
 		check_for_tree_backup_mismatch(bpt, backup);
 	}
-
 	SECTION("Queries") {
-		Bt tree;
 		Bt bpt("/tmp/eugene-tests/btree-operations/queries");
 		std::vector<Bt::Entry> inserted_entries;
-		const int limit = 100'000;
+		const int limit = 1000;
 		for (const int item : std::ranges::views::iota(0, limit)) {
 			inserted_entries.push_back(Bt::Entry{item, item});
 			bpt.insert(item, item);
@@ -220,6 +225,39 @@ TEST_CASE("Btree operations", "[btree]") {
 			fetched_entries_in_given_range.push_back(item);
 
 		REQUIRE(std::ranges::equal(fetched_entries_in_given_range, inserted_entries_in_given_range));
+	}
+}
+
+TEST_CASE("Btree bulk insertion", "[btree]") {
+	fs::create_directories("/tmp/eugene-tests/btree-bulk-insertion");
+	SECTION("Empty tree") {
+		Btree<Tree23> bpt("/tmp/eugene-tests/btree-bulk-insertion/insert-many-empty");
+
+		static const std::size_t limit = 10;
+		std::vector<Btree<Tree23>::Entry> entries_to_insert;
+		entries_to_insert.reserve(limit);
+		std::generate_n(std::back_inserter(entries_to_insert), limit, [i = 0]() mutable { return Btree<Tree23>::Entry{.key = i, .val = i++}; });
+
+		const auto res = bpt.insert_many(entries_to_insert);
+
+		for (auto i = 0ul; i < limit; ++i) {
+			REQUIRE(std::holds_alternative<Btree<Tree23>::InsertedEntry>(res.at(i)));
+			REQUIRE(*bpt.get(entries_to_insert[i].key) == entries_to_insert[i].val);
+		}
+
+		util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-bulk-insertion/insert-many-empty-printed"}();
+	}
+
+	SECTION("Simple bulk insertion without rebalancing") {
+		auto e = [](const auto &k) { return Btree<Tree23>::Entry{.key = k, .val = k}; };
+
+		Btree<Tree23> bpt("/tmp/eugene-tests/btree-bulk-insertion/insert-many-without-rebalancing");
+		bpt.insert_many(std::vector<Btree<Tree23>::Entry>{e(7), e(8), e(10), e(28), e(31), e(48), e(50), e(51)});
+		bpt.insert_many(std::vector<Btree<Tree23>::Entry>{e(13), e(15), e(16), e(17), e(18), e(19), e(20), e(23)});
+
+		for (const auto &entry : std::vector<Btree<Tree23>::Entry>{e(7), e(8), e(10), e(28), e(31), e(48), e(50), e(51), e(13), e(15), e(16), e(17), e(18), e(19), e(20), e(23)})
+			REQUIRE(bpt.get(entry.key).value() == entry.val);
+		util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-bulk-insertion/insert-many-without-rebalancing-printed"}();
 	}
 }
 
@@ -317,5 +355,60 @@ TEST_CASE("Btree configs") {
 
 		util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-configs/aggregate-types-printed"}();
 		check_for_tree_backup_mismatch(bpt, backup);
+	}
+}
+
+TEST_CASE("Btree utils") {
+	static constexpr auto BRANCH_NUM = 100;
+
+	SECTION("Node associated") {
+		Btree<DefaultConfig> bpt{"/tmp/eugene-tests/btree-utils/node-associated"};
+
+		std::vector<Position> branch_links_left(BRANCH_NUM + 1);
+		std::generate(branch_links_left.begin(), branch_links_left.end(), [&] { return bpt.pager().alloc(); });
+
+		std::vector<Position> branch_links_right(BRANCH_NUM + 1);
+		std::generate(branch_links_right.begin(), branch_links_right.end(), [&] { return bpt.pager().alloc(); });
+
+		auto branch_node_left  = Nod{Metadata(Branch(n_random_items<int>(BRANCH_NUM), std::move(branch_links_left), std::vector<LinkStatus>(BRANCH_NUM + 1, LinkStatus::Valid))), {}, Nod::RootStatus::IsInternal};
+		auto branch_node_right = Nod{Metadata(Branch(n_random_items<int>(BRANCH_NUM), std::move(branch_links_right), std::vector<LinkStatus>(BRANCH_NUM + 1, LinkStatus::Valid))), {}, Nod::RootStatus::IsInternal};
+		branch_node_left.branch().link_status[17] = LinkStatus::Inval;
+		branch_node_left.branch().link_status[38] = LinkStatus::Inval;
+		branch_node_left.branch().link_status[46] = LinkStatus::Inval;
+		branch_node_right.branch().link_status[27] = LinkStatus::Inval;
+		branch_node_right.branch().link_status[36] = LinkStatus::Inval;
+		branch_node_right.branch().link_status[78] = LinkStatus::Inval;
+
+		std::sort(branch_node_left.branch().refs.begin(), branch_node_left.branch().refs.end());
+		std::sort(branch_node_right.branch().refs.begin(), branch_node_right.branch().refs.end());
+
+		auto merged = branch_node_left.fuse_with(branch_node_right);
+		const auto merge_pos = bpt.pager().alloc();
+		bpt.pager().place(merge_pos, merged.make_page());
+
+		auto link_status_cbegin = merged.branch().links.cbegin();
+		auto empty_node = Nod{Metadata(Branch()), {}, Nod::RootStatus::IsInternal};
+		for (auto link_cbegin = merged.branch().links.cbegin(); link_cbegin != merged.branch().links.cend(); ++link_cbegin) {
+			if (*link_status_cbegin)
+				bpt.pager().place(*link_cbegin, empty_node.make_page());
+			++link_status_cbegin;
+		}
+
+		bpt.fix_sibling_links(merged, {0xABCD});
+
+		std::vector<Position> sibling_links;
+
+		std::vector<Position> parent_links{merged.branch().links};
+		for (const auto link : std::vector<Position>{
+		             branch_node_left.branch().links[17],
+		             branch_node_left.branch().links[38],
+		             branch_node_left.branch().links[46],
+		             branch_node_right.branch().links[27],
+		             branch_node_right.branch().links[36],
+		             branch_node_right.branch().links[78]}) {
+			parent_links.erase(std::find(parent_links.cbegin(), parent_links.cend(), link));
+		}
+		parent_links.push_back(0xABCD);
+		REQUIRE(std::equal(sibling_links.cbegin(), sibling_links.cend(), parent_links.cbegin()));
 	}
 }
