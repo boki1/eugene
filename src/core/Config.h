@@ -29,6 +29,9 @@ struct Config {
 	static inline constexpr bool PERSISTENT = true;
 
 	static inline constexpr bool BTREE_RELAXED_REMOVES = true;
+
+	static inline constexpr bool BTREE_DYN_ENTRIES = false;
+	using RealVal = Val;
 };
 
 template<typename C>

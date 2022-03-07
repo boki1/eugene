@@ -23,6 +23,10 @@
 
 namespace internal {
 
+struct BadIndVector : std::runtime_error {
+	explicit BadIndVector(std::string_view msg) : std::runtime_error{fmt::format("Eugene: Bad indirection vector {}", msg.data())} {}
+};
+
 struct Slot {
 	storage::Position pos;
 	std::size_t size;
@@ -33,8 +37,11 @@ using SlotId = std::size_t;
 template<EugeneConfig Config>
 class IndirectionVector {
 	using Val = typename Config::Val;
+	using RealVal = typename Config::RealVal;
+
 	using PagerType = typename Config::PagerType;
 
+	static_assert(std::same_as<Val, SlotId>);
 public:
 	///
 	/// Properties
@@ -62,7 +69,7 @@ public:
 	}
 
 	/// Allocates and sets new slot and returns its id
-	void set_to_slot(const Val &val, const auto sz = sizeof(Val)) {
+	Val set_to_slot(const RealVal &val, const auto sz = sizeof(Val)) {
 		const auto val_pos = m_slot_pager.alloc_inner(sz);
 
 		std::vector<uint8_t> val_data;
@@ -75,6 +82,7 @@ public:
 		m_slots.emplace_back(Slot{
 		        .pos = val_pos,
 		        .size = sz});
+		return m_slots.size() - 1;
 	}
 
 	/// Frees up allocated slot and associated inner space
