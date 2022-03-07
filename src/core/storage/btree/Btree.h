@@ -422,15 +422,9 @@ private:
 		     })) {
 			const PosNod path_to_instree_root = consume_back<PosNod, TreePath>(instree.path);
 			auto instree_root = Nod::from_page(m_pager->get(path_to_instree_root.node_pos));
-			fmt::print("path_to_instree_root = {}\n", path_to_instree_root.node_pos);
-			if (instree_root.is_branch())
-			fmt::print("[ {} ]\n", fmt::join(instree_root.branch().refs, ", "));
-			else
-			fmt::print("[ {} ]\n", fmt::join(instree_root.leaf().keys, ", "));
 			const PosNod path_to_p = consume_back<PosNod, TreePath>(instree.path);
 			auto ppos = path_to_p.node_pos;
 			auto p = Nod::from_page(m_pager->get(ppos));
-			fmt::print("Starting SBR for tree rooted just below @{}\n", ppos);
 
 			for (auto height = 1ul; height < instree.tree.depth() - 1; ++height) {
 				/// Deref safety: We already filtered insertion trees without parents and fetched this insertion tree's parent
@@ -451,52 +445,11 @@ private:
 				fix_sibling_links({right_sibling_of_p_pos});
 				fix_sibling_links(right_sibling_of_p);
 
-#define DEBUG
-#if defined(DEBUG)
-				fmt::print("Nodes children of node [ {} ], @{}:\n", fmt::join(p.branch().refs, ", "), ppos);
-				for (const auto link : p.branch().links) {
-					[[maybe_unused]] auto nod = Nod::from_page(m_pager->get(link));
-					if (nod.is_branch())
-						fmt::print("Node [ {} ], @{}:\n", fmt::join(nod.branch().refs, ", "), link);
-					else if (nod.is_leaf())
-						fmt::print("Node [ {} ], @{}:\n", fmt::join(nod.leaf().keys, ", "), link);
-				}
-
-				fmt::print("\n");
-				fmt::print("Nodes children of node [ {} ], @{}:\n", fmt::join(right_sibling_of_p.branch().refs, ", "), ppos);
-				for (const auto link : right_sibling_of_p.branch().links) {
-					[[maybe_unused]] auto nod = Nod::from_page(m_pager->get(link));
-					if (nod.is_branch())
-						fmt::print("Node [ {} ], @{}:\n", fmt::join(nod.branch().refs, ", "), link);
-					else if (nod.is_leaf())
-						fmt::print("Node [ {} ], @{}:\n", fmt::join(nod.leaf().keys, ", "), link);
-				}
-				fmt::print("---------\n");
-#endif
-
 				auto &l = instree_root.branch().links;
-				fmt::print("after level-linking: instree_root.branch().refs = [ {} ]\n", fmt::join(instree_root.branch().refs, ", "));
-				fmt::print("before removal of ql and qr\n");
-				for (const auto link : l){
-					[[maybe_unused]] auto nod = Nod::from_page(m_pager->get(link));
-					if (nod.is_branch())
-						fmt::print("  Node [ {} ], @{}:\n", fmt::join(nod.branch().refs, ", "), link);
-					else if (nod.is_leaf())
-						fmt::print("  Node [ {} ], @{}:\n", fmt::join(nod.leaf().keys, ", "), link);
-				}
-
 				if (auto fr = std::find(l.cbegin(), l.cend(), smallest_in_instree_pos); fr != l.cend())
 					l.erase(fr);
 				if (auto fr = std::find(l.cbegin(), l.cend(), biggest_in_instree_pos); fr != l.cend())
 					l.erase(fr);
-				fmt::print("after removal of ql and qr\n");
-				for (const auto link : l){
-					[[maybe_unused]] auto nod = Nod::from_page(m_pager->get(link));
-					if (nod.is_branch())
-						fmt::print("  Node [ {} ], @{}:\n", fmt::join(nod.branch().refs, ", "), link);
-					else if (nod.is_leaf())
-						fmt::print("  Node [ {} ], @{}:\n", fmt::join(nod.leaf().keys, ", "), link);
-				}
 
 				l.push_back(ppos);
 				l.push_back(right_sibling_of_p_pos);

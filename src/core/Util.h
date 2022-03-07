@@ -98,7 +98,6 @@ template<typename T, typename V>
 	auto diff_begin = std::cbegin(diff);
 	while (self_begin < std::cend(self) && diff_begin < std::cend(diff)) {
 		const auto use_self = *self_begin < *diff_begin;
-		fmt::print("{} < {} ??? {}\n", *self_begin, *diff_begin, use_self);
 		std::size_t idx = use_self
 		        ? std::distance(std::cbegin(self), self_begin++)
 		        : std::distance(std::cbegin(diff), diff_begin++);
