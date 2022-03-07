@@ -88,7 +88,7 @@ template<typename T>
 };
 
 template<typename T, typename V>
-[[nodiscard]] bool collection_contains(const T &collection, V item) {
+[[nodiscard]] constexpr bool collection_contains(const T &collection, V item) {
 	return std::find(collection.cbegin(), collection.cend(), item) != collection.cend();
 }
 
@@ -131,6 +131,10 @@ template<typename T, typename Ts>
 
 #define DO_NOTHING \
 	do {} while(0);
+
+[[nodiscard]] constexpr auto round_upwards(auto a, auto b) {
+	return (a / b) + (a % b > 0);
+}
 
 ///
 /// Used  primarily in unit tests

@@ -196,7 +196,7 @@ public:
 		huff_trie *node;
 
 		if (path.find('/') != std::string::npos) {
-			std::filesystem::create_directories(path.substr(0, path.find_last_of('/')));
+			fs::create_directories(path.substr(0, path.find_last_of('/')));
 		}
 		std::ofstream new_file(path, std::ios::binary);
 		for (long int i = 0; i < size; i++) {

@@ -1,6 +1,8 @@
 #include <array>
 #include <fstream>
 #include <vector>
+#include <algorithm>
+#include <filesystem>
 
 #include <catch2/catch.hpp>
 
@@ -31,17 +33,17 @@ TEST_CASE("Page", "[pager]") {
 
 TEST_CASE("Persistent pager", "[pager]") {
 	SECTION("Using stack allocator") {
-		Pager pr_stack1("/tmp/eu-persistent-pager-stackallocater");
+		Pager<StackSpaceAllocator> pr_stack1("/tmp/eu-persistent-pager-stackallocater");
 
 		for (int i = 0; i < 10; ++i)
 			[[maybe_unused]] Position p = pr_stack1.alloc();
 		REQUIRE(pr_stack1.allocator().cursor() == 10 * PAGE_SIZE);
 		pr_stack1.save();
 
-		Pager pr_stack2("/tmp/eu-persistent-pager-stackallocater", ActionOnConstruction::Load);
+		Pager<StackSpaceAllocator> pr_stack2("/tmp/eu-persistent-pager-stackallocater", ActionOnConstruction::Load);
 		REQUIRE(pr_stack2.allocator().cursor() == 10 * PAGE_SIZE);
 
-		Pager pr_stack3("/tmp/eu-persistent-pager-stackallocater", ActionOnConstruction::DoNotLoad);
+		Pager<StackSpaceAllocator> pr_stack3("/tmp/eu-persistent-pager-stackallocater", ActionOnConstruction::DoNotLoad);
 		REQUIRE(pr_stack3.allocator().cursor() == 0);
 		pr_stack3.load();
 		REQUIRE(pr_stack3.allocator().cursor() == 10 * PAGE_SIZE);
@@ -76,7 +78,7 @@ TEST_CASE("Persistent pager", "[pager]") {
 }
 
 TEST_CASE("Page stack allocator", "[pager]") {
-	Pager pr("/tmp/eu-pager-stack-alloc");
+	Pager<StackSpaceAllocator> pr("/tmp/eu-pager-stack-alloc");
 	for (int i = 0; i < 11; ++i) {
 		REQUIRE(pr.alloc() == i * PAGE_SIZE);
 		REQUIRE_THROWS_AS(pr.free(0), BadAlloc);

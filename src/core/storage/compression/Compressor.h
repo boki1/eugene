@@ -8,7 +8,7 @@
 #include <core/Logger.h>
 
 static constexpr size_t Folder = 16;
-static constexpr size_t OsBites = 64;
+static constexpr size_t OsBytes = 64;
 
 namespace fs = std::filesystem;
 
@@ -255,7 +255,7 @@ public:
 	///
 	/// \param path - string that represents the path to the file/folder
 	void count_file_bytes_freq(const std::string &path) {
-		m_total_bits += OsBites;
+		m_total_bits += OsBytes;
 		const std::string buff = return_file_info(path);
 
 		for (const auto &item : buff)

@@ -28,15 +28,28 @@ namespace fs = std::filesystem;
 namespace internal::storage {
 
 constexpr static std::size_t PAGE_SIZE = 4_KB;
+/// Each 4B have a bit denoting whether they are used or not.
+constexpr static std::size_t PAGE_ALLOC_SCALE = 4_B;
+/// Num B used for the header.
+/// 1B for type: Slot or Node.
+enum class PageType : uint8_t { Node,
+	                        Slots };
+
+/// Start of allocation metadata
+constexpr static std::size_t PAGE_ALLOC_METADATA = sizeof(PageType);
+/// The rest is for allocation information.
+constexpr static std::size_t PAGE_HEADER_SIZE = PAGE_ALLOC_METADATA + PAGE_SIZE / PAGE_ALLOC_SCALE;
+
 constexpr static std::size_t PAGECACHE_SIZE = 1_MB;
 
-/// FIXME:
-//constexpr static std::size_t PAGECACHE_SIZE_UNLIMITED = 0;
-constexpr static std::size_t PAGECACHE_SIZE_UNLIMITED = 100;
+constexpr static std::size_t PAGECACHE_SIZE_UNLIMITED = 0;
 
 constexpr static std::size_t DEFAULT_NUM_PAGES = 256;
 
 using Position = unsigned long int;
+
+/// Page layout
+/// First
 using Page = std::array<std::uint8_t, PAGE_SIZE>;
 
 /// Page with position
@@ -73,13 +86,13 @@ struct BadPosition : std::runtime_error {
 /// Bad read
 /// The read operation failed.
 struct BadRead : std::runtime_error {
-	explicit BadRead() : std::runtime_error{"Eugene: Bad read"} {}
+	explicit BadRead(std::string msg = "") : std::runtime_error{fmt::format("Eugene: Bad read - {}", msg)} {}
 };
 
 /// Bad write
 /// The write operation failed.
 struct BadWrite : std::runtime_error {
-	explicit BadWrite() : std::runtime_error{"Eugene: Bad write"} {}
+	explicit BadWrite(std::string msg = "") : std::runtime_error{fmt::format("Eugene: Bad write - {}", msg)} {}
 };
 
 /// Stack-based allocator
@@ -114,6 +127,11 @@ public:
 		return pos < m_cursor;
 	}
 
+	[[nodiscard]] cppcoro::generator<Position> next_allocated_page() const noexcept {
+		for (auto i = 0ul; i < m_cursor; i += PAGE_SIZE)
+			co_yield i;
+	}
+
 	[[nodiscard]] constexpr Position cursor() const noexcept { return m_cursor; }
 };
 
@@ -124,9 +142,6 @@ public:
 /// positions are stored sorted.
 /// Checking whether a page has been allocated is Θ(n).
 /// The drawbacks of this method is the space it uses.
-///
-/// TODO: Optimize space usage. Maybe something like a range selector: From 0x0 to 0x100000 is free, rather than keeping
-/// every page in this range.
 class FreeListAllocator {
 	std::vector<Position> m_freelist;
 	std::size_t m_next_page{0};
@@ -172,7 +187,19 @@ public:
 		m_freelist.insert(m_freelist.begin() + std::distance(m_freelist.begin(), it), pos);
 	}
 
-	[[nodiscard]] constexpr bool has_allocated(const Position) { return true; }
+	[[nodiscard]] constexpr bool has_allocated(const Position pos) const {
+		if (collection_contains(m_freelist, pos))
+			return false;
+		if (pos >= m_next_page)
+			return false;
+		return true;
+	}
+
+	[[nodiscard]] cppcoro::generator<Position> next_allocated_page() const noexcept {
+		for (auto i = 0ul; i < m_next_page; i += PAGE_SIZE)
+			if (has_allocated(i))
+				co_yield i;
+	}
 
 	[[nodiscard]] const auto &freelist() const noexcept { return m_freelist; }
 	[[nodiscard]] const auto next() const noexcept { return m_next_page; }
@@ -219,9 +246,6 @@ public:
 		} else {
 			/// Move it to the end of `m_tracker`.
 			m_tracker.splice(m_tracker.cend(), m_tracker, it->second.m_cit);
-
-			/// TODO: Perhaps perform some fast hashing to check whether the page was actually modified
-			/// in order to not make unneeded disk IO
 		}
 
 		m_index[pos] = CacheEntry{
@@ -268,7 +292,7 @@ struct NeverEvictCache {
 	}
 };
 
-template<typename AllocatorPolicy = StackSpaceAllocator,
+template<typename AllocatorPolicy = FreeListAllocator,
          typename CacheEvictionPolicy = LRUCache>
 class GenericPager {
 	friend AllocatorPolicy;
@@ -323,10 +347,22 @@ public:
 	virtual void load() = 0;
 };
 
-template<typename AllocatorPolicy = StackSpaceAllocator,
+///
+/// Allows inner allocations
+///
+class ISupportingInnerOperations {
+public:
+	virtual Position alloc_inner(std::size_t) = 0;
+	virtual void free_inner(Position, std::size_t) = 0;
+	virtual std::vector<uint8_t> get_inner(Position, std::size_t) = 0;
+	virtual void place_inner(Position, const std::vector<uint8_t> &) = 0;
+};
+
+template<typename AllocatorPolicy = FreeListAllocator,
          typename CacheEvictionPolicy = LRUCache>
 class Pager : public GenericPager<AllocatorPolicy, CacheEvictionPolicy>,
-              public IPersistentPager {
+              public IPersistentPager,
+              public ISupportingInnerOperations {
 	using Super = GenericPager<AllocatorPolicy, CacheEvictionPolicy>;
 
 	[[nodiscard]] static constexpr bool at_page_boundary(const Position pos) { return pos % PAGE_SIZE == 0; }
@@ -382,7 +418,7 @@ public:
 	/// If that is not adhered to, BadRead is thrown.
 	[[nodiscard]] Page read(Position pos) {
 		if (!at_page_boundary(pos) || !this->m_allocator.has_allocated(pos))
-			throw BadRead{};
+			throw BadRead("- pos is either not associated with a page or is not allocated");
 
 		Page page;
 		m_disk.seekp(pos);
@@ -434,7 +470,7 @@ public:
 		// Store allocator state
 		nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{fmt::format("{}-alloc", m_identifier.data()), std::ios::trunc | std::ios::out};
 		if (!serializer.Write(this->m_allocator))
-			throw BadWrite();
+			throw BadWrite("- serializer failed writing pager allocator");
 
 		// Flush cache
 		for (auto evict_res : this->m_cache.flush())
@@ -446,7 +482,205 @@ public:
 		// Load allocator state
 		nop::Deserializer<nop::StreamReader<std::ifstream>> deserializer{fmt::format("{}-alloc", m_identifier.data())};
 		if (!deserializer.Read(&this->m_allocator))
+			throw BadRead("- deserializer failed reading pager allocator");
+	}
+
+	///
+	/// Inner operations
+	///
+
+private:
+	[[nodiscard]] constexpr Position chunk_to_position(Position page_pos, unsigned chunk_num) {
+		return page_pos + chunk_num * PAGE_ALLOC_SCALE;
+	}
+
+	[[nodiscard]] constexpr unsigned position_to_chunk(Position page_pos) {
+		return (page_pos % PAGE_SIZE) / PAGE_ALLOC_SCALE;
+	}
+
+public:
+	/// Allocate 'sz' number of bytes space inside consecutive pages
+	/// Uses the allocation metadata in the header of the page.
+	/// Utilizes linear probing during search.
+	/// If a valid sz value is passed, then the allocation always succeeds.
+	Position alloc_inner(std::size_t sz) override {
+		if (sz == 0)
+			throw BadAlloc("cannot alloc_inner with size 0");
+
+		std::map<Position, Page> marked_pages;
+		std::optional<Position> prev_page_pos;
+		auto start_pos = 0ul;
+		auto curr_sz = 0ul;
+		auto reset = [&] {
+			curr_sz = 0;
+			marked_pages.clear();
+		};
+
+		for (Position page_pos : this->m_allocator.next_allocated_page()) {
+			auto page = get(page_pos);
+			if ((prev_page_pos && prev_page_pos.value() == page_pos - PAGE_SIZE) || (page.front() != static_cast<uint8_t>(PageType::Slots)))
+				reset();
+			for (auto i = 0ul; i < PAGE_ALLOC_SCALE; ++i) {
+				if (!page.at(PAGE_ALLOC_METADATA + i)) {
+					if (curr_sz == 0)
+						start_pos = chunk_to_position(page_pos, i);
+					++curr_sz;
+				} else
+					reset();
+			}
+			if (curr_sz > 0)
+				marked_pages.emplace(page_pos, std::move(page));
+		}
+		assert(curr_sz == sz);
+		for (auto &[mppos, mp] : marked_pages) {
+			for (auto i = 0ul; i < PAGE_ALLOC_SCALE; ++i)
+				if (auto chpos = chunk_to_position(mppos, i); chpos >= start_pos && chpos <= start_pos + sz)
+					mp[PAGE_ALLOC_METADATA + i] = 1;
+			place(mppos, std::move(mp));
+		}
+		return start_pos;
+	}
+
+	void free_inner(Position pos, std::size_t sz) override {
+		if (!this->m_allocator.has_allocated(pos))
+			throw BadAlloc(" - trying to inner free not allocated space");
+		assert(page.front() == static_cast<uint8_t>(PageType::Slots));
+		const auto num_pages = round_upwards(sz, PAGE_SIZE);
+		for (auto i = 0ul; i < num_pages; i += PAGE_SIZE) {
+			auto page = get(i);
+			auto limit = std::min(sz, PAGE_SIZE) / PAGE_ALLOC_SCALE;
+			sz -= limit;
+			std::fill(page.begin(), page.end() + limit, 0);
+			place(i, std::move(page));
+		}
+	}
+
+	std::vector<uint8_t> get_inner(Position pos, std::size_t sz) override {
+		if (!this->m_allocator.has_allocated(pos))
+			throw BadRead(" - cannot inner read from unallocated page");
+		auto page = get(pos);
+		assert(page.front() == static_cast<uint8_t>(PageType::Slots));
+		auto start_pos = pos % PAGE_SIZE;
+		if (start_pos + sz > PAGE_SIZE)
+			throw BadRead(" - trying to inner read out of page bounds");
+
+		std::vector<uint8_t> data;
+		data.reserve(sz);
+
+		std::copy(page.cbegin() + start_pos, page.cbegin() + start_pos + sz, std::back_inserter(data));
+		return data;
+	}
+
+	void place_inner(Position pos, const std::vector<uint8_t> &bytes_to_store) override {
+		if (!this->m_allocator.has_allocated(pos))
+			throw BadRead(" - cannot inner read from unallocated page");
+		auto page = get(pos);
+		assert(page.front() == static_cast<uint8_t>(PageType::Slots));
+		auto start_pos = pos % PAGE_SIZE;
+		if (start_pos + bytes_to_store.size() > PAGE_SIZE)
+			throw BadWrite(" - trying to inner write out of page bounds");
+
+		std::copy_n(bytes_to_store.cbegin(), bytes_to_store.size(), page.begin() + start_pos);
+		place(pos, std::move(page));
+	}
+
+	///
+	/// Inner operations
+	///
+
+private:
+	[[nodiscard]] constexpr Position chunk_to_position(Position page_pos, unsigned chunk_num) {
+		return page_pos + chunk_num * PAGE_ALLOC_SCALE;
+	}
+
+	[[nodiscard]] constexpr unsigned position_to_chunk(Position page_pos) {
+		return (page_pos % PAGE_SIZE) / PAGE_ALLOC_SCALE;
+	}
+
+public:
+	/// Allocate 'sz' number of bytes space inside consecutive pages
+	/// Uses the allocation metadata in the header of the page.
+	/// Utilizes linear probing during search.
+	/// If a valid sz value is passed, then the allocation always succeeds.
+	Position alloc_inner(std::size_t sz) override {
+		if (sz == 0)
+			throw BadAlloc("cannot alloc_inner with size 0");
+
+		std::map<Position, Page> marked_pages;
+		std::optional<Position> prev_page_pos;
+		auto start_pos = 0ul;
+		auto curr_sz = 0ul;
+		auto reset = [&] {
+			curr_sz = 0;
+			marked_pages.clear();
+		};
+
+		for (Position page_pos : this->m_allocator.next_allocated_page()) {
+			auto page = get(page_pos);
+			if ((prev_page_pos && prev_page_pos.value() == page_pos - PAGE_SIZE) || (page.front() != static_cast<uint8_t>(PageType::Slots)))
+				reset();
+			for (auto i = 0ul; i < PAGE_ALLOC_SCALE; ++i) {
+				if (!page.at(PAGE_ALLOC_METADATA + i)) {
+					if (curr_sz == 0)
+						start_pos = chunk_to_position(page_pos, i);
+					++curr_sz;
+				} else
+					reset();
+			}
+			if (curr_sz > 0)
+				marked_pages.emplace(page_pos, std::move(page));
+		}
+		assert(curr_sz == sz);
+		for (auto &[mppos, mp] : marked_pages) {
+			for (auto i = 0ul; i < PAGE_ALLOC_SCALE; ++i)
+				if (auto chpos = chunk_to_position(mppos, i); chpos >= start_pos && chpos <= start_pos + sz)
+					mp[PAGE_ALLOC_METADATA + i] = 1;
+			place(mppos, std::move(mp));
+		}
+		return start_pos;
+	}
+
+	void free_inner(Position pos, std::size_t sz) override {
+		if (!this->m_allocator.has_allocated(pos))
+			throw BadAlloc();
+		assert(page.front() == static_cast<uint8_t>(PageType::Slots));
+		const auto num_pages = round_upwards(sz, PAGE_SIZE);
+		for (auto i = 0ul; i < num_pages; i += PAGE_SIZE) {
+			auto page = get(i);
+			auto limit = std::min(sz, PAGE_SIZE) / PAGE_ALLOC_SCALE;
+			sz -= limit;
+			std::fill(page.begin(), page.end() + limit, 0);
+			place(i, std::move(page));
+		}
+	}
+
+	std::vector<uint8_t> get_inner(Position pos, std::size_t sz) override {
+		if (!this->m_allocator.has_allocated(pos))
 			throw BadRead();
+		auto page = get(pos);
+		assert(page.front() == static_cast<uint8_t>(PageType::Slots));
+		auto start_pos = pos % PAGE_SIZE;
+		if (start_pos + sz > PAGE_SIZE)
+			throw BadRead();
+
+		std::vector<uint8_t> data;
+		data.reserve(sz);
+
+		std::copy(page.cbegin() + start_pos, page.cbegin() + start_pos + sz, std::back_inserter(data));
+		return data;
+	}
+
+	void place_inner(Position pos, const std::vector<uint8_t> &bytes_to_store) override {
+		if (!this->m_allocator.has_allocated(pos))
+			throw BadRead();
+		auto page = get(pos);
+		assert(page.front() == static_cast<uint8_t>(PageType::Slots));
+		auto start_pos = pos % PAGE_SIZE;
+		if (start_pos + bytes_to_store.size() > PAGE_SIZE)
+			throw BadRead();
+
+		std::copy_n(bytes_to_store.cbegin(), bytes_to_store.size(), page.begin() + start_pos);
+		place(pos, std::move(page));
 	}
 
 public:
@@ -457,7 +691,7 @@ private:
 	std::fstream m_disk;
 };
 
-template<typename AllocatorPolicy = StackSpaceAllocator>
+template<typename AllocatorPolicy = FreeListAllocator>
 class InMemoryPager : protected GenericPager<AllocatorPolicy, NeverEvictCache> {
 	using Super = GenericPager<AllocatorPolicy, NeverEvictCache>;
 
