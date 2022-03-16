@@ -26,7 +26,7 @@ conan_basic_setup(TARGETS)
 set(LibEugeneBtree_SRC
         storage/btree/Btree.h
         storage/btree/Btree.cpp
-        storage/btree/BenchBtree.cpp
+        storage/btree/Bench.cpp
         storage/btree/Node.h
         storage/btree/BtreePrinter.h)
 
@@ -40,7 +40,6 @@ set(LibEugeneCompression_SRC
 
 set(LibEugeneCore_SRC
         Config.h Util.h Util.cpp Logger.h
-        Util.h Util.cpp Logger.h
         ${LibEugeneBtree_SRC}
         ${LibEugenePager_SRC}
         ${LibEugeneCompression_SRC})
@@ -50,12 +49,15 @@ add_library(LibEugeneCore "${LibEugeneCore_SRC}")
 set_target_properties(LibEugeneCore PROPERTIES LINKER_LANGUAGE CXX)
 target_include_directories(LibEugeneCore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(LibEugeneCore
-        CONAN_PKG::fmt
+		CONAN_PKG::fmt
         CONAN_PKG::ms-gsl
         CONAN_PKG::catch2
         CONAN_PKG::spdlog
         CONAN_PKG::libnop
-        CONAN_PKG::catch2)
+		CONAN_PKG::andreasbuhr-cppcoro
+        CONAN_PKG::benchmark
+        CONAN_PKG::catch2
+		CONAN_PKG::cppitertools)
 
 if (DEFINED EU_BUILD_TESTS)
 	message(STATUS "EU_BUILD_TESTS = " ${EU_BUILD_TESTS})
@@ -72,11 +74,19 @@ if (DEFINED EU_BUILD_TESTS)
 		add_library(TestMain src/core/Main.cpp)
 		target_link_libraries(TestMain CONAN_PKG::catch2)
 
-		eugene_test(Compression src/core/storage/compression)
 		eugene_test(Btree src/core/storage/btree)
 		eugene_test(Node src/core/storage/btree)
 		eugene_test(Pager src/core/storage)
 		eugene_test(Util src/core)
+
+
+		add_library(LibTestsShared src/core/storage/compression/tests/Shared.h)
+		set_target_properties(LibTestsShared PROPERTIES LINKER_LANGUAGE CXX)
+		target_include_directories(LibTestsShared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/core/storage/compression/tests")
+
+		eugene_test(CompDecompTests src/core/storage/compression/tests)
+		eugene_test(CompTests src/core/storage/compression/tests)
+		eugene_test(DecompTests src/core/storage/compression/tests)
 	endif()
 endif ()
 
@@ -93,7 +103,15 @@ if (DEFINED EU_BUILD_BENCHMARKS)
 
 		message(STATUS "Building core benchmarks")
 
-		#eugene_bench(Compression src/core/storage/compression)
-		eugene_bench(Btree src/core/storage/btree)
+		eugene_bench(BtreeBench src/core/storage/btree)
+
+
+		add_library(LibCompShared src/core/storage/compression/benchmarks/Shared.h)
+		set_target_properties(LibCompShared PROPERTIES LINKER_LANGUAGE CXX)
+		target_include_directories(LibCompShared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/core/storage/compression/benchmarks")
+
+		eugene_bench(bench_comp src/core/storage/compression/benchmarks/CompBench.cpp)
+		eugene_bench(bench_decomp src/core/storage/compression/benchmarks/DecompBench.cpp)
+
 	endif()
 endif ()
