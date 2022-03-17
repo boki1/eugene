@@ -130,7 +130,8 @@ template<typename T, typename Ts>
 	abort();
 
 #define DO_NOTHING \
-	do {} while(0);
+	do {       \
+	} while (0);
 
 [[nodiscard]] constexpr auto round_upwards(auto a, auto b) {
 	return (a / b) + (a % b > 0);

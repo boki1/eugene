@@ -55,7 +55,7 @@ exec-test:
 	$(eval EU_BUILD_TESTS=no)
 
 exec-bench:
-	for bench in `ls ${EU_BUILD_DIR}/bin/Bench*`; do $$bench; done
+	for bench in `ls ${EU_BUILD_DIR}/bin/*Bench*`; do $$bench; done
 	$(eval EU_BUILD_BENCHMARKS=no)
 
 bench: config-bench config build exec-bench

@@ -29,6 +29,7 @@ using Leaf = Nod::Leaf;
 struct SmallstrToPerson : Config {
 	using Key = smallstr;
 	using Val = person;
+	using RealVal = person;
 	using Ref = smallstr;
 
 	static inline constexpr int BRANCHING_FACTOR_LEAF = 83;
@@ -43,6 +44,7 @@ struct Tree23 : Config {
 struct DoubleToLong : Config {
 	using Key = double;
 	using Val = long;
+	using RealVal = long;
 	using Ref = double;
 };
 

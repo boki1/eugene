@@ -30,7 +30,7 @@ struct Config {
 
 	static inline constexpr bool BTREE_RELAXED_REMOVES = true;
 
-	static inline constexpr bool BTREE_DYN_ENTRIES = false;
+	static inline constexpr bool DYN_ENTRIES = false;
 	using RealVal = Val;
 };
 

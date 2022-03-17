@@ -26,7 +26,6 @@ conan_basic_setup(TARGETS)
 set(LibEugeneBtree_SRC
         storage/btree/Btree.h
         storage/btree/Btree.cpp
-        storage/btree/Bench.cpp
         storage/btree/Node.h
         storage/btree/BtreePrinter.h)
 
@@ -95,7 +94,7 @@ if (DEFINED EU_BUILD_BENCHMARKS)
 	message(STATUS "EU_BUILD_BENCHMARKS = " ${EU_BUILD_BENCHMARKS})
 	if ("${EU_BUILD_BENCHMARKS}" STREQUAL "yes")
 		macro(eugene_bench component path_prefix)
-			set(bench_name Bench${component})
+			set(bench_name ${component}Bench)
 			add_executable(${bench_name} ${path_prefix}/${bench_name}.cpp)
 			target_link_libraries(${bench_name} LibEugeneCore CONAN_PKG::benchmark)
 			message(STATUS "\tBenchmark about '${component}' component added from \"${path_prefix}/${bench_name}.cpp\"")
@@ -103,15 +102,7 @@ if (DEFINED EU_BUILD_BENCHMARKS)
 
 		message(STATUS "Building core benchmarks")
 
-		eugene_bench(BtreeBench src/core/storage/btree)
-
-
-		add_library(LibCompShared src/core/storage/compression/benchmarks/Shared.h)
-		set_target_properties(LibCompShared PROPERTIES LINKER_LANGUAGE CXX)
-		target_include_directories(LibCompShared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/core/storage/compression/benchmarks")
-
-		eugene_bench(bench_comp src/core/storage/compression/benchmarks/CompBench.cpp)
-		eugene_bench(bench_decomp src/core/storage/compression/benchmarks/DecompBench.cpp)
-
+		eugene_bench(Comp src/core/storage/compression/benchmarks)
+		eugene_bench(Decomp src/core/storage/compression/benchmarks)
 	endif()
-endif ()
+endif()

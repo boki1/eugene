@@ -190,7 +190,7 @@ public:
 	[[nodiscard]] constexpr bool has_allocated(const Position pos) const {
 		if (collection_contains(m_freelist, pos))
 			return false;
-		if (pos >= m_next_page)
+		if (pos >= m_next_page * PAGE_SIZE)
 			return false;
 		return true;
 	}
@@ -418,7 +418,7 @@ public:
 	/// If that is not adhered to, BadRead is thrown.
 	[[nodiscard]] Page read(Position pos) {
 		if (!at_page_boundary(pos) || !this->m_allocator.has_allocated(pos))
-			throw BadRead("- pos is either not associated with a page or is not allocated");
+			throw BadRead("pos is either not associated with a page or is not allocated");
 
 		Page page;
 		m_disk.seekp(pos);
@@ -584,106 +584,6 @@ public:
 		place(pos, std::move(page));
 	}
 
-	///
-	/// Inner operations
-	///
-
-private:
-	[[nodiscard]] constexpr Position chunk_to_position(Position page_pos, unsigned chunk_num) {
-		return page_pos + chunk_num * PAGE_ALLOC_SCALE;
-	}
-
-	[[nodiscard]] constexpr unsigned position_to_chunk(Position page_pos) {
-		return (page_pos % PAGE_SIZE) / PAGE_ALLOC_SCALE;
-	}
-
-public:
-	/// Allocate 'sz' number of bytes space inside consecutive pages
-	/// Uses the allocation metadata in the header of the page.
-	/// Utilizes linear probing during search.
-	/// If a valid sz value is passed, then the allocation always succeeds.
-	Position alloc_inner(std::size_t sz) override {
-		if (sz == 0)
-			throw BadAlloc("cannot alloc_inner with size 0");
-
-		std::map<Position, Page> marked_pages;
-		std::optional<Position> prev_page_pos;
-		auto start_pos = 0ul;
-		auto curr_sz = 0ul;
-		auto reset = [&] {
-			curr_sz = 0;
-			marked_pages.clear();
-		};
-
-		for (Position page_pos : this->m_allocator.next_allocated_page()) {
-			auto page = get(page_pos);
-			if ((prev_page_pos && prev_page_pos.value() == page_pos - PAGE_SIZE) || (page.front() != static_cast<uint8_t>(PageType::Slots)))
-				reset();
-			for (auto i = 0ul; i < PAGE_ALLOC_SCALE; ++i) {
-				if (!page.at(PAGE_ALLOC_METADATA + i)) {
-					if (curr_sz == 0)
-						start_pos = chunk_to_position(page_pos, i);
-					++curr_sz;
-				} else
-					reset();
-			}
-			if (curr_sz > 0)
-				marked_pages.emplace(page_pos, std::move(page));
-		}
-		assert(curr_sz == sz);
-		for (auto &[mppos, mp] : marked_pages) {
-			for (auto i = 0ul; i < PAGE_ALLOC_SCALE; ++i)
-				if (auto chpos = chunk_to_position(mppos, i); chpos >= start_pos && chpos <= start_pos + sz)
-					mp[PAGE_ALLOC_METADATA + i] = 1;
-			place(mppos, std::move(mp));
-		}
-		return start_pos;
-	}
-
-	void free_inner(Position pos, std::size_t sz) override {
-		if (!this->m_allocator.has_allocated(pos))
-			throw BadAlloc();
-		assert(page.front() == static_cast<uint8_t>(PageType::Slots));
-		const auto num_pages = round_upwards(sz, PAGE_SIZE);
-		for (auto i = 0ul; i < num_pages; i += PAGE_SIZE) {
-			auto page = get(i);
-			auto limit = std::min(sz, PAGE_SIZE) / PAGE_ALLOC_SCALE;
-			sz -= limit;
-			std::fill(page.begin(), page.end() + limit, 0);
-			place(i, std::move(page));
-		}
-	}
-
-	std::vector<uint8_t> get_inner(Position pos, std::size_t sz) override {
-		if (!this->m_allocator.has_allocated(pos))
-			throw BadRead();
-		auto page = get(pos);
-		assert(page.front() == static_cast<uint8_t>(PageType::Slots));
-		auto start_pos = pos % PAGE_SIZE;
-		if (start_pos + sz > PAGE_SIZE)
-			throw BadRead();
-
-		std::vector<uint8_t> data;
-		data.reserve(sz);
-
-		std::copy(page.cbegin() + start_pos, page.cbegin() + start_pos + sz, std::back_inserter(data));
-		return data;
-	}
-
-	void place_inner(Position pos, const std::vector<uint8_t> &bytes_to_store) override {
-		if (!this->m_allocator.has_allocated(pos))
-			throw BadRead();
-		auto page = get(pos);
-		assert(page.front() == static_cast<uint8_t>(PageType::Slots));
-		auto start_pos = pos % PAGE_SIZE;
-		if (start_pos + bytes_to_store.size() > PAGE_SIZE)
-			throw BadRead();
-
-		std::copy_n(bytes_to_store.cbegin(), bytes_to_store.size(), page.begin() + start_pos);
-		place(pos, std::move(page));
-	}
-
-public:
 	[[nodiscard]] std::string_view identifier() const noexcept { return m_identifier; }
 
 private:

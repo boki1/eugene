@@ -81,6 +81,11 @@ template<EugeneConfig Config = Config>
 class Btree {
 	using Key = typename Config::Key;
 	using Val = typename Config::Val;
+	using RealVal = typename Config::RealVal;
+
+	// If not using dyn entries, Val and RealVal are the same type.
+	static_assert(std::same_as<Val, RealVal> == !Config::DYN_ENTRIES);
+
 	using Ref = typename Config::Ref;
 	using Nod = Node<Config>;
 
@@ -700,7 +705,7 @@ private:
 				return std::find_if(simple_bulk_cbegin, rng::cend(bulk), [&leaf_highkey](const auto &entry) { return entry.key > leaf_highkey; });
 			}();
 
-			auto entry_of_key_it = [leaf_keys_cbegin, leaf_vals_cbegin](auto it) {
+			auto entry_of_key_it = [leaf_keys_cbegin, leaf_vals_cbegin, this](auto it) {
 				return Entry{.key = *it, .val = get_value(*(leaf_vals_cbegin + std::distance(leaf_keys_cbegin, it)))};
 			};
 
@@ -817,12 +822,12 @@ public:
 	/// Get the internal pager
 	[[nodiscard]] PagerType &pager() noexcept { return *m_pager.get(); }
 
-	[[nodiscard]] IndirectionVector &ind_vector() {
-		if constexpr (Config::DYN_ENTRIES) {
-			static IndirectionVector ind_vector_;
-			return ind_vector_;
-		}
-		throw BadIndVector(" - Not using DYN_ENTRIES option");
+	[[nodiscard]] auto& ind_vector() {
+		using namespace ::internal::storage;
+		if constexpr (!Config::DYN_ENTRIES)
+			throw BadIndVector(" - Not using DYN_ENTRIES option");
+		static IndirectionVector<Config> ind_vector_;
+		return ind_vector_;
 	}
 
 
@@ -837,11 +842,11 @@ public:
 		return val_or_slot;
 	}
 
-	[[nodiscard]] void set_value(RealVal val) {
+	[[nodiscard]] Val set_value(RealVal val) {
 		if constexpr (Config::DYN_ENTRIES) {
-			return ind_vector().set_to_slot(val, sizeof(RealVal))
+			return ind_vector().set_to_slot(val, sizeof(RealVal));
 		}
-		return val_or_slot;
+		return val;
 	}
 
 	///

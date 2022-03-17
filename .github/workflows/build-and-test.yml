@@ -1,4 +1,4 @@
-name: build-and-tests
+name: ci
 
 on: push
 
@@ -15,30 +15,30 @@ jobs:
         cc: [gcc-11]
 
     steps:
-      - uses: actions/checkout@v2
       - name: Dependency setup
+        env: EU_CONAN_PROFILE=.github/eu_conan_profile.toml
         run: |
-          sudo apt install gcc-11 g++-11
-          pip3 install conan --upgrade
-          CXX=g++-11 CC=gcc-11 conan install . --profile .github/eu_conan_profile.toml --build=missing
+            sudo apt update
+            sudo apt install gcc-11 g++-11
+            pip3 install conan --upgrade
+            make dep-setup
 
       - name: Configure
-        env:
-          CXX: ${{ matrix.cxx }}
         shell: bash
         working-directory: ${{github.workspace}}
-        run: |
-          export EUGENE_BUILD_TESTS=1
-          export EUGENE_BUILD_BENCHMARKS=1
-          cmake .
+        run: make config
 
       - name: Build
         working-directory: ${{github.workspace}}
         shell: bash
-        run:
-          cmake --build . --config $BUILD_TYPE
+        run: make build
 
       - name: Test
         working-directory: ${{github.workspace}}
         shell: bash
-        run: ctest -VV -C $BUILD_TYPE --no-tests=error --rerun-failed --output-on-failure
+        run: make clean-test
+
+      - name: Benchmarks
+        working-directory: ${{github.workspace}}
+        shell: bash
+        run: make clean-bench
