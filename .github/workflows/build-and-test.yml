@@ -15,13 +15,14 @@ jobs:
         cc: [gcc-11]
 
     steps:
+      - uses: actions/checkout@v2
       - name: Dependency setup
-        env: EU_CONAN_PROFILE=.github/eu_conan_profile.toml
         run: |
+            echo "EU_CONAN_PROFILE=.github/eu_conan_profile.toml" >> $GITHUB_ENV
             sudo apt update
-            sudo apt install gcc-11 g++-11
+            sudo apt install gcc-11 g++-11 ninja-build
             pip3 install conan --upgrade
-            make dep-setup
+            CXX=g++-11 CC=gcc-11 make dep-setup
 
       - name: Configure
         shell: bash
@@ -31,7 +32,8 @@ jobs:
       - name: Build
         working-directory: ${{github.workspace}}
         shell: bash
-        run: make build
+        run: |
+            make build
 
       - name: Test
         working-directory: ${{github.workspace}}
