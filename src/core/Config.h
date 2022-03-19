@@ -32,6 +32,8 @@ struct Config {
 
 	static inline constexpr bool DYN_ENTRIES = false;
 	using RealVal = Val;
+	using RealValSizeEvaluator_type = std::size_t (*)(const void *);
+	static inline constexpr RealValSizeEvaluator_type RealValSizeEvaluator = nullptr;
 };
 
 template<typename C>

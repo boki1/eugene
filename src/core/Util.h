@@ -4,6 +4,13 @@
 #include <limits>
 #include <optional>
 #include <random>
+#include <type_traits>
+#include <typeinfo>
+#include <sstream>
+
+#ifndef _MSC_VER
+	#include <cxxabi.h>
+#endif
 
 #include <nop/structure.h>
 
@@ -135,6 +142,29 @@ template<typename T, typename Ts>
 
 [[nodiscard]] constexpr auto round_upwards(auto a, auto b) {
 	return (a / b) + (a % b > 0);
+}
+
+template<typename T>
+std::string pretty_type_name([[maybe_unused]] T _t) {
+	using RawT = typename std::remove_reference<T>::type;
+	std::unique_ptr<char, void (*)(void *)> own(
+#ifndef _MSC_VER
+	        abi::__cxa_demangle(typeid(RawT).name(), nullptr,
+	                            nullptr, nullptr),
+#else
+	        nullptr,
+#endif
+	        std::free);
+	std::stringstream sstr{own != nullptr ? own.get() : typeid(RawT).name()};
+	if (std::is_const<RawT>::value)
+		sstr << " const";
+	if (std::is_volatile<RawT>::value)
+		sstr << " volatile";
+	if (std::is_lvalue_reference<T>::value)
+		sstr << "&";
+	else if (std::is_rvalue_reference<T>::value)
+		sstr << "&&";
+	return sstr.str();
 }
 
 ///

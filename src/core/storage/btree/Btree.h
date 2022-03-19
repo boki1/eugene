@@ -616,9 +616,13 @@ private:
 	/// Construct a new empty tree
 	/// Initializes an empty root node leaf and calculates the appropriate value for 'm'
 	constexpr void bare() {
+		if constexpr (Config::DYN_ENTRIES) {
+			if (!m_ind_vector.has_value())
+				m_ind_vector.emplace(name(), IndirectionVector<Config>::ActionOnConstruction::DoNotLoad);
+		}
+
 		[[maybe_unused]] auto new_root = make_root(MakeRootAction::BareInit);
 
-		/// FIXME: A q.a.d solution here.
 		/// Space evaluation done here.
 		/// Perform a binary search in the PAGE_SIZE range to calculate the maximum number of entries that could be stored.
 
@@ -826,8 +830,8 @@ public:
 		using namespace ::internal::storage;
 		if constexpr (!Config::DYN_ENTRIES)
 			throw BadIndVector(" - Not using DYN_ENTRIES option");
-		static IndirectionVector<Config> ind_vector_;
-		return ind_vector_;
+		assert(m_ind_vector.has_value());
+		return *m_ind_vector;
 	}
 
 
@@ -838,15 +842,19 @@ public:
 	[[nodiscard]] RealVal get_value(Val val_or_slot) {
 		if constexpr (Config::DYN_ENTRIES) {
 			return ind_vector().get_from_slot(val_or_slot);
+		} else {
+			static_assert(std::same_as<Val, RealVal>);
+			return val_or_slot;
 		}
-		return val_or_slot;
 	}
 
 	[[nodiscard]] Val set_value(RealVal val) {
 		if constexpr (Config::DYN_ENTRIES) {
-			return ind_vector().set_to_slot(val, sizeof(RealVal));
+			return ind_vector().set_to_slot(val, sizeof(val));
+		} else {
+			static_assert(std::same_as<Val, RealVal>);
+			return val;
 		}
-		return val;
 	}
 
 	///
@@ -860,7 +868,7 @@ public:
 	/// whether the key is distinct.
 	/// An exception 'BadTreeInsert' may be thrown if an unexpected error occurs. It contains an
 	/// appropriate message describing the failure.
-	constexpr InsertionReturnMark insert(const Key &key, const Val &val) {
+	constexpr InsertionReturnMark insert(const Key &key, const RealVal &val) {
 		return place_kv_entry(Entry{.key = key, .val = val}, ActionOnKeyPresent::AbandonChange);
 	}
 
@@ -1051,6 +1059,12 @@ public:
 
 			m_pager->load();
 		}
+
+		if constexpr (Config::DYN_ENTRIES) {
+			if (!m_ind_vector.has_value())
+				m_ind_vector.emplace(name(), IndirectionVector<Config>::ActionOnConstruction::Load);
+			ind_vector().load();
+		}
 	}
 
 	/// Store tree metadata to storage
@@ -1062,6 +1076,10 @@ public:
 				throw BadWrite();
 
 			m_pager->save();
+		}
+
+		if constexpr (Config::DYN_ENTRIES) {
+			ind_vector().save();
 		}
 	}
 
@@ -1123,5 +1141,8 @@ private:
 	/// Minimum num of records stored in a branch node
 	std::size_t m_num_records_branch{0};
 	std::size_t m_num_links_branch{0};
+
+	// Contains value only if the option DYN ENTRIES is used
+	std::optional<IndirectionVector<Config>> m_ind_vector;
 };
 }// namespace internal::storage::btree

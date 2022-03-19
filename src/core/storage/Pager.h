@@ -301,13 +301,13 @@ public:
 	template<typename... AllocatorArgs>
 	constexpr explicit GenericPager(std::size_t limit_num_pages = PAGECACHE_SIZE / PAGE_SIZE, AllocatorArgs &&...allocator_args) : m_allocator{limit_num_pages, std::forward<AllocatorArgs>(allocator_args)...},
 	                                                                                                                               m_cache{limit_num_pages} {}
-	constexpr GenericPager(const GenericPager &) = default;
+	GenericPager(const GenericPager &) = default;
 
-	constexpr GenericPager &operator=(const GenericPager &) = default;
+	GenericPager &operator=(const GenericPager &) = default;
 
 	virtual ~GenericPager() noexcept = default;
 
-	constexpr auto operator<=>(const GenericPager &) const noexcept = default;
+	auto operator<=>(const GenericPager &) const noexcept = default;
 
 	///
 	/// Allocation API
@@ -343,6 +343,10 @@ protected:
 class IPersistentPager {
 
 public:
+	IPersistentPager() = default;
+	IPersistentPager(const IPersistentPager &) = default;
+	IPersistentPager &operator=(const IPersistentPager &) = default;
+
 	virtual void save() = 0;
 	virtual void load() = 0;
 };
@@ -352,6 +356,10 @@ public:
 ///
 class ISupportingInnerOperations {
 public:
+	ISupportingInnerOperations() = default;
+	ISupportingInnerOperations(const ISupportingInnerOperations&) = default;
+	ISupportingInnerOperations &operator=(const ISupportingInnerOperations &) = default;
+
 	virtual Position alloc_inner(std::size_t) = 0;
 	virtual void free_inner(Position, std::size_t) = 0;
 	virtual std::vector<uint8_t> get_inner(Position, std::size_t) = 0;
@@ -387,9 +395,10 @@ public:
 		m_disk.close();
 	}
 
-	constexpr Pager(const Pager &pager) = default;
+	Pager(const Pager &p) :Super(p) {}
+	Pager &operator=(const Pager &) = default;
 
-	constexpr auto operator<=>(const Pager &) const noexcept = default;
+	auto operator<=>(const Pager &) const noexcept = default;
 
 	///
 	/// Allocation API
@@ -625,11 +634,6 @@ public:
 		DO_NOTHING
 	}
 
-	///
-	/// Page operations
-	///
-
-public:
 	/// Acquire the page, placed at a given position.
 	/// May fail if either `read` or `write` throw an error.
 	[[nodiscard]] Page get(Position pos) override {

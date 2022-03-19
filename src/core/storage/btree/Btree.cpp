@@ -48,20 +48,27 @@ struct DoubleToLong : Config {
 	using Ref = double;
 };
 
+struct IntToString : Config {
+	using Key = int;
+	using RealVal = std::string;
+
+	static inline constexpr bool DYN_ENTRIES = true;
+};
+
 ///
 /// Utility functions
 ///
 
-template<EugeneConfig Config>
-auto fill_tree_with_random_items(Btree<Config> &bpt, const std::size_t limit = 1000) {
-	using Key = typename Config::Key;
-	using Val = typename Config::Val;
-	std::map<Key, Val> backup;
+template<EugeneConfig C>
+auto fill_tree_with_random_items(Btree<C> &bpt, const std::size_t limit = 1000) {
+	using Key = typename C::Key;
+	using RealVal = typename C::RealVal;
+	std::map<Key, RealVal> backup;
 	[[maybe_unused]] int i = 0;
 
 	while (backup.size() != limit) {
 		auto key = random_item<Key>();
-		auto val = random_item<Val>();
+		auto val = random_item<RealVal>();
 		if (backup.contains(key)) {
 			REQUIRE(bpt.contains(key));
 			continue;
@@ -74,8 +81,8 @@ auto fill_tree_with_random_items(Btree<Config> &bpt, const std::size_t limit = 1
 	return backup;
 }
 
-template<EugeneConfig Config>
-void check_for_tree_backup_mismatch(Btree<Config> &bpt, const std::map<typename Config::Key, typename Config::Val> &backup) {
+template<EugeneConfig C>
+void check_for_tree_backup_mismatch(Btree<C> &bpt, const std::map<typename C::Key, typename C::RealVal> &backup) {
 	REQUIRE(bpt.size() == backup.size());
 	[[maybe_unused]] std::size_t i = 1;
 	for (const auto &[key, val] : backup) {
@@ -412,5 +419,13 @@ TEST_CASE("Btree utils") {
 		}
 		parent_links.push_back(0xABCD);
 		REQUIRE(std::equal(sibling_links.cbegin(), sibling_links.cend(), parent_links.cbegin()));
+	}
+}
+
+TEST_CASE("Btree dynamically sized entries") {
+	SECTION("std::string's") {
+		Btree<IntToString> btr{"/tmp/eugene-tests/btree-dyn/strings"};
+		auto backup = fill_tree_with_random_items(btr, 100);
+		check_for_tree_backup_mismatch(btr, backup);
 	}
 }

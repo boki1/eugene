@@ -61,6 +61,7 @@ class Node {
 	using Nod = Node<Config>;
 
 	using Val = typename Config::Val;
+	using RealVal = typename Config::RealVal;
 	using Key = typename Config::Key;
 	using Ref = typename Config::Ref;
 
@@ -98,7 +99,7 @@ public:
 
 	struct Entry {
 		Key key;
-		Val val;
+		RealVal val;
 
 		[[nodiscard]] auto operator<=>(const Entry &) const noexcept = default;
 	};
