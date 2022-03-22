@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.19)
 project(eugene)
 
+
+add_subdirectory(src/core/server)
+
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/build")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -12,10 +16,13 @@ add_compile_options(
         -Werror
         -pedantic
         -ggdb3
+		-Wfatal-errors
         -fdiagnostics-color)
 
 enable_testing()
 include(FetchContent)
+
+add_compile_definitions(NDEBUG="true")
 
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup(TARGETS)
@@ -53,7 +60,8 @@ target_link_libraries(LibEugeneCore
         CONAN_PKG::spdlog
         CONAN_PKG::libnop
         CONAN_PKG::andreasbuhr-cppcoro
-        CONAN_PKG::benchmark)
+        CONAN_PKG::benchmark
+        CONAN_PKG::cpprestsdk)
 
 
 if (DEFINED ENV{EUGENE_BUILD_TESTS})
