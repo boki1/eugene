@@ -7,12 +7,14 @@
 #include <core/storage/compression/Decompressor.h>
 
 
-constexpr std::string_view file_name = "test.txt";
-constexpr std::string_view compressed_file_name = "compressed";
+constexpr std::string_view file_name = "test.txt"; //!< File name to be used for compression/decompression benchmarking.
+constexpr std::string_view compressed_file_name = "compressed"; //!< File name to be used for compressed file.
 
-static bool clean(const std::map<std::string, std::string> &files) {
+/// @brief Static function that will clean up the files created by the compression/decompression benchmarks.
+/// @param files - vector of files to be deleted.
+static bool clean(const std::vector<std::string_view> &files) {
 	return std::ranges::all_of(files.cbegin(), files.cend(),
-	                           [](const auto &pair) {
-	                             return fs::remove_all(pair.second);
+	                           [](const auto &item) {
+	                             return fs::remove_all(item);
 	                           });
 }

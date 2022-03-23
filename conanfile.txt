@@ -8,6 +8,7 @@ andreasbuhr-cppcoro/cci.20210113
 benchmark/1.6.0
 andreasbuhr-cppcoro/cci.20210113
 cppitertools/2.1
+cpprestsdk/2.10.18
 
 
 [generators]
