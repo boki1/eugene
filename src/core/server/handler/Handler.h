@@ -24,10 +24,10 @@ using namespace http;
 using namespace utility;
 using namespace http::experimental::listener;
 
-class handler {
+class Handler {
 public:
-	explicit handler(const utility::string_t &);
-	virtual ~handler() noexcept = default;
+	explicit Handler(const utility::string_t &);
+	virtual ~Handler() noexcept = default;
 
 	pplx::task<void> open() { return m_listener.open(); }
 	pplx::task<void> close() { return m_listener.close(); }

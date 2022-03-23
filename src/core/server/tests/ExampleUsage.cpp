@@ -1,20 +1,20 @@
 #include <iostream>
 #include <memory>
 
-#include <handler/handler.h>
+#include <handler/Handler.h>
 
 using namespace web;
 using namespace http;
 using namespace utility;
 using namespace http::experimental::listener;
 
-std::unique_ptr<handler> g_httpHandler;
+std::unique_ptr<Handler> g_httpHandler;
 
 void on_initialize(const string_t &address) {
 	uri_builder uri(address);
 
 	auto addr = uri.to_uri().to_string();
-	g_httpHandler = std::make_unique<handler>(addr);
+	g_httpHandler = std::make_unique<Handler>(addr);
 	g_httpHandler->open().wait();
 
 	ucout << utility::string_t(U("Listening for requests at: ")) << addr << std::endl;

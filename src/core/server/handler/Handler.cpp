@@ -1,30 +1,30 @@
-#include <handler/handler.h>
+#include <handler/Handler.h>
 
-handler::handler(const utility::string_t &url) : m_listener(url) {
+Handler::Handler(const utility::string_t &url) : m_listener(url) {
 	m_listener.support(
 		methods::GET,
-		[this](auto &&PH1) {
-		  handle_get(std::forward<decltype(PH1)>(PH1));
+		[this](auto &&initial_param) {
+		  handle_get(std::forward<decltype(initial_param)>(initial_param));
 		});
 	m_listener.support(
 		methods::PUT,
-		[this](auto &&PH1) {
-		  handle_put(std::forward<decltype(PH1)>(PH1));
+		[this](auto &&initial_param) {
+		  handle_put(std::forward<decltype(initial_param)>(initial_param));
 		});
 	m_listener.support(
 		methods::POST,
-		[this](auto &&PH1) {
-		  handle_post(std::forward<decltype(PH1)>(PH1));
+		[this](auto &&initial_param) {
+		  handle_post(std::forward<decltype(initial_param)>(initial_param));
 		});
 	m_listener.support(
 		methods::DEL,
-		[this](auto &&PH1) {
-		  handle_delete(std::forward<decltype(PH1)>(PH1));
+		[this](auto &&initial_param) {
+		  handle_delete(std::forward<decltype(initial_param)>(initial_param));
 		});
 
 }
 
-[[maybe_unused]] void handler::handle_error(const pplx::task<void> &task) {
+[[maybe_unused]] void Handler::handle_error(const pplx::task<void> &task) {
 	try {
 		task.get();
 	}
@@ -45,6 +45,8 @@ bool authenticate(const http_headers &headers) {
 	std::vector<unsigned char> credentials = utility::conversions::from_base64
 		(auth_header->second.substr(6, auth_header->second.size()));
 
+//	The credentials are in the form of username:password
+//	stored in vector like "u" "s" "e" "r" "n" "a" "m" "e" ":" "p" "a" "s" "s" "w" "o" "r" "d"
 	std::string username{credentials.begin(), std::find(credentials.begin(), credentials.end(), ':')};
 	std::string password{std::find(credentials.begin(), credentials.end(), ':') + 1, credentials.end()};
 
@@ -52,7 +54,7 @@ bool authenticate(const http_headers &headers) {
 	return true;
 }
 
-void handler::handle_request(std::string_view endpoint,
+void Handler::handle_request(std::string_view endpoint,
                              const http_request &request, FuncHandleRequest &action) {
 	auto path = request.relative_uri().path();
 	CHECK_ENDPOINT(path, endpoint, authenticate) {
@@ -81,7 +83,7 @@ void handler::handle_request(std::string_view endpoint,
 	request.reply(status_codes::NotFound);
 }
 
-void handler::handle_get(const http_request &request) {
+void Handler::handle_get(const http_request &request) {
 	TRACE("\nhandle GET\n");
 
 	auto path = request.relative_uri().path();
@@ -100,7 +102,7 @@ void handler::handle_get(const http_request &request) {
 	request.reply(status_codes::NotFound);
 }
 
-void handler::handle_post(const http_request &request) {
+void Handler::handle_post(const http_request &request) {
 	TRACE("\nhandle POST\n");
 
 	auto path = request.relative_uri().path();
@@ -116,7 +118,7 @@ void handler::handle_post(const http_request &request) {
 		});
 }
 
-void handler::handle_put(const http_request &request) {
+void Handler::handle_put(const http_request &request) {
 	TRACE("\nhandle PUT\n");
 
 	handle_request(
@@ -142,7 +144,7 @@ void handler::handle_put(const http_request &request) {
 		});
 }
 
-void handler::handle_delete(const http_request &request) {
+void Handler::handle_delete(const http_request &request) {
 	TRACE("\nhandle DEL\n");
 
 	auto path = request.relative_uri().path();

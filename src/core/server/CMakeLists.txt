@@ -11,7 +11,7 @@ endif (UNIX)
 option(DBMS "Dbms" OFF)
 
 set(LibEugeneServer_SRC
-        handler/handler.cpp
+        handler/Handler.cpp
         src/User.cpp src/User.h src/ClientGroup.cpp src/ClientGroup.h )
 
 add_library(LibEugeneServer "${LibEugeneServer_SRC}")
@@ -19,12 +19,12 @@ set_target_properties(LibEugeneServer PROPERTIES LINKER_LANGUAGE CXX)
 target_include_directories(LibEugeneServer PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(LibEugeneServer CONAN_PKG::cpprestsdk)
 
-add_library(LibEugeneServer_handler handler/handler.h)
+add_library(LibEugeneServer_handler handler/Handler.h)
 set_target_properties(LibEugeneServer_handler PROPERTIES LINKER_LANGUAGE CXX)
 target_include_directories(LibEugeneServer_handler PUBLIC src)
 
 add_executable(restserver
         tests/ExampleUsage.cpp
-        handler/handler.cpp)
+        handler/Handler.cpp)
 
 target_link_libraries(restserver PRIVATE LibEugeneServer)
