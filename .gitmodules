@@ -1,3 +1,6 @@
 [submodule "src/third-party/btree-printer"]
 	path = src/third-party/btree-printer
 	url = https://github.com/Felerius/btree-generator
+[submodule "tools/btree-generator"]
+	path = tools/btree-generator
+	url = https://github.com/Felerius/btree-generator

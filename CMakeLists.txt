@@ -16,7 +16,7 @@ add_compile_options(
         -Werror
         -pedantic
         -ggdb3
-		-Wfatal-errors
+        -Wfatal-errors
         -fdiagnostics-color)
 
 enable_testing()
@@ -44,7 +44,7 @@ set(LibEugeneCompression_SRC
         storage/compression/Decompressor.h)
 
 set(LibEugeneCore_SRC
-        Util.h Util.cpp SizeMetrics.h Logger.h
+        Util.h Util.cpp Logger.h
         ${LibEugeneBtree_SRC}
         ${LibEugenePager_SRC}
         ${LibEugeneCompression_SRC})
@@ -64,50 +64,58 @@ target_link_libraries(LibEugeneCore
         CONAN_PKG::cpprestsdk)
 
 
-if (DEFINED ENV{EUGENE_BUILD_TESTS})
-    macro(eugene_test component path_prefix)
-        add_executable(Test${component} ${path_prefix}/${component}.cpp)
-        target_link_libraries(Test${component} TestMain LibEugeneCore)
-        add_test(NAME Test${component} COMMAND Test${component})
-        message("   -- Test about '${component}' component added from \"${path_prefix}/${component}.cpp\"")
-    endmacro()
+if (DEFINED ENV{EU_BUILD_TESTS})
+    message(STATUS "EU_BUILD_TESTS = " ${EU_BUILD_TESTS})
+    if ("${EU_BUILD_TESTS}" STREQUAL "yes")
+        macro(eugene_test component path_prefix)
+            add_executable(Test${component} ${path_prefix}/${component}.cpp)
+            target_link_libraries(Test${component} TestMain LibEugeneCore)
+            add_test(NAME Test${component} COMMAND Test${component})
+            message(STATUS "\tTest about '${component}' component added from \"${path_prefix}/${component}.cpp\"")
+        endmacro()
 
-    message("-- Building core unit tests")
+        message(STATUS "Building core unit tests")
 
-    add_library(TestMain src/core/Main.cpp)
-    target_link_libraries(TestMain CONAN_PKG::catch2)
+        add_library(TestMain src/core/Main.cpp)
+        target_link_libraries(TestMain CONAN_PKG::catch2)
 
-    eugene_test(Btree src/core/storage/btree)
-    eugene_test(Node src/core/storage/btree)
-    eugene_test(Pager src/core/storage)
-    eugene_test(Util src/core)
+        eugene_test(Btree src/core/storage/btree)
+        eugene_test(Node src/core/storage/btree)
+        eugene_test(Pager src/core/storage)
+        eugene_test(Util src/core)
 
 
-    add_library(LibTestsShared src/core/storage/compression/tests/Shared.h)
-    set_target_properties(LibTestsShared PROPERTIES LINKER_LANGUAGE CXX)
-    target_include_directories(LibTestsShared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/core/storage/compression/tests")
+        add_library(LibTestsShared src/core/storage/compression/tests/Shared.h)
+        set_target_properties(LibTestsShared PROPERTIES LINKER_LANGUAGE CXX)
+        target_include_directories(LibTestsShared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/core/storage/compression/tests")
 
-    eugene_test(CompDecompTests src/core/storage/compression/tests)
-    eugene_test(CompTests src/core/storage/compression/tests)
-    eugene_test(DecompTests src/core/storage/compression/tests)
+        eugene_test(CompDecompTests src/core/storage/compression/tests)
+        eugene_test(CompTests src/core/storage/compression/tests)
+        eugene_test(DecompTests src/core/storage/compression/tests)
+    endif ()
 endif ()
 
 
-if (DEFINED ENV{EUGENE_BUILD_BENCHMARKS})
-    add_executable(BtreeBench src/core/storage/btree/Bench.cpp)
-    target_link_libraries(BtreeBench PUBLIC LibEugeneCore)
+if (DEFINED ENV{EU_BUILD_BENCHMARKS})
+    message(STATUS "EU_BUILD_BENCHMARKS = " ${EU_BUILD_BENCHMARKS})
+    if ("${EU_BUILD_BENCHMARKS}" STREQUAL "yes")
+        macro(eugene_bench component path_prefix)
+            set(bench_name Bench${component})
+            add_executable(${bench_name} ${path_prefix}/${bench_name}.cpp)
+            target_link_libraries(${bench_name} LibEugeneCore CONAN_PKG::benchmark)
+            message(STATUS "\tBenchmark about '${component}' component added from \"${path_prefix}/${bench_name}.cpp\"")
+        endmacro()
+
+        message(STATUS "Building core benchmarks")
+
+        eugene_bench(BtreeBench src/core/storage/btree)
 
 
-    add_library(LibCompShared src/core/storage/compression/benchmarks/Shared.h)
-    set_target_properties(LibCompShared PROPERTIES LINKER_LANGUAGE CXX)
-    target_include_directories(LibCompShared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/core/storage/compression/benchmarks")
+        add_library(LibCompShared src/core/storage/compression/benchmarks/Shared.h)
+        set_target_properties(LibCompShared PROPERTIES LINKER_LANGUAGE CXX)
+        target_include_directories(LibCompShared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/core/storage/compression/benchmarks")
 
-    add_executable(bench_comp src/core/storage/compression/benchmarks/CompBench.cpp)
-    target_link_libraries(bench_comp PUBLIC LibEugeneCore LibCompShared)
-
-    add_executable(bench_decomp src/core/storage/compression/benchmarks/DecompBench.cpp)
-    target_link_libraries(bench_decomp PUBLIC LibEugeneCore LibCompShared)
-
-
-    message("-- Building benchmarks")
+        eugene_bench(CompBench src/core/storage/compression/benchmarks)
+        eugene_bench(DecompBench src/core/storage/compression/benchmarks)
+    endif ()
 endif ()
