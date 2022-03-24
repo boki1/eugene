@@ -126,3 +126,23 @@ TEST_CASE("Page cache with LRU policy", "[pager]") {
 	REQUIRE(std::find(evict_res2->page.cbegin(), evict_res2->page.cend(), 1) != evict_res2->page.cend());
 	REQUIRE(evict_res2->pos == 1 * PAGE_SIZE);
 }
+
+TEST_CASE("Pager inner allocations") {
+	using PagerType = Pager<FreeListAllocator, LRUCache>;
+	PagerType pt{"/tmp/eu-pager-inner-allocations"};
+
+	REQUIRE(pt.alloc_inner(10) == PAGE_HEADER_SIZE);
+	REQUIRE(pt.alloc_inner(20) == PAGE_HEADER_SIZE + 12);
+	REQUIRE(pt.max_bytes_inner_used() == 32);
+
+	REQUIRE(pt.alloc_inner(5000) == PAGE_HEADER_SIZE + 32);
+	REQUIRE(pt.max_bytes_inner_used() == 5032);
+
+	// pt.free_inner(pos10, 10);
+	// auto pos10_2 = pt.alloc_inner(10);
+	// REQUIRE(pos10 == pos10_2);
+	// pt.free_inner(pos5000, 5000);
+
+	// auto max_bytes = pt.max_inner_used();
+	// REQUIRE(max_bytes == 32);
+}

@@ -12,6 +12,7 @@
 #include <stack>
 #include <stdexcept>
 #include <utility>
+#include <typeinfo>
 
 #include <fmt/core.h>
 #include <fmt/ranges.h>
@@ -850,7 +851,9 @@ public:
 
 	[[nodiscard]] Val set_value(RealVal val) {
 		if constexpr (Config::DYN_ENTRIES) {
-			return ind_vector().set_to_slot(val, sizeof(val));
+			const auto val_sz = (*Config::RealValSizeEvaluator)(&val);
+			fmt::print("calling set_to_slot for val = '{}' (type = {}, sz = {})\n", val, pretty_type_name(val), val_sz);
+			return ind_vector().set_to_slot(val, val_sz);
 		} else {
 			static_assert(std::same_as<Val, RealVal>);
 			return val;

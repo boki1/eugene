@@ -3,6 +3,7 @@
 #include <nop/base/serializer.h>
 #include <nop/utility/buffer_reader.h>
 #include <nop/utility/buffer_writer.h>
+#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -29,11 +30,6 @@ struct BadIndVector : std::runtime_error {
 struct Slot {
 	storage::Position pos = 0;
 	std::size_t size = 0;
-
-	Slot() = default;
-	Slot(auto p, auto s) : pos{p}, size{s} {}
-	Slot(const Slot &) = default;
-	Slot &operator=(const Slot &) = default;
 
 	NOP_STRUCTURE(Slot, pos, size);
 };
@@ -94,11 +90,17 @@ public:
 
 		fmt::print("val = '{}' (sz = {}, @slot_id = {})\n", val, sz, val_pos);
 
-		std::vector<uint8_t> val_data;
-		val_data.reserve(sz);
-		nop::Serializer<nop::BufferWriter> serializer{val_data.data(), val_data.size()};
+		nop::Serializer<nop::StreamWriter<std::stringstream>> serializer;
 		if (!serializer.Write(val))
 			throw BadWrite(fmt::format(" - serializer fails writing val_data for slot", val));
+		const auto str = serializer.writer().stream().str();
+		std::vector<uint8_t> val_data{str.cbegin(), str.cend()};
+
+		fmt::print("    Serialized form = '{}'\n", str);
+		nop::Deserializer<nop::StreamReader<std::stringstream>> deserializer{str};
+		RealVal _rv;
+		deserializer.Read(&_rv);
+		fmt::print("    tryout deserialization yields '{}'\n", _rv);
 
 		m_slot_pager->place_inner(val_pos, val_data);
 		m_slots.emplace_back(val_pos, sz);
@@ -117,14 +119,14 @@ public:
 		fmt::print("new_val = '{}' (sz = {}, @slot_id = {})\n", new_val, new_val_sz, n);
 
 		std::vector<uint8_t> new_val_data;
-		new_val_data.reserve(new_val_sz);
+		new_val_data.resize(new_val_sz);
 		nop::Serializer<nop::BufferWriter> serializer{new_val_data.data(), new_val_sz};
 		if (!serializer.Write(new_val))
 			throw BadWrite(fmt::format(" - serializer fails updating with new_val for slot", n));
 
 		m_slot_pager->place_inner(new_val_pos, new_val_data);
 
-		m_slots[n] = Slot{new_val_pos, new_val_sz};
+		m_slots[n] = Slot{.pos=new_val_pos, .size=new_val_sz};
 	}
 
 	/// Free up a slot
@@ -144,7 +146,7 @@ public:
 		const auto &slot = m_slots.at(n);
 		auto val_data = m_slot_pager->get_inner(slot.pos, slot.size);
 
-		Val val;
+		RealVal val;
 		nop::Deserializer<nop::BufferReader> deserializer{val_data.data(), val_data.size()};
 		if (!deserializer.Read(&val))
 			throw BadRead(fmt::format(" - deserializer fails reading val_data for slot", n));
