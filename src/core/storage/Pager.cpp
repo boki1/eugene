@@ -143,12 +143,12 @@ TEST_CASE("Pager inner allocations") {
 	REQUIRE(pos5000 == PAGE_HEADER_SIZE + 32);
 	REQUIRE(pt.max_bytes_inner_used() == 5032);
 
-	// pt.free_inner(pos10, 10);
-	// REQUIRE(pt.max_bytes_inner_used() == 5020);
-	// auto pos10_2 = pt.alloc_inner(10);
-	// REQUIRE(pos10 == pos10_2);
-	// pt.free_inner(pos5000, 5000);
+	pt.free_inner(pos10, 10);
+	REQUIRE(pt.max_bytes_inner_used() == 5020);
 
-	// auto max_bytes = pt.max_inner_used();
-	// REQUIRE(max_bytes == 32);
+	auto pos10_2 = pt.alloc_inner(10);
+	REQUIRE(pos10 == pos10_2);
+	pt.free_inner(pos5000, 5000);
+
+	REQUIRE(pt.max_bytes_inner_used() == 32);
 }

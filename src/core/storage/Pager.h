@@ -599,10 +599,16 @@ public:
 		/// Try to fill in a page that has already been started but is not yet full.
 		for (Position page_pos : this->m_allocator.next_allocated_page()) {
 			auto page = get(page_pos);
-			if ((page.front() != static_cast<uint8_t>(PageType::Slots))
-			 || (prev_page_pos && prev_page_pos.value() != page_pos - PAGE_SIZE))
+			if (page.front() != static_cast<uint8_t>(PageType::Slots)) {
 				reset();
+				continue;
+			}
+			if (prev_page_pos && prev_page_pos.value() != page_pos - PAGE_SIZE)
+				reset();
+
 			alloc_in_page(page, page_pos);
+			if (curr_chunks >= target_chunks)
+				break;
 		}
 
 		/// If that was not enough, allocate new pages to use.
@@ -631,20 +637,23 @@ public:
 
 	void free_inner(Position pos, std::size_t sz) override {
 		// The position of the page whose metadata we are currently modifying
-		auto containing_pg = pos / PAGE_SIZE;
-		// The position inside the page
-		auto i_pg = pos % PAGE_SIZE;
+		auto pgpos = (pos / PAGE_SIZE) * PAGE_SIZE;
+		auto target_chunks = round_upwards(sz, PAGE_ALLOC_SCALE);
+		fmt::print("freeing {} chunks\n", target_chunks);
 
-		for (auto sz_left = sz; sz_left > 0;) {
-			auto pg = get(containing_pg);
-			auto sz_limit = std::min(sz, PAGE_SIZE);
-			std::fill(pg.begin() + i_pg, pg.begin() + i_pg + sz_limit, 0);
-
-			sz_left -= sz_limit;
-			containing_pg += PAGE_SIZE;// Go to next page
-			assert(containing_pg % PAGE_SIZE == 0);
-			i_pg = PAGE_HEADER_SIZE;// We always read from the logical start of the data of the next page
-			place(containing_pg, std::move(pg));
+		while (target_chunks > 0) {
+			auto pg = get(pgpos);
+			for (auto [chunk_num, _] : chunkbit_iter(pg)) {
+				auto chpos = chunk_to_position(pgpos, chunk_num);
+				fmt::print("at chunk #{} (@{})\n", chunk_num, chpos);
+				if (chpos < pos)
+					continue;
+				chunkbit(pg, chunk_num, false);
+				if (--target_chunks <= 0)
+					break;
+			}
+			place(pgpos, std::move(pg));
+			pgpos += PAGE_SIZE;// Go to next page
 		}
 	}
 

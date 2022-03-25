@@ -433,7 +433,7 @@ TEST_CASE("Btree utils") {
 TEST_CASE("Btree dyn entries") {
 	SECTION("std::string's") {
 		Btree<IntToString> btr{"/tmp/eugene-tests/btree-dyn/strings"};
-		auto backup = fill_tree_with_random_items(btr, 1);
+		// auto backup = fill_tree_with_random_items(btr, 1);
 		// check_for_tree_backup_mismatch(btr, backup);
 	}
 }
