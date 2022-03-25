@@ -533,13 +533,17 @@ private:
 			byte &= ~mask;
 	}
 
-	cppcoro::generator<std::pair<unsigned, bool>> chunkbit_iter(const Page &p) {
+	[[nodiscard]] cppcoro::generator<std::pair<unsigned, bool>> chunkbit_iter(const Page &p) {
 		auto chunk_num = 0;
 		for (auto i = PAGE_ALLOC_METADATA; i < PAGE_HEADER_SIZE; ++i, ++chunk_num) {
 			const auto val = p.at(i);
 			for (auto bit_num = 0; bit_num < CHAR_BIT; ++bit_num)
 				co_yield std::make_pair(chunk_num * CHAR_BIT + bit_num, val & (1 << bit_num));
 		}
+	}
+
+	[[nodiscard]] constexpr Position page_pos_of(Position pos) {
+		return (pos / PAGE_SIZE) * PAGE_SIZE;
 	}
 
 public:
@@ -637,7 +641,7 @@ public:
 
 	void free_inner(Position pos, std::size_t sz) override {
 		// The position of the page whose metadata we are currently modifying
-		auto pgpos = (pos / PAGE_SIZE) * PAGE_SIZE;
+		auto pgpos = page_pos_of(pos);
 		auto target_chunks = round_upwards(sz, PAGE_ALLOC_SCALE);
 		fmt::print("freeing {} chunks\n", target_chunks);
 
@@ -658,32 +662,41 @@ public:
 	}
 
 	std::vector<uint8_t> get_inner(Position pos, std::size_t sz) override {
-		if (!this->m_allocator.has_allocated(pos))
-			throw BadRead("cannot inner read from unallocated page");
-		auto page = get(pos);
-		assert(page.front() == static_cast<uint8_t>(PageType::Slots));
-		auto start_pos = pos % PAGE_SIZE;
-		if (start_pos + sz > PAGE_SIZE)
-			throw BadRead("trying to inner read out of page bounds");
-
 		std::vector<uint8_t> data;
 		data.reserve(sz);
+		auto start_pos = pos % PAGE_SIZE;
+		auto pgpos = page_pos_of(pos);
+		assert(start_pos >= PAGE_HEADER_SIZE);
+		while (sz > 0) {
+			auto page = get(pgpos);
+			if (page.front() != static_cast<uint8_t>(PageType::Slots))
+				throw BadRead("cannot inner read from page without support for inner operations");
+			auto limit = std::min(sz, PAGE_SIZE - PAGE_HEADER_SIZE - start_pos);
+			std::copy_n(page.cbegin() + start_pos, limit, std::back_inserter(data));
+			sz -= limit;
+			start_pos = PAGE_HEADER_SIZE;
+			pgpos += PAGE_SIZE;
+		}
 
-		std::copy(page.cbegin() + start_pos, page.cbegin() + start_pos + sz, std::back_inserter(data));
 		return data;
 	}
 
-	void place_inner(Position pos, const std::vector<uint8_t> &bytes_to_store) override {
-		if (!this->m_allocator.has_allocated(pos))
-			throw BadRead("cannot inner read from unallocated page");
-		auto page = get(pos);
-		assert(page.front() == static_cast<uint8_t>(PageType::Slots));
+	void place_inner(Position pos, const std::vector<uint8_t> &data) override {
 		auto start_pos = pos % PAGE_SIZE;
-		if (start_pos + bytes_to_store.size() > PAGE_SIZE)
-			throw BadWrite("trying to inner write out of page bounds");
-
-		std::copy_n(bytes_to_store.cbegin(), bytes_to_store.size(), page.begin() + start_pos);
-		place(pos, std::move(page));
+		auto pgpos = page_pos_of(pos);
+		assert(start_pos >= PAGE_HEADER_SIZE);
+		auto cursor = 0ul;
+		while (cursor < data.size()) {
+			auto page = get(pgpos);
+			if (page.front() != static_cast<uint8_t>(PageType::Slots))
+				throw BadWrite("cannot inner write from page without support for inner operations");
+			auto limit = std::min(data.size() - cursor, PAGE_SIZE - PAGE_HEADER_SIZE - start_pos);
+			std::copy_n(data.cbegin() + cursor, limit, page.begin() + start_pos);
+			place(pgpos, std::move(page));
+			cursor += limit;
+			start_pos = PAGE_HEADER_SIZE;
+			pgpos += PAGE_SIZE;
+		}
 	}
 
 	[[nodiscard]] std::string_view identifier() const noexcept { return m_identifier; }
