@@ -60,7 +60,8 @@ target_link_libraries(LibEugeneCore
         CONAN_PKG::libnop
         CONAN_PKG::andreasbuhr-cppcoro
         CONAN_PKG::benchmark
-        CONAN_PKG::cpprestsdk)
+        CONAN_PKG::cpprestsdk
+        CONAN_PKG::cppitertools)
 
 
 if (DEFINED ENV{EU_BUILD_TESTS})
