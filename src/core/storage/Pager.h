@@ -1,6 +1,8 @@
 #pragma once
 
 #include <array>
+#include <bit>
+#include <bitset>
 #include <cassert>
 #include <cstdint>
 #include <deque>
@@ -38,7 +40,7 @@ enum class PageType : uint8_t { Node,
 /// Start of allocation metadata
 constexpr static std::size_t PAGE_ALLOC_METADATA = sizeof(PageType);
 /// The rest is for allocation information.
-constexpr static std::size_t PAGE_HEADER_SIZE = PAGE_ALLOC_METADATA + PAGE_SIZE / PAGE_ALLOC_SCALE;
+constexpr static std::size_t PAGE_HEADER_SIZE = PAGE_ALLOC_METADATA + PAGE_SIZE / PAGE_ALLOC_SCALE / CHAR_BIT;
 
 constexpr static std::size_t PAGECACHE_SIZE = 1_MB;
 
@@ -371,7 +373,7 @@ public:
 class ISupportingInnerOperations {
 public:
 	ISupportingInnerOperations() = default;
-	ISupportingInnerOperations(const ISupportingInnerOperations&) = default;
+	ISupportingInnerOperations(const ISupportingInnerOperations &) = default;
 	ISupportingInnerOperations &operator=(const ISupportingInnerOperations &) = default;
 
 	virtual Position alloc_inner(std::size_t) = 0;
@@ -410,7 +412,7 @@ public:
 		m_disk.close();
 	}
 
-	Pager(const Pager &p) :Super(p) {}
+	Pager(const Pager &p) : Super(p) {}
 	Pager &operator=(const Pager &) = default;
 
 	auto operator<=>(const Pager &) const noexcept = default;
@@ -522,18 +524,35 @@ private:
 		return (pos_in_page - PAGE_HEADER_SIZE) % PAGE_SIZE / PAGE_ALLOC_SCALE;
 	}
 
-public:
+	constexpr void chunkbit(Page &p, unsigned chunk_num, bool flag) {
+		uint8_t &byte = p[PAGE_ALLOC_METADATA + chunk_num / CHAR_BIT];
+		uint8_t mask = 1 << (chunk_num % CHAR_BIT);
+		if (flag)
+			byte |= mask;
+		else
+			byte &= ~mask;
+	}
 
+	cppcoro::generator<std::pair<unsigned, bool>> chunkbit_iter(const Page &p) {
+		auto chunk_num = 0;
+		for (auto i = PAGE_ALLOC_METADATA; i < PAGE_HEADER_SIZE; ++i, ++chunk_num) {
+			const auto val = p.at(i);
+			for (auto bit_num = 0; bit_num < CHAR_BIT; ++bit_num)
+				co_yield std::make_pair(chunk_num * CHAR_BIT + bit_num, val & (1 << bit_num));
+		}
+	}
+
+public:
 	std::size_t max_bytes_inner_used() noexcept override {
 		std::size_t chunks = 0;
 		for (Position page_pos : this->m_allocator.next_allocated_page()) {
 			auto page = get(page_pos);
-			fmt::print("Page @{}: ", page_pos);
+			fmt::print("Inspecting page @{}\n", page_pos);
 			for (auto i = PAGE_ALLOC_METADATA; i < PAGE_HEADER_SIZE; ++i) {
-				chunks += static_cast<int>(page.at(i));
-				fmt::print("{}", page.at(i));
+				chunks += std::popcount(page.at(i));
+				if (auto popc = std::popcount(page.at(i)); popc > 0)
+					fmt::print("    has {} used chunkbits\n", popc);
 			}
-			fmt::print("\n");
 		}
 		return chunks * PAGE_ALLOC_SCALE;
 	}
@@ -547,38 +566,33 @@ public:
 			throw BadAlloc("cannot alloc_inner with size 0");
 
 		const auto target_chunks = round_upwards(sz, PAGE_ALLOC_SCALE);
-		fmt::print("the target chunks for {} bytes are {}\n", sz, target_chunks);
 		auto curr_chunks = 0ul;
 		std::map<Position, Page> marked_pages;
 		std::optional<Position> prev_page_pos;
 		auto start_pos = 0ul;
 
 		auto reset = [&] {
-			fmt::print("resetting\n");
 			curr_chunks = 0;
 			marked_pages.clear();
+			// fmt::print("resetting\n");
 		};
 
-		auto alloc_in_page = [&] (Page &page, const Position page_pos) {
-			for (auto i = PAGE_ALLOC_METADATA; i < PAGE_HEADER_SIZE; ++i) {
-				if (!page.at(i)) {
-					if (curr_chunks == 0) {
-						fmt::print("setting start_pos = {} (chunk_to_position({}, {}))\n", chunk_to_position(page_pos, i - 1), page_pos, i - 1);
-						start_pos = chunk_to_position(page_pos, i - 1);
-					}
-					// fmt::print("curr_chunks inced, now {}\n", curr_chunks);
-					if (++curr_chunks >= target_chunks) {
-						fmt::print("curr_chunks now = {} which is equal to target = {}\n", curr_chunks, target_chunks);
-						break;
-					}
-				} else {
+		auto alloc_in_page = [&](Page &page, const Position page_pos) {
+			for (auto [chunk_num, bitval] : chunkbit_iter(page)) {
+				if (bitval) {
 					reset();
+					continue;
 				}
+				fmt::print("match\n");
+				if (curr_chunks == 0)
+					start_pos = chunk_to_position(page_pos, chunk_num);
+				if (++curr_chunks >= target_chunks)
+					break;
 			}
 
 			if (curr_chunks > 0) {
 				marked_pages.emplace(page_pos, std::move(page));
-				fmt::print("putting page @{} in marked\n", page_pos);
+				fmt::print("emplace page @{} with start_pos = {}\n", page_pos, start_pos);
 			}
 		};
 
@@ -598,39 +612,39 @@ public:
 			alloc_in_page(new_page, new_page_pos);
 		}
 
-		for (const auto &a: this->m_allocator.next_allocated_page()) {
-			fmt::print("allocated @{}\n", a);
-		}
-
 		/// We should be fine now, just assure that.
 		assert(curr_chunks == target_chunks);
 
 		/// Mark used pages and save.
 		for (auto &[mppos, mp] : marked_pages) {
-			fmt::print("marking page @{}\n", mppos);
-			for (auto i = PAGE_ALLOC_METADATA; i < PAGE_HEADER_SIZE; ++i)
-				if (auto chpos = chunk_to_position(mppos, i - 1); chpos >= start_pos && chpos < start_pos + sz) {
-				    // fmt::print("    {} >= {} && {} <= {} ? {}\n", chpos, start_pos, chpos, start_pos + sz,(chpos >= start_pos && chpos <= start_pos + sz));
-					mp[i] = 1;
-				}
+			for (auto [chunk_num, _] : chunkbit_iter(mp)) {
+				fmt::print("chunk #{}\n", chunk_num);
+				auto chpos = chunk_to_position(mppos, chunk_num);
+				if (chpos >= start_pos && chpos < start_pos + sz)
+					chunkbit(mp, chunk_num, true);
+			}
 			place(mppos, std::move(mp));
 		}
 
-		fmt::print("done! allocated {} bytes in page @{}\n", curr_chunks * PAGE_ALLOC_SCALE, start_pos);
 		return start_pos;
 	}
 
 	void free_inner(Position pos, std::size_t sz) override {
-		if (!this->m_allocator.has_allocated(pos))
-			throw BadAlloc("trying to inner free not allocated space");
-		assert(page.front() == static_cast<uint8_t>(PageType::Slots));
-		const auto num_pages = round_upwards(sz, PAGE_SIZE);
-		for (auto i = 0ul; i < num_pages; i += PAGE_SIZE) {
-			auto page = get(i);
-			auto limit = std::min(sz, PAGE_SIZE) / PAGE_ALLOC_SCALE;
-			sz -= limit;
-			std::fill(page.begin(), page.end() + limit, 0);
-			place(i, std::move(page));
+		// The position of the page whose metadata we are currently modifying
+		auto containing_pg = pos / PAGE_SIZE;
+		// The position inside the page
+		auto i_pg = pos % PAGE_SIZE;
+
+		for (auto sz_left = sz; sz_left > 0;) {
+			auto pg = get(containing_pg);
+			auto sz_limit = std::min(sz, PAGE_SIZE);
+			std::fill(pg.begin() + i_pg, pg.begin() + i_pg + sz_limit, 0);
+
+			sz_left -= sz_limit;
+			containing_pg += PAGE_SIZE;// Go to next page
+			assert(containing_pg % PAGE_SIZE == 0);
+			i_pg = PAGE_HEADER_SIZE;// We always read from the logical start of the data of the next page
+			place(containing_pg, std::move(pg));
 		}
 	}
 

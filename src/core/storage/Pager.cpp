@@ -131,14 +131,20 @@ TEST_CASE("Pager inner allocations") {
 	using PagerType = Pager<FreeListAllocator, LRUCache>;
 	PagerType pt{"/tmp/eu-pager-inner-allocations"};
 
-	REQUIRE(pt.alloc_inner(10) == PAGE_HEADER_SIZE);
-	REQUIRE(pt.alloc_inner(20) == PAGE_HEADER_SIZE + 12);
+	auto pos10 = pt.alloc_inner(10);
+	REQUIRE(pos10 == PAGE_HEADER_SIZE);
+	REQUIRE(pt.max_bytes_inner_used() == 12);
+
+	auto pos20 = pt.alloc_inner(20);
+	REQUIRE(pos20 == PAGE_HEADER_SIZE + 12);
 	REQUIRE(pt.max_bytes_inner_used() == 32);
 
-	REQUIRE(pt.alloc_inner(5000) == PAGE_HEADER_SIZE + 32);
+	auto pos5000 = pt.alloc_inner(5000);
+	REQUIRE(pos5000 == PAGE_HEADER_SIZE + 32);
 	REQUIRE(pt.max_bytes_inner_used() == 5032);
 
 	// pt.free_inner(pos10, 10);
+	// REQUIRE(pt.max_bytes_inner_used() == 5020);
 	// auto pos10_2 = pt.alloc_inner(10);
 	// REQUIRE(pos10 == pos10_2);
 	// pt.free_inner(pos5000, 5000);
