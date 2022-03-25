@@ -28,8 +28,8 @@ jobs:
         shell: bash
         working-directory: ${{github.workspace}}
         run: |
-          export EUGENE_BUILD_TESTS=1
-          export EUGENE_BUILD_BENCHMARKS=1
+          export EU_BUILD_TESTS=1
+          export EU_BUILD_BENCHMARKS=1
           cmake .
 
       - name: Build
