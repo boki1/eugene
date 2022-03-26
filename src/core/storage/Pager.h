@@ -29,23 +29,20 @@ namespace fs = std::filesystem;
 
 namespace internal::storage {
 
-constexpr static std::size_t PAGE_SIZE = 4_KB;
-/// Each 4B have a bit denoting whether they are used or not.
-constexpr static std::size_t PAGE_ALLOC_SCALE = 4_B;
-/// Num B used for the header.
-/// 1B for type: Slot or Node.
 enum class PageType : uint8_t { Node,
 	                        Slots };
 
-/// Start of allocation metadata
-constexpr static std::size_t PAGE_ALLOC_METADATA = sizeof(PageType);
-/// The rest is for allocation information.
-constexpr static std::size_t PAGE_HEADER_SIZE = PAGE_ALLOC_METADATA + PAGE_SIZE / PAGE_ALLOC_SCALE / CHAR_BIT;
+constexpr static std::size_t PAGE_SIZE = 4_KB;
+constexpr static std::size_t PAGE_ALLOC_SCALE = 4_B;
+constexpr static std::size_t PAGE_TYPE_METADATA = sizeof(PageType);
+constexpr static std::size_t TOTAL_CHUNKS = PAGE_SIZE / PAGE_ALLOC_SCALE;
+constexpr static std::size_t TOTAL_CHUNK_MAP = TOTAL_CHUNKS / CHAR_BIT;
+constexpr static std::size_t PAGE_HEADER_SIZE = PAGE_TYPE_METADATA + TOTAL_CHUNK_MAP;
+constexpr static std::size_t CHUNKS = (PAGE_SIZE - PAGE_HEADER_SIZE) / PAGE_ALLOC_SCALE;
+constexpr static std::size_t CHUNK_MAP_SIZE = CHUNKS / CHAR_BIT;
 
 constexpr static std::size_t PAGECACHE_SIZE = 1_MB;
-
 constexpr static std::size_t PAGECACHE_SIZE_UNLIMITED = 0;
-
 constexpr static std::size_t DEFAULT_NUM_PAGES = 256;
 
 using Position = unsigned long int;
@@ -123,13 +120,15 @@ public:
 	StackSpaceAllocator(const StackSpaceAllocator &) = default;
 	StackSpaceAllocator &operator=(const StackSpaceAllocator &);
 
-	[[nodiscard]] constexpr Position alloc() {
+	[[nodiscard]] Position alloc() {
 		auto tmp = m_cursor;
 		m_cursor += PAGE_SIZE;
+		fmt::print("[pager] stack alloc page @{}\n", tmp);
 		return tmp;
 	}
 
-	void free(const Position) {
+	void free(const Position pos) {
+		fmt::print("[ERR][pager] stack dealloc page @{}\n", pos);
 		throw BadAlloc{};
 	}
 
@@ -178,9 +177,11 @@ public:
 		}
 
 		if (m_next_page >= m_limit_num_pages)
-			throw BadAlloc(fmt::format(" - FreeListAllocator out of space. Already returned limit amount of pages (={})\n", m_limit_num_pages));
+			throw BadAlloc(fmt::format("FreeListAllocator out of space (limit is {})", m_limit_num_pages));
 
-		return m_next_page++ * PAGE_SIZE;
+		const Position tmp = m_next_page++ * PAGE_SIZE;
+		fmt::print("[pager] freelist alloc page @{}\n", tmp);
+		return tmp;
 	}
 
 	void free(const Position pos) {
@@ -198,6 +199,7 @@ public:
 		if (it < m_freelist.end() && *it == pos)
 			throw BadPosition(pos);
 		m_freelist.insert(m_freelist.begin() + std::distance(m_freelist.begin(), it), pos);
+		fmt::print("[pager] freelist dealloc page @{}\n", pos);
 	}
 
 	[[nodiscard]] constexpr bool has_allocated(const Position pos) const {
@@ -209,7 +211,6 @@ public:
 	}
 
 	[[nodiscard]] cppcoro::generator<Position> next_allocated_page() const noexcept {
-		fmt::print("pager alloc: next_page @{}\n", m_next_page);
 		for (Position i = 0; i < m_next_page * PAGE_SIZE; i += PAGE_SIZE) {
 			if (has_allocated(i)) {
 				co_yield i;
@@ -396,15 +397,16 @@ public:
 	/// The Pager class conforms to the Rule of Three
 
 	template<typename... Args>
-	explicit Pager(std::string_view identifier, const ActionOnConstruction action = ActionOnConstruction::DoNotLoad, std::size_t limit_page_cache_size = PAGECACHE_SIZE / PAGE_SIZE, Args &&...args)
+	explicit Pager(std::string identifier, const ActionOnConstruction action = ActionOnConstruction::DoNotLoad, std::size_t limit_page_cache_size = PAGECACHE_SIZE / PAGE_SIZE, Args &&...args)
 	    : Super{limit_page_cache_size, std::forward<Args>(args)...}, m_identifier{identifier} {
+			fmt::print("[pager] instantiating '{}'\n", m_identifier);
 		if (action == ActionOnConstruction::Load)
 			load();
-		else if (!fs::exists(identifier.data()))
+		else if (!fs::exists(m_identifier))
 			/// Create an empty storage iff we should not load and the storage does not yet exist.
-			m_disk.open(identifier.data(), std::ios::trunc | std::ios::in | std::ios::out);
+			m_disk.open(m_identifier, std::ios::trunc | std::ios::in | std::ios::out);
 		else
-			m_disk.open(identifier.data(), std::ios::in | std::ios::out);
+			m_disk.open(m_identifier, std::ios::in | std::ios::out);
 	}
 
 	virtual ~Pager() noexcept {
@@ -443,8 +445,10 @@ public:
 	/// Position is expected to be 1) associated with a page and, 2) the page which is allocated.
 	/// If that is not adhered to, BadRead is thrown.
 	[[nodiscard]] Page read(Position pos) {
-		if (!at_page_boundary(pos) || !this->m_allocator.has_allocated(pos))
-			throw BadRead("pos is either not associated with a page or is not allocated");
+		if (!at_page_boundary(pos))
+			throw BadRead(fmt::format("pos (@{}) is not associated with a page", pos));
+		if (!this->m_allocator.has_allocated(pos))
+			throw BadRead(fmt::format("pos (@{}) is not allocated", pos));
 
 		Page page;
 		m_disk.seekp(pos);
@@ -494,9 +498,11 @@ public:
 
 	void save() override {
 		// Store allocator state
-		nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{fmt::format("{}-alloc", m_identifier.data()), std::ios::trunc | std::ios::out};
+		const std::string pager_allocator_name = fmt::format("{}-alloc", m_identifier);
+		fmt::print("[pager] saving pager allocator '{}'\n", pager_allocator_name);
+		nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{pager_allocator_name};
 		if (!serializer.Write(this->m_allocator))
-			throw BadWrite("- serializer failed writing pager allocator");
+			throw BadWrite("serializer failed writing pager allocator");
 
 		// Flush cache
 		for (auto evict_res : this->m_cache.flush())
@@ -506,9 +512,11 @@ public:
 
 	void load() override {
 		// Load allocator state
-		nop::Deserializer<nop::StreamReader<std::ifstream>> deserializer{fmt::format("{}-alloc", m_identifier.data())};
+		const std::string pager_allocator_name = fmt::format("{}-alloc", m_identifier);
+		fmt::print("[pager] loading pager allocator '{}'\n", pager_allocator_name);
+		nop::Deserializer<nop::StreamReader<std::ifstream>> deserializer{pager_allocator_name};
 		if (!deserializer.Read(&this->m_allocator))
-			throw BadRead("- deserializer failed reading pager allocator");
+			throw BadRead("deserializer failed reading pager allocator");
 	}
 
 	///
@@ -525,7 +533,7 @@ private:
 	}
 
 	constexpr void chunkbit(Page &p, unsigned chunk_num, bool flag) {
-		uint8_t &byte = p[PAGE_ALLOC_METADATA + chunk_num / CHAR_BIT];
+		uint8_t &byte = p[PAGE_TYPE_METADATA + chunk_num / CHAR_BIT];
 		uint8_t mask = 1 << (chunk_num % CHAR_BIT);
 		if (flag)
 			byte |= mask;
@@ -535,7 +543,7 @@ private:
 
 	[[nodiscard]] cppcoro::generator<std::pair<unsigned, bool>> chunkbit_iter(const Page &p) {
 		auto chunk_num = 0;
-		for (auto i = PAGE_ALLOC_METADATA; i < PAGE_HEADER_SIZE; ++i, ++chunk_num) {
+		for (auto i = PAGE_TYPE_METADATA; i < PAGE_TYPE_METADATA + CHUNK_MAP_SIZE; ++i, ++chunk_num) {
 			const auto val = p.at(i);
 			for (auto bit_num = 0; bit_num < CHAR_BIT; ++bit_num)
 				co_yield std::make_pair(chunk_num * CHAR_BIT + bit_num, val & (1 << bit_num));
@@ -548,15 +556,29 @@ private:
 
 public:
 	std::size_t max_bytes_inner_used() noexcept override {
+		fmt::print("TOTAL_CHUNKS = {}\n", TOTAL_CHUNKS);
+		fmt::print("TOTAL_CHUNK_MAP = {}\n", TOTAL_CHUNK_MAP);
+		fmt::print("PAGE_HEADER_SIZE = {}\n", PAGE_HEADER_SIZE);
+		fmt::print("CHUNKS = {}\n", CHUNKS);
+		fmt::print("SPACE = {}\n", CHUNKS * PAGE_ALLOC_SCALE);
+		fmt::print("UNUSED_CHUNKS = {}\n", TOTAL_CHUNKS - CHUNKS);
+		fmt::print("UNUSED_SPACE = {}\n", (TOTAL_CHUNKS - CHUNKS) * PAGE_ALLOC_SCALE);
+		fmt::print("TOTAL_SPACE = {}\n", (TOTAL_CHUNKS - CHUNKS) * PAGE_ALLOC_SCALE + (CHUNKS * PAGE_ALLOC_SCALE));
+		fmt::print("CHUNK_MAP_SIZE = {}\n", CHUNK_MAP_SIZE);
+		fmt::print("TOTAL_CHUNK_MAP = {}\n", TOTAL_CHUNK_MAP);
+
 		std::size_t chunks = 0;
+		std::size_t in_last_page = 0;
+		std::size_t a = 0;
 		for (Position page_pos : this->m_allocator.next_allocated_page()) {
-			auto page = get(page_pos);
-			fmt::print("Inspecting page @{}\n", page_pos);
-			for (auto i = PAGE_ALLOC_METADATA; i < PAGE_HEADER_SIZE; ++i) {
-				chunks += std::popcount(page.at(i));
-				if (auto popc = std::popcount(page.at(i)); popc > 0)
-					fmt::print("    has {} used chunkbits\n", popc);
+			for (const auto &[_, bitval] : chunkbit_iter(get(page_pos))) {
+				chunks += static_cast<std::size_t>(bitval);
+				in_last_page += static_cast<std::size_t>(bitval);
+				++a;
 			}
+			fmt::print("      max bytes from page @{} are {} (total = {})\n", page_pos, in_last_page * PAGE_ALLOC_SCALE, a * PAGE_ALLOC_SCALE);
+			a = 0;
+			in_last_page = 0;
 		}
 		return chunks * PAGE_ALLOC_SCALE;
 	}
@@ -578,7 +600,6 @@ public:
 		auto reset = [&] {
 			curr_chunks = 0;
 			marked_pages.clear();
-			// fmt::print("resetting\n");
 		};
 
 		auto alloc_in_page = [&](Page &page, const Position page_pos) {
@@ -587,17 +608,14 @@ public:
 					reset();
 					continue;
 				}
-				fmt::print("match\n");
 				if (curr_chunks == 0)
 					start_pos = chunk_to_position(page_pos, chunk_num);
 				if (++curr_chunks >= target_chunks)
 					break;
 			}
 
-			if (curr_chunks > 0) {
+			if (curr_chunks > 0)
 				marked_pages.emplace(page_pos, std::move(page));
-				fmt::print("emplace page @{} with start_pos = {}\n", page_pos, start_pos);
-			}
 		};
 
 		/// Try to fill in a page that has already been started but is not yet full.
@@ -619,6 +637,7 @@ public:
 		while (curr_chunks < target_chunks) {
 			auto new_page = SlotPage();
 			auto new_page_pos = this->m_allocator.alloc();
+			fmt::print("[Additional] inner alloc allocates page @{}\n", new_page_pos);
 			alloc_in_page(new_page, new_page_pos);
 		}
 
@@ -627,8 +646,8 @@ public:
 
 		/// Mark used pages and save.
 		for (auto &[mppos, mp] : marked_pages) {
+			fmt::print("[pager-inner] allocating in page @{}\n", mppos);
 			for (auto [chunk_num, _] : chunkbit_iter(mp)) {
-				fmt::print("chunk #{}\n", chunk_num);
 				auto chpos = chunk_to_position(mppos, chunk_num);
 				if (chpos >= start_pos && chpos < start_pos + sz)
 					chunkbit(mp, chunk_num, true);
@@ -643,15 +662,14 @@ public:
 		// The position of the page whose metadata we are currently modifying
 		auto pgpos = page_pos_of(pos);
 		auto target_chunks = round_upwards(sz, PAGE_ALLOC_SCALE);
-		fmt::print("freeing {} chunks\n", target_chunks);
 
 		while (target_chunks > 0) {
 			auto pg = get(pgpos);
 			for (auto [chunk_num, _] : chunkbit_iter(pg)) {
 				auto chpos = chunk_to_position(pgpos, chunk_num);
-				fmt::print("at chunk #{} (@{})\n", chunk_num, chpos);
 				if (chpos < pos)
 					continue;
+				fmt::print("[pager-inner] deallocating in page @{}\n", pgpos);
 				chunkbit(pg, chunk_num, false);
 				if (--target_chunks <= 0)
 					break;
@@ -670,8 +688,9 @@ public:
 		while (sz > 0) {
 			auto page = get(pgpos);
 			if (page.front() != static_cast<uint8_t>(PageType::Slots))
-				throw BadRead("cannot inner read from page without support for inner operations");
-			auto limit = std::min(sz, PAGE_SIZE - PAGE_HEADER_SIZE - start_pos);
+				throw BadRead(fmt::format("cannot inner read from page (@{}) without support for inner operations", pgpos));
+			auto limit = std::min(sz, PAGE_SIZE - start_pos);
+			fmt::print("[pager-inner] retrieving from page @{}\n", pgpos);
 			std::copy_n(page.cbegin() + start_pos, limit, std::back_inserter(data));
 			sz -= limit;
 			start_pos = PAGE_HEADER_SIZE;
@@ -689,8 +708,9 @@ public:
 		while (cursor < data.size()) {
 			auto page = get(pgpos);
 			if (page.front() != static_cast<uint8_t>(PageType::Slots))
-				throw BadWrite("cannot inner write from page without support for inner operations");
-			auto limit = std::min(data.size() - cursor, PAGE_SIZE - PAGE_HEADER_SIZE - start_pos);
+				throw BadWrite(fmt::format("cannot inner write to page (@{}) without support for inner operations", pgpos));
+			auto limit = std::min(data.size() - cursor, PAGE_SIZE - start_pos);
+			fmt::print("[pager-inner] emplacing at page @{}\n", pgpos);
 			std::copy_n(data.cbegin() + cursor, limit, page.begin() + start_pos);
 			place(pgpos, std::move(page));
 			cursor += limit;
@@ -702,7 +722,7 @@ public:
 	[[nodiscard]] std::string_view identifier() const noexcept { return m_identifier; }
 
 private:
-	std::string_view m_identifier;
+	std::string m_identifier;
 	std::fstream m_disk;
 };
 
@@ -761,7 +781,7 @@ public:
 	[[nodiscard]] std::string_view identifier() const noexcept { return m_identifier; }
 
 private:
-	std::string_view m_identifier;
+	std::string m_identifier;
 };
 
 }// namespace internal::storage

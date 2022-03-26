@@ -619,7 +619,7 @@ private:
 	constexpr void bare() {
 		if constexpr (Config::DYN_ENTRIES) {
 			if (!m_ind_vector.has_value())
-				m_ind_vector.emplace(name(), IndirectionVector<Config>::ActionOnConstruction::DoNotLoad);
+				m_ind_vector.emplace(fmt::format("{}-indvector", name()), IndirectionVector<Config>::ActionOnConstruction::DoNotLoad);
 		}
 
 		[[maybe_unused]] auto new_root = make_root(MakeRootAction::BareInit);
@@ -851,9 +851,7 @@ public:
 
 	[[nodiscard]] Val set_value(RealVal val) {
 		if constexpr (Config::DYN_ENTRIES) {
-			const auto val_sz = (*Config::RealValSizeEvaluator)(&val);
-			fmt::print("calling set_to_slot for val = '{}' (type = {}, sz = {})\n", val, pretty_type_name(val), val_sz);
-			return ind_vector().set_to_slot(val, val_sz);
+			return ind_vector().set_to_slot(val);
 		} else {
 			static_assert(std::same_as<Val, RealVal>);
 			return val;
@@ -906,7 +904,7 @@ public:
 	/// break in any way any of the tree invariants. It remains as an additional element to compare with
 	/// in the branch nodes.
 	struct RemovedVal {
-		const Val val;
+		const RealVal val;
 	};
 	struct RemovedNothing {};
 	using RemovalReturnMark = std::variant<RemovedVal, RemovedNothing>;
@@ -920,13 +918,13 @@ public:
 		auto &node_leaf = search_res.node.leaf();
 		const auto &node_path = search_res.path.top();
 
-		const Val removed = get_value(node_leaf.vals.at(search_res.key_expected_pos));
+		const auto removed = get_value(node_leaf.vals.at(search_res.key_expected_pos));
 
 		/// Erase element
 		node_leaf.keys.erase(node_leaf.keys.cbegin() + search_res.key_expected_pos);
 		if constexpr (Config::DYN_ENTRIES) {
-			auto slot_id = node_leaf.vals.cbegin() + search_res.key_expected_pos;
-			return ind_vector().remove_slot(slot_id);
+			auto slot_id_it = node_leaf.vals.cbegin() + search_res.key_expected_pos;
+			ind_vector().remove_slot(*slot_id_it);
 		}
 		node_leaf.vals.erase(node_leaf.vals.cbegin() + search_res.key_expected_pos);
 		m_pager->place(node_path.node_pos, search_res.node.make_page());
@@ -1047,11 +1045,12 @@ public:
 	/// Reads from 'identifier' and 'identifier'-header and initializes the tree's metadata.
 	void load() {
 		if constexpr (requires { m_pager->load(); }) {
+			fmt::print("[btree] loading '{}'\n", header_name());
 			Header header_;
 
 			nop::Deserializer<nop::StreamReader<std::ifstream>> deserializer{header_name().data()};
 			if (!deserializer.Read(&header_))
-				throw BadRead();
+				throw BadRead("failed deseralizing btree header");
 
 			m_rootpos = header_.tree_rootpos;
 			m_size = header_.tree_size;
@@ -1065,18 +1064,20 @@ public:
 
 		if constexpr (Config::DYN_ENTRIES) {
 			if (!m_ind_vector.has_value())
-				m_ind_vector.emplace(name(), IndirectionVector<Config>::ActionOnConstruction::Load);
-			ind_vector().load();
+				m_ind_vector.emplace(fmt::format("{}-indvector", name()), IndirectionVector<Config>::ActionOnConstruction::Load);
+			else
+				ind_vector().load();
 		}
 	}
 
 	/// Store tree metadata to storage
 	/// Stores tree's metadata inside files 'identifier' and 'identifier'-header.
 	void save() {
+		fmt::print("[btree] saving '{}'\n", header_name());
 		if constexpr (requires { m_pager->save(); }) {
 			nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{header_name().data(), std::ios::trunc};
 			if (!serializer.Write(header()))
-				throw BadWrite();
+				throw BadWrite("failed serializing btree header");
 
 			m_pager->save();
 		}
@@ -1096,9 +1097,10 @@ public:
 	}
 
 public:
-	explicit Btree(std::string_view identifier = "/tmp/eu-btree-default", ActionOnConstruction action_on_construction = ActionOnConstruction::Bare) : m_pager{std::make_shared<PagerType>(identifier)}, m_identifier{identifier} {
+	explicit Btree(std::string identifier = "/tmp/eu-btree-default", ActionOnConstruction action_on_construction = ActionOnConstruction::Bare) : m_pager{std::make_shared<PagerType>(identifier)}, m_identifier{identifier} {
 		using enum ActionOnConstruction;
 
+		fmt::print("[btree] instantiating '{}'\n", identifier);
 		// clang-format off
 		switch (action_on_construction) {
 		  break; case Load: load();

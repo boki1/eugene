@@ -48,17 +48,16 @@ struct DoubleToLong : Config {
 	using Ref = float;
 };
 
-
-static std::size_t string_size_eval(const void *val) {
-	const std::string &as_str = *(const std::string *) val;
-	return as_str.size();
-}
-
 struct IntToString : Config {
 	using Key = int;
 	using RealVal = std::string;
 
-	static inline constexpr RealValSizeEvaluator_type RealValSizeEvaluator = string_size_eval;
+	static inline constexpr bool DYN_ENTRIES = true;
+};
+
+struct DoubleToVectorOfStrings : Config {
+	using Key = double;
+	using RealVal = std::vector<std::string>;
 
 	static inline constexpr bool DYN_ENTRIES = true;
 };
@@ -431,9 +430,38 @@ TEST_CASE("Btree utils") {
 }
 
 TEST_CASE("Btree dyn entries") {
+	fs::create_directories("/tmp/eugene-tests/btree-dyn");
+
 	SECTION("std::string's") {
-		Btree<IntToString> btr{"/tmp/eugene-tests/btree-dyn/strings"};
-		// auto backup = fill_tree_with_random_items(btr, 1);
-		// check_for_tree_backup_mismatch(btr, backup);
+		using Tree = Btree<IntToString>;
+		auto backup = [] {
+			Tree bpt{"/tmp/eugene-tests/btree-dyn/strings", ActionOnConstruction::Bare};
+			auto backup = fill_tree_with_random_items(bpt, 10000);
+			check_for_tree_backup_mismatch(bpt, backup);
+			bpt.save();
+			fmt::print("saved\n");
+			return backup;
+		}();
+
+		Tree bpt{"/tmp/eugene-tests/btree-dyn/strings", ActionOnConstruction::Load};
+		check_for_tree_backup_mismatch(bpt, backup);
+
+		for (auto i = 0ul; i < 10; ++i) {
+			auto random_key = [&] {
+				std::random_device dev;
+				std::mt19937_64 rng(dev());
+
+				std::uniform_int_distribution<size_t> dist(0, backup.size() - 1);
+				auto random_pair = backup.begin();
+				std::advance(random_pair, dist(rng));
+				return random_pair->first;
+			}();
+			const auto removed = bpt.remove(random_key);
+			REQUIRE(std::holds_alternative<Tree::RemovedVal>(removed));
+			REQUIRE(std::get<Tree::RemovedVal>(removed).val == backup.at(random_key));
+			backup.erase(random_key);
+		}
+
+		check_for_tree_backup_mismatch(bpt, backup);
 	}
 }
