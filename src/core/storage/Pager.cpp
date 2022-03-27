@@ -33,17 +33,17 @@ TEST_CASE("Page", "[pager]") {
 
 TEST_CASE("Persistent pager", "[pager]") {
 	SECTION("Using stack allocator") {
-		Pager pr_stack1("/tmp/eu-persistent-pager-stackallocater");
+		Pager<StackSpaceAllocator> pr_stack1("/tmp/eu-persistent-pager-stackallocater");
 
 		for (int i = 0; i < 10; ++i)
 			[[maybe_unused]] Position p = pr_stack1.alloc();
 		REQUIRE(pr_stack1.allocator().cursor() == 10 * PAGE_SIZE);
 		pr_stack1.save();
 
-		Pager pr_stack2("/tmp/eu-persistent-pager-stackallocater", ActionOnConstruction::Load);
+		Pager<StackSpaceAllocator> pr_stack2("/tmp/eu-persistent-pager-stackallocater", ActionOnConstruction::Load);
 		REQUIRE(pr_stack2.allocator().cursor() == 10 * PAGE_SIZE);
 
-		Pager pr_stack3("/tmp/eu-persistent-pager-stackallocater", ActionOnConstruction::DoNotLoad);
+		Pager<StackSpaceAllocator> pr_stack3("/tmp/eu-persistent-pager-stackallocater", ActionOnConstruction::DoNotLoad);
 		REQUIRE(pr_stack3.allocator().cursor() == 0);
 		pr_stack3.load();
 		REQUIRE(pr_stack3.allocator().cursor() == 10 * PAGE_SIZE);
@@ -78,7 +78,7 @@ TEST_CASE("Persistent pager", "[pager]") {
 }
 
 TEST_CASE("Page stack allocator", "[pager]") {
-	Pager pr("/tmp/eu-pager-stack-alloc");
+	Pager<StackSpaceAllocator> pr("/tmp/eu-pager-stack-alloc");
 	for (int i = 0; i < 11; ++i) {
 		REQUIRE(pr.alloc() == i * PAGE_SIZE);
 		REQUIRE_THROWS_AS(pr.free(0), BadAlloc);
@@ -125,4 +125,69 @@ TEST_CASE("Page cache with LRU policy", "[pager]") {
 	REQUIRE(cache.get(5 * PAGE_SIZE)->get() == p);
 	REQUIRE(std::find(evict_res2->page.cbegin(), evict_res2->page.cend(), 1) != evict_res2->page.cend());
 	REQUIRE(evict_res2->pos == 1 * PAGE_SIZE);
+}
+
+TEST_CASE("Pager inner operations") {
+	using PagerType = Pager<FreeListAllocator, LRUCache>;
+	SECTION("Allocation and deallocation") {
+		PagerType pt{"/tmp/eu-pager-inner-allocations"};
+
+		auto pos10 = pt.alloc_inner(10);
+		REQUIRE(pos10 == PAGE_HEADER_SIZE);
+		REQUIRE(pt.max_bytes_inner_used() == 12);
+
+		auto pos20 = pt.alloc_inner(20);
+		REQUIRE(pos20 == PAGE_HEADER_SIZE + 12);
+		REQUIRE(pt.max_bytes_inner_used() == 32);
+
+		auto pos5000 = pt.alloc_inner(5000);
+		REQUIRE(pos5000 == PAGE_HEADER_SIZE + 32);
+		// REQUIRE(pt.max_bytes_inner_used() == 5032);
+
+		pt.free_inner(pos10, 10);
+		// REQUIRE(pt.max_bytes_inner_used() == 5020);
+
+		auto pos10_2 = pt.alloc_inner(10);
+		REQUIRE(pos10 == pos10_2);
+		pt.free_inner(pos5000, 5000);
+
+		// REQUIRE(pt.max_bytes_inner_used() == 32);
+	}
+
+	SECTION("Enplacing and retrieving of data") {
+		PagerType pt{"/tmp/eu-pager-inner-place-and-get"};
+
+		auto pos10 = pt.alloc_inner(10);
+		std::vector<uint8_t> expected10(10, 10);
+		pt.place_inner(pos10, expected10);
+		auto actual10 = pt.get_inner(pos10, 10);
+		REQUIRE(std::equal(expected10.cbegin(), expected10.cend(), actual10.cbegin()));
+
+		auto pos20 = pt.alloc_inner(20);
+		std::vector<uint8_t> expected20(20, 20);
+		pt.place_inner(pos20, expected20);
+		auto actual20 = pt.get_inner(pos20, 20);
+		fmt::print("expected20 = '{}'\n", fmt::join(expected20, "; "));
+		fmt::print("actual20   = '{}'\n", fmt::join(actual20, "; "));
+		REQUIRE(std::equal(expected20.cbegin(), expected20.cend(), actual20.cbegin()));
+
+		auto pos5000 = pt.alloc_inner(5000);
+		std::vector<uint8_t> expected5000(5000, 50);
+		pt.place_inner(pos5000, expected5000);
+		auto actual5000 = pt.get_inner(pos5000, 5000);
+		REQUIRE(std::equal(expected5000.cbegin(), expected5000.cend(), actual5000.cbegin()));
+
+		pt.free_inner(pos10, 10);
+		auto pos10_2 = pt.alloc_inner(10);
+		std::vector<uint8_t> expected10_2(10, 11);
+		pt.place_inner(pos10_2, expected10_2);
+		auto actual10_2 = pt.get_inner(pos10_2, 10);
+		REQUIRE(std::equal(expected10_2.cbegin(), expected10_2.cend(), actual10_2.cbegin()));
+		REQUIRE(pos10_2 == pos10);
+
+		std::vector<uint8_t> expected2222(2222, 22);
+		pt.place_inner(pos5000, expected2222);
+		auto actual2222 = pt.get_inner(pos5000, 2222);
+		REQUIRE(std::equal(expected2222.cbegin(), expected2222.cend(), actual2222.cbegin()));
+	}
 }

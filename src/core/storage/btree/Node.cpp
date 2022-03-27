@@ -19,7 +19,7 @@ using namespace internal::storage;
 using namespace internal::storage::btree;
 using namespace internal;
 
-using Nod = Node<DefaultConfig>;
+using Nod = Node<Config>;
 using Metadata = Nod::Metadata;
 using Branch = Nod::Branch;
 using Leaf = Nod::Leaf;
@@ -38,7 +38,7 @@ Nod random_item<Nod>() {
 	std::uniform_int_distribution<std::mt19937::result_type> dist128(1, 128);
 
 	std::vector<Position> a;
-	std::vector<DefaultConfig::Key> b;
+	std::vector<Config::Key> b;
 	for (std::size_t i = 0; i < dist128(rng); ++i)
 		if (dist128(rng) % 2)
 			a.push_back(dist128(rng));

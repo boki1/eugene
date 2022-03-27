@@ -17,14 +17,14 @@
 #include <nop/utility/buffer_writer.h>
 #include <nop/utility/die.h>
 
+#include <core/Config.h>
 #include <core/storage/Pager.h>
-#include <core/storage/btree/Config.h>
 
 #include <fmt/core.h>
 
 namespace internal::storage::btree {
 
-template<BtreeConfig Config>
+template<EugeneConfig _>
 class Btree;
 
 struct BadTreeAccess : std::runtime_error {
@@ -54,13 +54,14 @@ enum class SplitBias { LeanLeft,
 enum class SplitType { ExplodeOnly,
 	               ExcludeMid };
 
-template<BtreeConfig Config = DefaultConfig>
+template<EugeneConfig Config = Config>
 class Node {
 	friend Btree<Config>;
 
 	using Nod = Node<Config>;
 
 	using Val = typename Config::Val;
+	using RealVal = typename Config::RealVal;
 	using Key = typename Config::Key;
 	using Ref = typename Config::Ref;
 
@@ -98,7 +99,7 @@ public:
 
 	struct Entry {
 		Key key;
-		Val val;
+		RealVal val;
 
 		[[nodiscard]] auto operator<=>(const Entry &) const noexcept = default;
 	};
@@ -158,8 +159,12 @@ public:
 	///
 
 	/// Create a node from page
-	[[nodiscard]] constexpr static Nod from_page(const Page &p) {
-		nop::Deserializer<nop::BufferReader> deserializer{p.data(), PAGE_SIZE};
+	[[nodiscard]] static Nod from_page(const Page &p) {
+		if (static_cast<PageType>(p.front()) != PageType::Node)
+		{}
+			// throw BadRead("cannot create node from page");
+			// throw BadRead();
+		nop::Deserializer<nop::BufferReader> deserializer{p.data() + 1, PAGE_SIZE - 1};
 		Node node;
 		deserializer.Read(&node);
 		return node;
@@ -168,7 +173,8 @@ public:
 	/// Create a page containing this' data
 	[[nodiscard]] constexpr Page make_page() const noexcept {
 		Page p;
-		nop::Serializer<nop::BufferWriter> serializer{p.data(), PAGE_SIZE};
+		p[0] = static_cast<uint8_t>(PageType::Node);
+		nop::Serializer<nop::BufferWriter> serializer{p.data() + 1, PAGE_SIZE - 1};
 		serializer.Write(*this);
 		return p;
 	}
@@ -218,11 +224,11 @@ public:
 			auto l = Leaf();
 			merge_many(leaf().keys, other.leaf().keys, [&](const bool use_self, const std::size_t idx) {
 				if (use_self) {
-					fmt::print("Adding {}\n", *(leaf().keys.cbegin() + idx));
+					// fmt::print("Adding {}\n", *(leaf().keys.cbegin() + idx));
 					l.keys.push_back(*(leaf().keys.cbegin() + idx));
 					l.vals.push_back(*(leaf().vals.cbegin() + idx));
 				} else {
-					fmt::print("Adding {}\n", *(other.leaf().keys.cbegin() + idx));
+					// fmt::print("Adding {}\n", *(other.leaf().keys.cbegin() + idx));
 					l.keys.push_back(*(other.leaf().keys.cbegin() + idx));
 					l.vals.push_back(*(other.leaf().vals.cbegin() + idx));
 				}
@@ -235,9 +241,9 @@ public:
 					b.refs.push_back(*(branch().refs.cbegin() + idx));
 					b.links.push_back(*(branch().links.cbegin() + idx));
 					b.link_status.push_back(*(branch().link_status.cbegin() + idx));
-					fmt::print("Adding {} and link to @{}\n", b.refs.back(), b.links.back());
+					// fmt::print("Adding {} and link to @{}\n", b.refs.back(), b.links.back());
 					if (idx == branch().refs.size() - 1 && branch().links.size() > branch().refs.size()) {
-						fmt::print("Last ref, adding right link and link to @{}\n", branch().links.back());
+						// fmt::print("Last ref, adding right link and link to @{}\n", branch().links.back());
 						b.links.push_back(branch().links.back());
 						b.link_status.push_back(branch().link_status.back());
 					}
@@ -245,9 +251,9 @@ public:
 					b.refs.push_back(*(other.branch().refs.cbegin() + idx));
 					b.links.push_back(*(other.branch().links.cbegin() + idx));
 					b.link_status.push_back(*(other.branch().link_status.cbegin() + idx));
-					fmt::print("Adding {} and link to @{}\n", b.refs.back(), b.links.back());
+					// fmt::print("Adding {} and link to @{}\n", b.refs.back(), b.links.back());
 					if (idx == other.branch().refs.size() - 1 && other.branch().links.size() > other.branch().refs.size()) {
-						fmt::print("Last ref, adding right link and link to @{}\n", other.branch().links.back());
+						// fmt::print("Last ref, adding right link and link to @{}\n", other.branch().links.back());
 						b.links.push_back(other.branch().links.back());
 						b.link_status.push_back(other.branch().link_status.back());
 					}

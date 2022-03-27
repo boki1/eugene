@@ -31,8 +31,7 @@ set(LibEugeneBtree_SRC
         storage/btree/Btree.h
         storage/btree/Btree.cpp
         storage/btree/Node.h
-        storage/btree/BtreePrinter.h
-        storage/btree/Config.h)
+        storage/btree/BtreePrinter.h)
 
 set(LibEugenePager_SRC
         storage/Pager.h
@@ -43,7 +42,7 @@ set(LibEugeneCompression_SRC
         storage/compression/Decompressor.h)
 
 set(LibEugeneCore_SRC
-        Util.h Util.cpp Logger.h
+        Config.h Util.h Util.cpp Logger.h
         ${LibEugeneBtree_SRC}
         ${LibEugenePager_SRC}
         ${LibEugeneCompression_SRC})
@@ -53,7 +52,7 @@ add_library(LibEugeneCore "${LibEugeneCore_SRC}")
 set_target_properties(LibEugeneCore PROPERTIES LINKER_LANGUAGE CXX)
 target_include_directories(LibEugeneCore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(LibEugeneCore
-        CONAN_PKG::fmt
+		CONAN_PKG::fmt
         CONAN_PKG::ms-gsl
         CONAN_PKG::catch2
         CONAN_PKG::spdlog
@@ -61,8 +60,7 @@ target_link_libraries(LibEugeneCore
         CONAN_PKG::andreasbuhr-cppcoro
         CONAN_PKG::benchmark
         CONAN_PKG::cpprestsdk
-        CONAN_PKG::cppitertools)
-
+		    CONAN_PKG::cppitertools)
 
 if (DEFINED ENV{EU_BUILD_TESTS})
     message(STATUS "EU_BUILD_TESTS = " ${EU_BUILD_TESTS})
@@ -107,11 +105,10 @@ if (DEFINED ENV{EU_BUILD_BENCHMARKS})
 
     eugene_bench(BtreeBench src/core/storage/btree)
 
-
     add_library(LibCompShared src/core/storage/compression/benchmarks/Shared.h)
     set_target_properties(LibCompShared PROPERTIES LINKER_LANGUAGE CXX)
     target_include_directories(LibCompShared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/core/storage/compression/benchmarks")
-
+    
     eugene_bench(CompBench src/core/storage/compression/benchmarks)
     eugene_bench(DecompBench src/core/storage/compression/benchmarks)
 endif ()

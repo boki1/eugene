@@ -16,8 +16,8 @@ namespace fs = std::filesystem;
 using namespace internal;
 using namespace internal::storage::btree;
 using internal::storage::Position;
-using Bt = Btree<DefaultConfig>;
-using Nod = Node<DefaultConfig>;
+using Bt = Btree<Config>;
+using Nod = Node<Config>;
 using Metadata = Nod::Metadata;
 using Branch = Nod::Branch;
 using Leaf = Nod::Leaf;
@@ -26,9 +26,10 @@ using Leaf = Nod::Leaf;
 /// Various tree configuration used in the tests below
 ///
 
-struct SmallstrToPerson : DefaultConfig {
+struct SmallstrToPerson : Config {
 	using Key = smallstr;
 	using Val = person;
+	using RealVal = person;
 	using Ref = smallstr;
 
 	static inline constexpr int BRANCHING_FACTOR_LEAF = 83;
@@ -36,30 +37,45 @@ struct SmallstrToPerson : DefaultConfig {
 };
 
 /// 2-3 tree: https://en.wikipedia.org/wiki/2-3_tree
-struct Tree23 : DefaultConfig {
+struct Tree23 : Config {
 	BTREE_OF_ORDER(4);
 };
 
-struct DoubleToLong : DefaultConfig {
+struct DoubleToLong : Config {
+	using Key = float;
+	using Val = int;
+	using RealVal = int;
+	using Ref = float;
+};
+
+struct IntToString : Config {
+	using Key = int;
+	using RealVal = std::string;
+
+	static inline constexpr bool DYN_ENTRIES = true;
+};
+
+struct DoubleToVectorOfStrings : Config {
 	using Key = double;
-	using Val = long;
-	using Ref = double;
+	using RealVal = std::vector<std::string>;
+
+	static inline constexpr bool DYN_ENTRIES = true;
 };
 
 ///
 /// Utility functions
 ///
 
-template<BtreeConfig Config>
-auto fill_tree_with_random_items(Btree<Config> &bpt, const std::size_t limit = 1000) {
-	using Key = typename Config::Key;
-	using Val = typename Config::Val;
-	std::map<Key, Val> backup;
+template<EugeneConfig C>
+auto fill_tree_with_random_items(Btree<C> &bpt, const std::size_t limit = 1000) {
+	using Key = typename C::Key;
+	using RealVal = typename C::RealVal;
+	std::map<Key, RealVal> backup;
 	[[maybe_unused]] int i = 0;
 
 	while (backup.size() != limit) {
 		auto key = random_item<Key>();
-		auto val = random_item<Val>();
+		auto val = random_item<RealVal>();
 		if (backup.contains(key)) {
 			REQUIRE(bpt.contains(key));
 			continue;
@@ -72,8 +88,8 @@ auto fill_tree_with_random_items(Btree<Config> &bpt, const std::size_t limit = 1
 	return backup;
 }
 
-template<BtreeConfig Config>
-void check_for_tree_backup_mismatch(Btree<Config> &bpt, const std::map<typename Config::Key, typename Config::Val> &backup) {
+template<EugeneConfig C>
+void check_for_tree_backup_mismatch(Btree<C> &bpt, const std::map<typename C::Key, typename C::RealVal> &backup) {
 	REQUIRE(bpt.size() == backup.size());
 	[[maybe_unused]] std::size_t i = 1;
 	for (const auto &[key, val] : backup) {
@@ -150,15 +166,7 @@ TEST_CASE("Btree operations", "[btree]") {
 			util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-operations/difficult-removal-printed-1"}();
 
 			for (auto i = 0ul; i < limit; ++i) {
-				auto random_key = [&] {
-					std::random_device dev;
-					std::mt19937_64 rng(dev());
-
-					std::uniform_int_distribution<size_t> dist(0, backup.size() - 1);
-					auto random_pair = backup.begin();
-					std::advance(random_pair, dist(rng));
-					return random_pair->first;
-				}();
+				const auto random_key = random_key_of_map(backup);
 				const auto removed = bpt.remove(random_key);
 				REQUIRE(std::holds_alternative<Btree<Tree23>::RemovedVal>(removed));
 				REQUIRE(std::get<Btree<Tree23>::RemovedVal>(removed).val == backup.at(random_key));
@@ -265,7 +273,7 @@ TEST_CASE("Btree persistence", "[btree]") {
 	fs::create_directories("/tmp/eugene-tests/btree-persistence");
 
 	SECTION("Loading and recovery") {
-		std::map<typename DefaultConfig::Key, typename DefaultConfig::Val> backup;
+		std::map<typename Config::Key, typename Config::Val> backup;
 		Position rootpos;
 		{
 			if constexpr (NDEBUG)
@@ -362,7 +370,7 @@ TEST_CASE("Btree utils") {
 	static constexpr auto BRANCH_NUM = 100;
 
 	SECTION("Node associated") {
-		Btree<DefaultConfig> bpt{"/tmp/eugene-tests/btree-utils/node-associated"};
+		Btree<Config> bpt{"/tmp/eugene-tests/btree-utils/node-associated"};
 
 		std::vector<Position> branch_links_left(BRANCH_NUM + 1);
 		std::generate(branch_links_left.begin(), branch_links_left.end(), [&] { return bpt.pager().alloc(); });
@@ -410,5 +418,34 @@ TEST_CASE("Btree utils") {
 		}
 		parent_links.push_back(0xABCD);
 		REQUIRE(std::equal(sibling_links.cbegin(), sibling_links.cend(), parent_links.cbegin()));
+	}
+}
+
+TEST_CASE("Btree dyn entries") {
+	fs::create_directories("/tmp/eugene-tests/btree-dyn");
+
+	SECTION("std::string's") {
+		using Tree = Btree<IntToString>;
+		auto backup = [] {
+			Tree bpt{"/tmp/eugene-tests/btree-dyn/strings", ActionOnConstruction::Bare};
+			auto backup = fill_tree_with_random_items(bpt, 1000);
+			check_for_tree_backup_mismatch(bpt, backup);
+			bpt.save();
+			fmt::print("saved\n");
+			return backup;
+		}();
+
+		Tree bpt{"/tmp/eugene-tests/btree-dyn/strings", ActionOnConstruction::Load};
+		check_for_tree_backup_mismatch(bpt, backup);
+
+		for (auto i = 0ul; i < 100; ++i) {
+			const auto random_key = random_key_of_map(backup);
+			const auto removed = bpt.remove(random_key);
+			REQUIRE(std::holds_alternative<Tree::RemovedVal>(removed));
+			REQUIRE(std::get<Tree::RemovedVal>(removed).val == backup.at(random_key));
+			backup.erase(random_key);
+		}
+
+		check_for_tree_backup_mismatch(bpt, backup);
 	}
 }

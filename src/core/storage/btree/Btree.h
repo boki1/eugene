@@ -12,6 +12,7 @@
 #include <stack>
 #include <stdexcept>
 #include <utility>
+#include <typeinfo>
 
 #include <fmt/core.h>
 #include <fmt/ranges.h>
@@ -27,15 +28,27 @@
 #include <nop/utility/stream_reader.h>
 #include <nop/utility/stream_writer.h>
 
+#include <core/Config.h>
 #include <core/Util.h>
 #include <core/storage/Pager.h>
-#include <core/storage/btree/Config.h>
+#include <core/storage/IndirectionVector.h>
 #include <core/storage/btree/Node.h>
+
+/// Define configuration for a Btree of order m.
+/// Used primarily in unit tests as of now, but it may come in handy in other situtations too.
+/// Simple example usage:
+///
+/// class MyConfig : Config {
+///     BTREE_OF_ORDER(3);
+/// };
+#define BTREE_OF_ORDER(m)\
+	static inline constexpr int BRANCHING_FACTOR_LEAF = (m);\
+	static inline constexpr int BRANCHING_FACTOR_BRANCH = (m)
 
 namespace internal::storage::btree {
 
 namespace util {
-template<BtreeConfig Config = DefaultConfig>
+template<EugeneConfig Config = Config>
 class BtreePrinter;
 }
 
@@ -65,10 +78,15 @@ enum class ActionOnConstruction : std::uint8_t {
 enum class ActionOnKeyPresent { SubmitChange,
 	                        AbandonChange };
 
-template<BtreeConfig Config = DefaultConfig>
+template<EugeneConfig Config = Config>
 class Btree {
 	using Key = typename Config::Key;
 	using Val = typename Config::Val;
+	using RealVal = typename Config::RealVal;
+
+	// If not using dyn entries, Val and RealVal are the same type.
+	static_assert(std::same_as<Val, RealVal> == !Config::DYN_ENTRIES);
+
 	using Ref = typename Config::Ref;
 	using Nod = Node<Config>;
 
@@ -410,15 +428,9 @@ private:
 		     })) {
 			const PosNod path_to_instree_root = consume_back<PosNod, TreePath>(instree.path);
 			auto instree_root = Nod::from_page(m_pager->get(path_to_instree_root.node_pos));
-			fmt::print("path_to_instree_root = {}\n", path_to_instree_root.node_pos);
-			if (instree_root.is_branch())
-			fmt::print("[ {} ]\n", fmt::join(instree_root.branch().refs, ", "));
-			else
-			fmt::print("[ {} ]\n", fmt::join(instree_root.leaf().keys, ", "));
 			const PosNod path_to_p = consume_back<PosNod, TreePath>(instree.path);
 			auto ppos = path_to_p.node_pos;
 			auto p = Nod::from_page(m_pager->get(ppos));
-			fmt::print("Starting SBR for tree rooted just below @{}\n", ppos);
 
 			for (auto height = 1ul; height < instree.tree.depth() - 1; ++height) {
 				/// Deref safety: We already filtered insertion trees without parents and fetched this insertion tree's parent
@@ -427,7 +439,6 @@ private:
 				auto right_sibling_of_p_pos = m_pager->alloc();
 				p.set_next_node(right_sibling_of_p_pos);
 
-				// FIXME: This is questionable
 				// Removes the insertion tree link from its parent 'p'
 				right_sibling_of_p.branch().links.erase(right_sibling_of_p.branch().links.cbegin());
 
@@ -439,52 +450,11 @@ private:
 				fix_sibling_links({right_sibling_of_p_pos});
 				fix_sibling_links(right_sibling_of_p);
 
-#define DEBUG
-#if defined(DEBUG)
-				fmt::print("Nodes children of node [ {} ], @{}:\n", fmt::join(p.branch().refs, ", "), ppos);
-				for (const auto link : p.branch().links) {
-					[[maybe_unused]] auto nod = Nod::from_page(m_pager->get(link));
-					if (nod.is_branch())
-						fmt::print("Node [ {} ], @{}:\n", fmt::join(nod.branch().refs, ", "), link);
-					else if (nod.is_leaf())
-						fmt::print("Node [ {} ], @{}:\n", fmt::join(nod.leaf().keys, ", "), link);
-				}
-
-				fmt::print("\n");
-				fmt::print("Nodes children of node [ {} ], @{}:\n", fmt::join(right_sibling_of_p.branch().refs, ", "), ppos);
-				for (const auto link : right_sibling_of_p.branch().links) {
-					[[maybe_unused]] auto nod = Nod::from_page(m_pager->get(link));
-					if (nod.is_branch())
-						fmt::print("Node [ {} ], @{}:\n", fmt::join(nod.branch().refs, ", "), link);
-					else if (nod.is_leaf())
-						fmt::print("Node [ {} ], @{}:\n", fmt::join(nod.leaf().keys, ", "), link);
-				}
-				fmt::print("---------\n");
-#endif
-
 				auto &l = instree_root.branch().links;
-				fmt::print("after level-linking: instree_root.branch().refs = [ {} ]\n", fmt::join(instree_root.branch().refs, ", "));
-				fmt::print("before removal of ql and qr\n");
-				for (const auto link : l){
-					[[maybe_unused]] auto nod = Nod::from_page(m_pager->get(link));
-					if (nod.is_branch())
-						fmt::print("  Node [ {} ], @{}:\n", fmt::join(nod.branch().refs, ", "), link);
-					else if (nod.is_leaf())
-						fmt::print("  Node [ {} ], @{}:\n", fmt::join(nod.leaf().keys, ", "), link);
-				}
-
 				if (auto fr = std::find(l.cbegin(), l.cend(), smallest_in_instree_pos); fr != l.cend())
 					l.erase(fr);
 				if (auto fr = std::find(l.cbegin(), l.cend(), biggest_in_instree_pos); fr != l.cend())
 					l.erase(fr);
-				fmt::print("after removal of ql and qr\n");
-				for (const auto link : l){
-					[[maybe_unused]] auto nod = Nod::from_page(m_pager->get(link));
-					if (nod.is_branch())
-						fmt::print("  Node [ {} ], @{}:\n", fmt::join(nod.branch().refs, ", "), link);
-					else if (nod.is_leaf())
-						fmt::print("  Node [ {} ], @{}:\n", fmt::join(nod.leaf().keys, ", "), link);
-				}
 
 				l.push_back(ppos);
 				l.push_back(right_sibling_of_p_pos);
@@ -647,9 +617,13 @@ private:
 	/// Construct a new empty tree
 	/// Initializes an empty root node leaf and calculates the appropriate value for 'm'
 	constexpr void bare() {
+		if constexpr (Config::DYN_ENTRIES) {
+			if (!m_ind_vector.has_value())
+				m_ind_vector.emplace(fmt::format("{}-indvector", name()), IndirectionVector<Config>::ActionOnConstruction::DoNotLoad);
+		}
+
 		[[maybe_unused]] auto new_root = make_root(MakeRootAction::BareInit);
 
-		/// FIXME: A q.a.d solution here.
 		/// Space evaluation done here.
 		/// Perform a binary search in the PAGE_SIZE range to calculate the maximum number of entries that could be stored.
 
@@ -694,11 +668,10 @@ private:
 		auto &leaf_node = search_res.node.leaf();
 		/// Insert new element
 		leaf_node.keys.insert(leaf_node.keys.cbegin() + search_res.key_expected_pos, entry.key);
-		leaf_node.vals.insert(leaf_node.vals.cbegin() + search_res.key_expected_pos, entry.val);
+		leaf_node.vals.insert(leaf_node.vals.cbegin() + search_res.key_expected_pos, set_value(entry.val));
 		m_pager->place(search_res.path.top().node_pos, search_res.node.make_page());
 
 		/// Update stats
-		/// TODO:
 		++m_size;
 
 		/// Rebalance
@@ -712,8 +685,6 @@ private:
 	/// Returns return marks for each <key, value> Entry and a collection of all insertion trees that were created.
 	/// The latter is used during rebalancing.
 	/// The client code could take advantage of this, by buffering the insertion/update queries.
-	///
-	/// TODO: For now, nothing differentiates insert from update when calling `insert_many`. Add a specifier with default state.
 	[[nodiscard]] auto place_kv_entries(std::ranges::range auto &&bulk) {
 		namespace rng = std::ranges;
 
@@ -739,8 +710,8 @@ private:
 				return std::find_if(simple_bulk_cbegin, rng::cend(bulk), [&leaf_highkey](const auto &entry) { return entry.key > leaf_highkey; });
 			}();
 
-			auto entry_of_key_it = [leaf_keys_cbegin, leaf_vals_cbegin](auto it) {
-				return Entry{.key = *it, .val = *(leaf_vals_cbegin + std::distance(leaf_keys_cbegin, it))};
+			auto entry_of_key_it = [leaf_keys_cbegin, leaf_vals_cbegin, this](auto it) {
+				return Entry{.key = *it, .val = get_value(*(leaf_vals_cbegin + std::distance(leaf_keys_cbegin, it)))};
 			};
 
 			auto iterate_over_simple_bulk = [simple_bulk_cit = simple_bulk_cbegin, leaf_keys_cit = leaf_keys_cbegin, simple_bulk_cend, leaf_keys_cend, &entry_of_key_it]() mutable -> cppcoro::generator<const Entry> {
@@ -764,20 +735,8 @@ private:
 			auto &insertion_tree = insertion_trees.back();
 
 			rng::for_each(iterate_over_simple_bulk(), [&insertion_tree, &insertion_marks, this](const auto &entry) {
-				fmt::print("entry.key = {}\n", entry.key);
-				[[maybe_unused]] auto instree_root_node = Nod::from_page(m_pager->get(insertion_tree.tree.rootpos()));
-				if (instree_root_node.is_branch())
-				fmt::print("#1 In 'simple bulk insertion: instree root is branch :[ {} ] @{}\n", fmt::join(instree_root_node.branch().refs, ", "), insertion_tree.tree.rootpos());
-				else
-				fmt::print("#1 In 'simple bulk insertion: instree root is leaf : [ {} ] @{}\n", fmt::join(instree_root_node.leaf().keys, ", "), insertion_tree.tree.rootpos());
 				insertion_marks[entry.key] = insertion_tree.tree.place_kv_entry(typename Nod::Entry{.key = entry.key, .val = entry.val}, ActionOnKeyPresent::AbandonChange, SplitBias::LeanLeft);
 			});
-				[[maybe_unused]] auto instree_root_node = Nod::from_page(m_pager->get(insertion_tree.tree.rootpos()));
-				if (instree_root_node.is_branch())
-				fmt::print("#1 In 'simple bulk insertion: instree root is branch :[ {} ] @{}\n", fmt::join(instree_root_node.branch().refs, ", "), insertion_tree.tree.rootpos());
-				else
-				fmt::print("#1 In 'simple bulk insertion: instree root is leaf : [ {} ] @{}\n", fmt::join(instree_root_node.leaf().keys, ", "), insertion_tree.tree.rootpos());
-
 			/// Replace leaf with insertion tree root
 			auto pos = [&] {
 				// No parent, nor siblings => root element
@@ -802,8 +761,6 @@ private:
 				}
 				return (insertion_tree.leaf_pos = new_pos);
 			}();
-
-			fmt::print("#2 In 'simple bulk insertion: instree root is [ {} ] @{}\n", fmt::join(insertion_tree.tree.root().branch().refs, ", "), pos);
 			m_pager->place(pos, insertion_tree.tree.root().make_page());
 
 			// Update current position in simple bulk
@@ -870,6 +827,37 @@ public:
 	/// Get the internal pager
 	[[nodiscard]] PagerType &pager() noexcept { return *m_pager.get(); }
 
+	[[nodiscard]] auto& ind_vector() {
+		using namespace ::internal::storage;
+		if constexpr (!Config::DYN_ENTRIES)
+			throw BadIndVector(" - Not using DYN_ENTRIES option");
+		assert(m_ind_vector.has_value());
+		return *m_ind_vector;
+	}
+
+
+	///
+	/// Dynamic entries
+	///
+
+	[[nodiscard]] RealVal get_value(Val val_or_slot) {
+		if constexpr (Config::DYN_ENTRIES) {
+			return ind_vector().get_from_slot(val_or_slot);
+		} else {
+			static_assert(std::same_as<Val, RealVal>);
+			return val_or_slot;
+		}
+	}
+
+	[[nodiscard]] Val set_value(RealVal val) {
+		if constexpr (Config::DYN_ENTRIES) {
+			return ind_vector().set_to_slot(val);
+		} else {
+			static_assert(std::same_as<Val, RealVal>);
+			return val;
+		}
+	}
+
 	///
 	/// Operations API
 	///
@@ -881,7 +869,7 @@ public:
 	/// whether the key is distinct.
 	/// An exception 'BadTreeInsert' may be thrown if an unexpected error occurs. It contains an
 	/// appropriate message describing the failure.
-	constexpr InsertionReturnMark insert(const Key &key, const Val &val) {
+	constexpr InsertionReturnMark insert(const Key &key, const RealVal &val) {
 		return place_kv_entry(Entry{.key = key, .val = val}, ActionOnKeyPresent::AbandonChange);
 	}
 
@@ -916,7 +904,7 @@ public:
 	/// break in any way any of the tree invariants. It remains as an additional element to compare with
 	/// in the branch nodes.
 	struct RemovedVal {
-		const Val val;
+		const RealVal val;
 	};
 	struct RemovedNothing {};
 	using RemovalReturnMark = std::variant<RemovedVal, RemovedNothing>;
@@ -930,14 +918,17 @@ public:
 		auto &node_leaf = search_res.node.leaf();
 		const auto &node_path = search_res.path.top();
 
-		const Val removed = node_leaf.vals.at(search_res.key_expected_pos);
+		const auto removed = get_value(node_leaf.vals.at(search_res.key_expected_pos));
 
 		/// Erase element
 		node_leaf.keys.erase(node_leaf.keys.cbegin() + search_res.key_expected_pos);
+		if constexpr (Config::DYN_ENTRIES) {
+			auto slot_id_it = node_leaf.vals.cbegin() + search_res.key_expected_pos;
+			ind_vector().remove_slot(*slot_id_it);
+		}
 		node_leaf.vals.erase(node_leaf.vals.cbegin() + search_res.key_expected_pos);
 		m_pager->place(node_path.node_pos, search_res.node.make_page());
 
-		/// TODO:
 		/// Update stats
 		--m_size;
 
@@ -967,12 +958,13 @@ public:
 	/// Finds the entry described by 'key'. If no such entry is found, an empty std::optional<>.
 	/// If an error occurs during the tree traversal 'BadTreeSea
 	/// rch' is thrown.
-	constexpr std::optional<Val> get(const Key &key) {
+	constexpr std::optional<RealVal> get(const Key &key) {
 		const auto search_result = search(key);
 		if (!search_result.key_is_present)
 			return {};
 
-		return search_result.node.leaf().vals[search_result.key_expected_pos];
+		const auto &val = search_result.node.leaf().vals[search_result.key_expected_pos];
+		return get_value(val);
 	}
 
 	/// Check whether <key, val> entry described by the given key is present in the tree
@@ -988,7 +980,7 @@ public:
 			return {};
 
 		return std::make_optional<Entry>({.key = node_with_smallest_keys.leaf().keys.front(),
-		                                  .val = node_with_smallest_keys.leaf().vals.front()});
+		                                  .val = get_value(node_with_smallest_keys.leaf().vals.front())});
 	}
 
 	/// Get the entry with the biggest key
@@ -998,7 +990,7 @@ public:
 			return {};
 
 		return std::make_optional<Entry>({.key = node_with_biggest_keys.leaf().keys.back(),
-		                                  .val = node_with_biggest_keys.leaf().vals.back()});
+		                                  .val = get_value(node_with_biggest_keys.leaf().vals.back())});
 	}
 
 	/// Acquire all entries present in the tree
@@ -1011,7 +1003,7 @@ public:
 
 		while (true) {
 			for (const auto &&[key, val] : iter::zip(curr.leaf().keys, curr.leaf().vals))
-				co_yield Entry{.key = key, .val = val};
+				co_yield Entry{.key = key, .val = get_value(val)};
 			if (!curr.next_node())
 				co_return;
 			curr = Nod::from_page(m_pager->get(*curr.next_node()));
@@ -1053,11 +1045,12 @@ public:
 	/// Reads from 'identifier' and 'identifier'-header and initializes the tree's metadata.
 	void load() {
 		if constexpr (requires { m_pager->load(); }) {
+			fmt::print("[btree] loading '{}'\n", header_name());
 			Header header_;
 
 			nop::Deserializer<nop::StreamReader<std::ifstream>> deserializer{header_name().data()};
 			if (!deserializer.Read(&header_))
-				throw BadRead();
+				throw BadRead("failed deseralizing btree header");
 
 			m_rootpos = header_.tree_rootpos;
 			m_size = header_.tree_size;
@@ -1068,17 +1061,29 @@ public:
 
 			m_pager->load();
 		}
+
+		if constexpr (Config::DYN_ENTRIES) {
+			if (!m_ind_vector.has_value())
+				m_ind_vector.emplace(fmt::format("{}-indvector", name()), IndirectionVector<Config>::ActionOnConstruction::Load);
+			else
+				ind_vector().load();
+		}
 	}
 
 	/// Store tree metadata to storage
 	/// Stores tree's metadata inside files 'identifier' and 'identifier'-header.
 	void save() {
+		fmt::print("[btree] saving '{}'\n", header_name());
 		if constexpr (requires { m_pager->save(); }) {
 			nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{header_name().data(), std::ios::trunc};
 			if (!serializer.Write(header()))
-				throw BadWrite();
+				throw BadWrite("failed serializing btree header");
 
 			m_pager->save();
+		}
+
+		if constexpr (Config::DYN_ENTRIES) {
+			ind_vector().save();
 		}
 	}
 
@@ -1092,9 +1097,10 @@ public:
 	}
 
 public:
-	explicit Btree(std::string_view identifier = "/tmp/eu-btree-default", ActionOnConstruction action_on_construction = ActionOnConstruction::Bare) : m_pager{std::make_shared<PagerType>(identifier)}, m_identifier{identifier} {
+	explicit Btree(std::string identifier = "/tmp/eu-btree-default", ActionOnConstruction action_on_construction = ActionOnConstruction::Bare) : m_pager{std::make_shared<PagerType>(identifier)}, m_identifier{identifier} {
 		using enum ActionOnConstruction;
 
+		fmt::print("[btree] instantiating '{}'\n", identifier);
 		// clang-format off
 		switch (action_on_construction) {
 		  break; case Load: load();
@@ -1140,5 +1146,8 @@ private:
 	/// Minimum num of records stored in a branch node
 	std::size_t m_num_records_branch{0};
 	std::size_t m_num_links_branch{0};
+
+	// Contains value only if the option DYN ENTRIES is used
+	std::optional<IndirectionVector<Config>> m_ind_vector;
 };
 }// namespace internal::storage::btree

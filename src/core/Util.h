@@ -4,6 +4,13 @@
 #include <limits>
 #include <optional>
 #include <random>
+#include <type_traits>
+#include <typeinfo>
+#include <sstream>
+
+#ifndef _MSC_VER
+	#include <cxxabi.h>
+#endif
 
 #include <nop/structure.h>
 
@@ -85,10 +92,10 @@ template<typename T>
 	vec1.reserve(vec1.size() + vec2.size());
 	vec1.insert(vec1.end(), vec2.begin(), vec2.end());
 	return vec1;
-};
+}
 
 template<typename T, typename V>
-[[nodiscard]] bool collection_contains(const T &collection, V item) {
+[[nodiscard]] constexpr bool collection_contains(const T &collection, V item) {
 	return std::find(collection.cbegin(), collection.cend(), item) != collection.cend();
 }
 
@@ -98,7 +105,6 @@ template<typename T, typename V>
 	auto diff_begin = std::cbegin(diff);
 	while (self_begin < std::cend(self) && diff_begin < std::cend(diff)) {
 		const auto use_self = *self_begin < *diff_begin;
-		fmt::print("{} < {} ??? {}\n", *self_begin, *diff_begin, use_self);
 		std::size_t idx = use_self
 		        ? std::distance(std::cbegin(self), self_begin++)
 		        : std::distance(std::cbegin(diff), diff_begin++);
@@ -131,11 +137,49 @@ template<typename T, typename Ts>
 	abort();
 
 #define DO_NOTHING \
-	do {} while(0);
+	do {       \
+	} while (0);
+
+[[nodiscard]] constexpr auto round_upwards(auto a, auto b) {
+	return (a / b) + (a % b > 0);
+}
+
+template<typename T>
+std::string pretty_type_name([[maybe_unused]] T _t) {
+	using RawT = typename std::remove_reference<T>::type;
+	std::unique_ptr<char, void (*)(void *)> own(
+#ifndef _MSC_VER
+	        abi::__cxa_demangle(typeid(RawT).name(), nullptr,
+	                            nullptr, nullptr),
+#else
+	        nullptr,
+#endif
+	        std::free);
+	std::stringstream sstr{own != nullptr ? own.get() : typeid(RawT).name()};
+	if (std::is_const<RawT>::value)
+		sstr << " const";
+	if (std::is_volatile<RawT>::value)
+		sstr << " volatile";
+	if (std::is_lvalue_reference<T>::value)
+		sstr << "&";
+	else if (std::is_rvalue_reference<T>::value)
+		sstr << "&&";
+	return sstr.str();
+}
 
 ///
 /// Used  primarily in unit tests
 ///
+
+auto random_key_of_map(const auto &mapp) {
+	std::random_device dev;
+	std::mt19937_64 rng(dev());
+
+	std::uniform_int_distribution<size_t> dist(0, mapp.size() - 1);
+	auto random_pair = mapp.begin();
+	std::advance(random_pair, dist(rng));
+	return random_pair->first;
+}
 
 /// String with limit of 10 characters in size - small string.
 class smallstr {
