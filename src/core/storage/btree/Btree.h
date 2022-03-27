@@ -12,8 +12,8 @@
 #include <sstream>
 #include <stack>
 #include <stdexcept>
-#include <utility>
 #include <typeinfo>
+#include <utility>
 
 #include <fmt/core.h>
 #include <fmt/ranges.h>
@@ -31,9 +31,10 @@
 
 #include <core/Config.h>
 #include <core/Util.h>
-#include <core/storage/Pager.h>
 #include <core/storage/IndirectionVector.h>
+#include <core/storage/Pager.h>
 #include <core/storage/btree/Node.h>
+#include <variant>
 
 /// Define configuration for a Btree of order m.
 /// Used primarily in unit tests as of now, but it may come in handy in other situtations too.
@@ -42,8 +43,8 @@
 /// class MyConfig : Config {
 ///     BTREE_OF_ORDER(3);
 /// };
-#define BTREE_OF_ORDER(m)\
-	static inline constexpr int BRANCHING_FACTOR_LEAF = (m);\
+#define BTREE_OF_ORDER(m)                                        \
+	static inline constexpr int BRANCHING_FACTOR_LEAF = (m); \
 	static inline constexpr int BRANCHING_FACTOR_BRANCH = (m)
 
 namespace internal::storage::btree {
@@ -772,9 +773,6 @@ private:
 			insertion_tree.path.push(path_to_leaf);
 		}
 
-		for (auto &instree: insertion_trees)
-			m_size += instree.tree.size();
-
 		return std::make_pair(std::move(insertion_marks), std::move(insertion_trees));
 	}
 
@@ -830,14 +828,13 @@ public:
 	/// Get the internal pager
 	[[nodiscard]] PagerType &pager() noexcept { return *m_pager.get(); }
 
-	[[nodiscard]] auto& ind_vector() {
+	[[nodiscard]] auto &ind_vector() {
 		using namespace ::internal::storage;
 		if constexpr (!Config::DYN_ENTRIES)
 			throw BadIndVector(" - Not using DYN_ENTRIES option");
 		assert(m_ind_vector.has_value());
 		return *m_ind_vector;
 	}
-
 
 	///
 	/// Dynamic entries
@@ -891,8 +888,13 @@ public:
 		if (rng::empty(bulk))
 			return {};
 
+		auto tmp = m_size;
 		auto &&[insertion_marks, insertion_trees] = place_kv_entries(bulk);
 		rebalance_after_bulk_insert(insertion_trees);
+		m_size = tmp + rng::count_if(bulk, [&](const auto &entry) {
+			return insertion_marks.contains(entry.key) &&
+				std::holds_alternative<InsertedEntry>(insertion_marks.at(entry.key));
+		});
 
 		return insertion_marks;
 	}
@@ -953,7 +955,6 @@ public:
 			marks.emplace(key, remove(key));
 		return marks;
 	}
-
 
 	/// Replace an existing <key, value> entry with a new <key, value2>
 	/// If no such entry with the given key is found, 'InsertedNothing' is returned, else-

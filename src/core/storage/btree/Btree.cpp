@@ -260,12 +260,16 @@ TEST_CASE("Btree bulk operations", "[btree]") {
 
 	SECTION("Simple bulk insertion without rebalancing") {
 		Btree<Tree23> bpt("/tmp/eugene-tests/btree-bulk-insertion/insert-many-without-rebalancing");
+		REQUIRE(bpt.size() == 0);
 		bpt.insert_many(std::vector<Btree<Tree23>::Entry>{e(7), e(8), e(10), e(28), e(31), e(48), e(50), e(51)});
+		REQUIRE(bpt.size() == 8);
 		bpt.insert_many(std::vector<Btree<Tree23>::Entry>{e(13), e(15), e(16), e(17), e(18), e(19), e(20), e(23)});
+		REQUIRE(bpt.size() == 16);
 
 		std::vector<Btree<Tree23>::Entry> expected{e(7), e(8), e(10), e(28), e(31), e(48), e(50), e(51), e(13), e(15), e(16), e(17), e(18), e(19), e(20), e(23)};
 		for (const auto &entry : expected)
 			REQUIRE(bpt.get(entry.key).value() == entry.val);
+		REQUIRE(bpt.size() == 16);
 		util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-bulk-insertion/insert-many-without-rebalancing-printed"}();
 	}
 
