@@ -92,7 +92,7 @@ template<typename T>
 	vec1.reserve(vec1.size() + vec2.size());
 	vec1.insert(vec1.end(), vec2.begin(), vec2.end());
 	return vec1;
-};
+}
 
 template<typename T, typename V>
 [[nodiscard]] constexpr bool collection_contains(const T &collection, V item) {
