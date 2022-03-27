@@ -75,7 +75,7 @@ enum class ActionOnConstruction : std::uint8_t {
 	InMemoryOnly
 };
 
-/// Action flag to mark whether a <k,v> pair should be replaced if encountered during '???' operation.
+/// Action flag to mark whether a <k,v> pair should be replaced if encountered during modificating operations.
 /// Used in order to provide a reasonable abstraction for update and insert APIs to call.
 enum class ActionOnKeyPresent { SubmitChange,
 	                        AbandonChange };
@@ -686,7 +686,7 @@ private:
 	/// Returns return marks for each <key, value> Entry and a collection of all insertion trees that were created.
 	/// The latter is used during rebalancing.
 	/// The client code could take advantage of this, by buffering the insertion/update queries.
-	[[nodiscard]] auto place_kv_entries(std::ranges::range auto &&bulk) {
+	[[nodiscard]] auto place_kv_entries(std::ranges::range auto &&bulk, ActionOnKeyPresent action) {
 		namespace rng = std::ranges;
 
 		ManyInsertionReturnMarks insertion_marks;
@@ -735,8 +735,8 @@ private:
 			        .leaf_pos = path_to_leaf.node_pos});
 			auto &insertion_tree = insertion_trees.back();
 
-			rng::for_each(iterate_over_simple_bulk(), [&insertion_tree, &insertion_marks, this](const auto &entry) {
-				insertion_marks[entry.key] = insertion_tree.tree.place_kv_entry(typename Nod::Entry{.key = entry.key, .val = entry.val}, ActionOnKeyPresent::AbandonChange, SplitBias::LeanLeft);
+			rng::for_each(iterate_over_simple_bulk(), [&](const auto &entry) {
+				insertion_marks[entry.key] = insertion_tree.tree.place_kv_entry(typename Nod::Entry{.key = entry.key, .val = entry.val}, action, SplitBias::LeanLeft);
 			});
 			/// Replace leaf with insertion tree root
 			auto pos = [&] {
@@ -880,21 +880,18 @@ public:
 	/// Submit a set of <key, value> entries into the tree, i.e bulk insertion.
 	/// Requires that the entries in 'bulk' are sorted in ascending order.
 	/// Implementation is according to "Concurrency Control and I/O-Optimality in Bulk Insertion".
-	/// FIXME: Adapt 'ActionOnKeyPresent' by adding "AskOnEach" and "ReplaceAllPresent" and "IgnoreAllPresent".
-
-	std::unordered_map<Key, InsertionReturnMark> insert_many(std::ranges::range auto &&bulk) {
+	std::unordered_map<Key, InsertionReturnMark> insert_many(std::ranges::range auto &&bulk, ActionOnKeyPresent action = ActionOnKeyPresent::AbandonChange) {
 		namespace rng = std::ranges;
 
 		if (rng::empty(bulk))
 			return {};
 
 		auto tmp = m_size;
-		auto &&[insertion_marks, insertion_trees] = place_kv_entries(bulk);
+		auto &&[insertion_marks, insertion_trees] = place_kv_entries(bulk, action);
 		rebalance_after_bulk_insert(insertion_trees);
 		m_size = tmp + rng::count_if(bulk, [&](const auto &entry) {
-			return insertion_marks.contains(entry.key) &&
-				std::holds_alternative<InsertedEntry>(insertion_marks.at(entry.key));
-		});
+			         return insertion_marks.contains(entry.key) && std::holds_alternative<InsertedEntry>(insertion_marks.at(entry.key));
+		         });
 
 		return insertion_marks;
 	}
