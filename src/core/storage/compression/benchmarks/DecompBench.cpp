@@ -1,4 +1,3 @@
-
 #include <core/storage/compression/benchmarks/Shared.h>
 
 /// @brief Decompression benchmark
