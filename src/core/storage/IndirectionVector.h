@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <nop/base/serializer.h>
 #include <nop/utility/buffer_reader.h>
 #include <nop/utility/buffer_writer.h>
@@ -30,8 +31,9 @@ struct BadIndVector : std::runtime_error {
 struct Slot {
 	storage::Position pos = 0;
 	std::size_t size = 0;
+	bool occupied;
 
-	NOP_STRUCTURE(Slot, pos, size);
+	NOP_STRUCTURE(Slot, pos, size, occupied);
 };
 
 using SlotId = std::size_t;
@@ -41,6 +43,7 @@ class IndirectionVector {
 	using Val = typename Config::Val;
 	using RealVal = typename Config::RealVal;
 	using PagerType = typename Config::PagerType;
+
 public:
 	enum class ActionOnConstruction { Load,
 		                          DoNotLoad };
@@ -115,9 +118,9 @@ public:
 		else
 			fmt::print("[ERR][ind-vector] inner retrieved does not match emplaced\n");
 #endif
-
-		m_slots.emplace_back(pos, sz);
-		return static_cast<SlotId>(m_slots.size() - 1);
+		auto slot_id = alloc_slot();
+		m_slots.emplace(m_slots.cbegin() + slot_id, pos, sz);
+		return slot_id;
 	}
 
 	/// Update dyn value in an existing slot
@@ -134,7 +137,7 @@ public:
 
 		const auto &slot = m_slots.at(n);
 		m_slot_pager->free_inner(slot.pos, slot.size);
-		m_slots[n] = Slot{.pos=new_val_pos, .size=new_val_sz};
+		m_slots[n] = Slot{.pos = new_val_pos, .size = new_val_sz};
 	}
 
 	/// Free up a slot
@@ -144,7 +147,7 @@ public:
 		const auto &slot = m_slots.at(n);
 
 		m_slot_pager->free_inner(slot.pos, slot.size);
-		m_slots.erase(m_slots.cbegin() + n);
+		free_slot(n);
 	}
 
 	/// Read a dyn value from slot
@@ -162,6 +165,30 @@ public:
 		return val;
 	}
 
+private:
+	///
+	/// Slots API
+	///
+
+	[[nodiscard]] SlotId alloc_slot() {
+		auto it = std::find_if(m_slots.cbegin(), m_slots.cend(), [&](const auto &slot) {
+			return !slot.occupied;
+		});
+
+		return static_cast<SlotId>([&] {
+			if (it == m_slots.cend())
+				return static_cast<SlotId>(std::distance(it, m_slots.cbegin()));
+			m_slots.emplace_back();
+			return m_slots.size() - 1;
+		}());
+	}
+
+	void free_slot(SlotId slot_id) {
+		if (slot_id <= m_slots.size())
+			m_slots[slot_id].occupied = false;
+	}
+
+public:
 	///
 	/// Properties
 	///

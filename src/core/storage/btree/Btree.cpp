@@ -166,15 +166,7 @@ TEST_CASE("Btree operations", "[btree]") {
 			util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-operations/difficult-removal-printed-1"}();
 
 			for (auto i = 0ul; i < limit; ++i) {
-				auto random_key = [&] {
-					std::random_device dev;
-					std::mt19937_64 rng(dev());
-
-					std::uniform_int_distribution<size_t> dist(0, backup.size() - 1);
-					auto random_pair = backup.begin();
-					std::advance(random_pair, dist(rng));
-					return random_pair->first;
-				}();
+				const auto random_key = random_key_of_map(backup);
 				const auto removed = bpt.remove(random_key);
 				REQUIRE(std::holds_alternative<Btree<Tree23>::RemovedVal>(removed));
 				REQUIRE(std::get<Btree<Tree23>::RemovedVal>(removed).val == backup.at(random_key));
@@ -436,7 +428,7 @@ TEST_CASE("Btree dyn entries") {
 		using Tree = Btree<IntToString>;
 		auto backup = [] {
 			Tree bpt{"/tmp/eugene-tests/btree-dyn/strings", ActionOnConstruction::Bare};
-			auto backup = fill_tree_with_random_items(bpt, 10000);
+			auto backup = fill_tree_with_random_items(bpt, 1000);
 			check_for_tree_backup_mismatch(bpt, backup);
 			bpt.save();
 			fmt::print("saved\n");
@@ -446,16 +438,8 @@ TEST_CASE("Btree dyn entries") {
 		Tree bpt{"/tmp/eugene-tests/btree-dyn/strings", ActionOnConstruction::Load};
 		check_for_tree_backup_mismatch(bpt, backup);
 
-		for (auto i = 0ul; i < 10; ++i) {
-			auto random_key = [&] {
-				std::random_device dev;
-				std::mt19937_64 rng(dev());
-
-				std::uniform_int_distribution<size_t> dist(0, backup.size() - 1);
-				auto random_pair = backup.begin();
-				std::advance(random_pair, dist(rng));
-				return random_pair->first;
-			}();
+		for (auto i = 0ul; i < 100; ++i) {
+			const auto random_key = random_key_of_map(backup);
 			const auto removed = bpt.remove(random_key);
 			REQUIRE(std::holds_alternative<Tree::RemovedVal>(removed));
 			REQUIRE(std::get<Tree::RemovedVal>(removed).val == backup.at(random_key));

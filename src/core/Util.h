@@ -171,6 +171,16 @@ std::string pretty_type_name([[maybe_unused]] T _t) {
 /// Used  primarily in unit tests
 ///
 
+auto random_key_of_map(const auto &mapp) {
+	std::random_device dev;
+	std::mt19937_64 rng(dev());
+
+	std::uniform_int_distribution<size_t> dist(0, mapp.size() - 1);
+	auto random_pair = mapp.begin();
+	std::advance(random_pair, dist(rng));
+	return random_pair->first;
+}
+
 /// String with limit of 10 characters in size - small string.
 class smallstr {
 	static constexpr std::size_t SMALL_LIMIT = 10;
