@@ -236,8 +236,10 @@ TEST_CASE("Btree operations", "[btree]") {
 	}
 }
 
-TEST_CASE("Btree bulk insertion", "[btree]") {
+TEST_CASE("Btree bulk operations", "[btree]") {
 	fs::create_directories("/tmp/eugene-tests/btree-bulk-insertion");
+	auto e = [](const auto &k) { return Btree<Tree23>::Entry{.key = k, .val = k}; };
+
 	SECTION("Empty tree") {
 		Btree<Tree23> bpt("/tmp/eugene-tests/btree-bulk-insertion/insert-many-empty");
 
@@ -257,15 +259,28 @@ TEST_CASE("Btree bulk insertion", "[btree]") {
 	}
 
 	SECTION("Simple bulk insertion without rebalancing") {
-		auto e = [](const auto &k) { return Btree<Tree23>::Entry{.key = k, .val = k}; };
-
 		Btree<Tree23> bpt("/tmp/eugene-tests/btree-bulk-insertion/insert-many-without-rebalancing");
 		bpt.insert_many(std::vector<Btree<Tree23>::Entry>{e(7), e(8), e(10), e(28), e(31), e(48), e(50), e(51)});
 		bpt.insert_many(std::vector<Btree<Tree23>::Entry>{e(13), e(15), e(16), e(17), e(18), e(19), e(20), e(23)});
 
-		for (const auto &entry : std::vector<Btree<Tree23>::Entry>{e(7), e(8), e(10), e(28), e(31), e(48), e(50), e(51), e(13), e(15), e(16), e(17), e(18), e(19), e(20), e(23)})
+		std::vector<Btree<Tree23>::Entry> expected{e(7), e(8), e(10), e(28), e(31), e(48), e(50), e(51), e(13), e(15), e(16), e(17), e(18), e(19), e(20), e(23)};
+		for (const auto &entry : expected)
 			REQUIRE(bpt.get(entry.key).value() == entry.val);
 		util::BtreePrinter{bpt, "/tmp/eugene-tests/btree-bulk-insertion/insert-many-without-rebalancing-printed"}();
+	}
+
+	SECTION("Bulk removal") {
+		Btree<Tree23> bpt("/tmp/eugene-tests/btree-bulk-insertion/remove-many");
+		bpt.insert_many(std::vector<Btree<Tree23>::Entry>{e(7), e(8), e(10), e(28), e(31), e(48), e(50), e(51)});
+		for (const auto &entry : std::vector<Btree<Tree23>::Entry>{e(7), e(8), e(10), e(28), e(31), e(48), e(50)})
+			REQUIRE(bpt.get(entry.key).value() == entry.val);
+		auto marks = bpt.remove_many(std::vector<Tree23::Key>{7, 8, 10, 28, 31, 48, 50, 51});
+		REQUIRE_FALSE(marks.empty());
+		for (auto &[key, mark] : marks) {
+			REQUIRE(std::holds_alternative<Btree<Tree23>::RemovedVal>(mark));
+			REQUIRE(std::get<Btree<Tree23>::RemovedVal>(mark).val == key);
+		}
+		REQUIRE(bpt.empty());
 	}
 }
 
