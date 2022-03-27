@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <bits/ranges_base.h>
 #include <cassert>
 #include <concepts>
 #include <exception>
@@ -396,7 +397,6 @@ private:
 			auto [midkey, sibling] = node_split(*node, bias);
 			auto sibling_pos = m_pager->alloc();
 			node->set_next_node(sibling_pos);
-			/// TODO: Can 'sibling' already have a right neighbor?
 
 			visited.pop();
 			const PosNod &path_of_parent = visited.top();
@@ -772,6 +772,9 @@ private:
 			insertion_tree.path.push(path_to_leaf);
 		}
 
+		for (auto &instree: insertion_trees)
+			m_size += instree.tree.size();
+
 		return std::make_pair(std::move(insertion_marks), std::move(insertion_trees));
 	}
 
@@ -930,17 +933,27 @@ public:
 		m_pager->place(node_path.node_pos, search_res.node.make_page());
 
 		/// Update stats
+		fmt::print("removing '{}', size is now '{}'\n", key, m_size);
 		--m_size;
 
 		/// Performs any rebalance operations if needed.
 		if constexpr (Config::BTREE_RELAXED_REMOVES)
 			rebalance_after_remove_relaxed(search_res.path);
-		else {
-			// rebalance_after_remove(curr, currpos, curr_idx_in_parent, ke}y);
-		}
 
 		return RemovedVal{.val = removed};
 	}
+
+	std::unordered_map<Key, RemovalReturnMark> remove_many(std::ranges::range auto &&bulk) {
+		namespace rng = std::ranges;
+		if (rng::empty(bulk))
+			return {};
+
+		std::unordered_map<Key, RemovalReturnMark> marks;
+		for (const auto &key : bulk)
+			marks.emplace(key, remove(key));
+		return marks;
+	}
+
 
 	/// Replace an existing <key, value> entry with a new <key, value2>
 	/// If no such entry with the given key is found, 'InsertedNothing' is returned, else-
