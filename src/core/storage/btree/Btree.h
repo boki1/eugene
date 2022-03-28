@@ -179,6 +179,27 @@ private:
 	/// Helper functions
 	///
 
+	/// 'Node safety' functions are used in order to make the tree thread-safe.
+	/// Node being safe means that any tree modifications created by the
+	/// rebalancing procedures will not propagate beyond the node at hand,
+	/// absorbing any changes.
+	/// Since modifying operations (insert and remove) always do that to/from
+	/// leaves, leaves are never considered to be safe :D.
+
+	/// Checks whether a node is 'safe' during an insertion operation.
+	[[nodiscard]] constexpr bool is_node_insertion_safe(const Nod &node) {
+		if (node.is_branch())
+			return node.num_filled() < max_num_records_branch();
+		return false;
+	}
+
+	/// Checks whether a node is 'safe' during a removal operation.
+	[[nodiscard]] constexpr bool is_node_remove_safe(const Nod &node) {
+		if (node.is_branch())
+			return !node.empty();
+		return false;
+	}
+
 	/// Wrapper for checking whether a node has too many elements
 	[[nodiscard]] constexpr bool is_node_over(const Nod &node) {
 		if (node.is_branch())
