@@ -7,8 +7,10 @@
 
 #include <core/Logger.h>
 
-static constexpr size_t Folder = 16;
-static constexpr size_t OsBytes = 64;
+static constexpr size_t FileBits = 9;
+static constexpr size_t FileSizeBits = 64;
+static constexpr size_t FileCountBitsInsideCurrFolder = 16;
+static constexpr size_t BitGroups_Second = 16;
 
 namespace fs = std::filesystem;
 
@@ -23,7 +25,7 @@ T decompress(std::vector<uint8_t> v);
 }// namespace internal::compression
 
 /// Compression algorithm is based on
-/// <a href="https://en.wikipedia.org/wiki/Huffman_coding#Basic_technique">huffman coding</a>
+/// <a href="http://www.huffmancoding.com/my-uncle/scientific-american">huffman coding</a>
 /// and is separated in 2 parts:
 /// <br> <br>
 /// <h2>Part 1</h2>
@@ -56,9 +58,9 @@ T decompress(std::vector<uint8_t> v);
 ///     </li>
 ///     <li>seventh (a lot of bits) -> transformed version of current input_file (IF FILE)</li>
 /// </ul>
-/// **1** groups from fifth to eighth will be written as much as file count in that folder <br>
+/// **1** groups from third to seventh will be written as much as file count in that folder <br>
 ///    (this is argument_count-1(argc-1) for the main folder) <br>
-/// **2** whenever we see a new folder we will write_from_ch seventh then start writing from fourth to eighth
+/// **2** whenever we see a new folder we will write_from_ch (sixth) then start writing from third to seventh
 namespace compression {
 namespace storage::detail {
 class CompressorInternal {
@@ -75,8 +77,12 @@ public:
 		unsigned long size = 0;
 		if (fs::is_directory(path))
 			size += std::accumulate(
-				fs::recursive_directory_iterator(path.c_str()), fs::recursive_directory_iterator(), 0,
-				[](auto sz, auto entry) { return is_directory(entry) ? sz : sz + file_size(entry); });
+				fs::recursive_directory_iterator(path.c_str()),
+				fs::recursive_directory_iterator(),
+				0,
+				[](auto sz, auto entry) {
+				  return is_directory(entry) ? sz : sz + file_size(entry);
+				});
 		else
 			size += fs::file_size(path);
 		return size;
@@ -98,7 +104,7 @@ public:
 		                  R"(Compressor: started for "{0}" file/files/folder/folders with size: "{1}" bytes)",
 		                  m_files.begin()->c_str(), m_all_size);
 
-		m_total_bits = Folder + 9 * m_files.size();
+		m_total_bits = FileCountBitsInsideCurrFolder + FileBits * m_files.size();
 		for (const auto &item : m_files) {
 			for (const char *c = item.c_str(); *c; c++)
 				m_occurrence_symbol[(uint8_t) *c]++;
@@ -139,22 +145,22 @@ public:
 
 	/// \brief This structure will be used to create the trie
 	struct huff_trie {
-		huff_trie *left{nullptr}, *right{nullptr};//!< left and right nodes of the m_trie_root
-		uint8_t character;                  //!< associated character in the m_trie_root node
-		long int number;                          //<! occurrences of the respective character
-		std::string bit;                          //<! bit that represents Huffman code of current character
+		huff_trie *left{nullptr}, *right{nullptr}; //!< left and right nodes of the m_trie_root
+		uint8_t character; //!< associated character in the m_trie_root node
+		long int char_occurrence; //<! occurrences of the respective character
+		std::string bit; //<! bit that represents Huffman code of current character
 
 		huff_trie() = default;
 
-		huff_trie(long int num, uint8_t c) : character(c), number(num) {}
+		huff_trie(long int num, uint8_t c) : character(c), char_occurrence(num) {}
 
 		bool operator<(const huff_trie &second) const {
-			return this->number < second.number;
+			return this->char_occurrence < second.char_occurrence;
 		}
 	};
 
 	std::vector<std::string> m_files;//!< path to the m_files for compress
-	FILE *m_compressed_fp = nullptr; //!< file pinter to the new created compressed file
+	FILE *m_compressed_fp = nullptr; //!< file pointer to the new created compressed file
 
 	std::array<long int, 256> m_occurrence_symbol;//!< long integer array that will contain
 	//!< the number of occurrences of each symbol in the m_files
@@ -189,7 +195,7 @@ public:
 			if (m_occurrence_symbol[i]) {
 				e->right = nullptr;
 				e->left = nullptr;
-				e->number = m_occurrence_symbol[i];
+				e->char_occurrence = m_occurrence_symbol[i];
 				e->character = i;
 				e++;
 			}
@@ -202,11 +208,11 @@ public:
 		huff_trie *not_leaf = m_trie.data() + m_symbols;//!< not_leaf is the pointer that
 		//!< traverses through nodes that are not leaves
 
-		huff_trie *is_leaf = m_trie.data() + 2;//!< is_leaf is the pointer that traverses through leaves and
+		huff_trie *is_leaf = m_trie.data() + 2;//!< is_leaf is the pointer that traverses through leaves
 		huff_trie *curr = m_trie.data() + m_symbols;
 
 		for (unsigned long i = 0; i < m_symbols - 1; i++) {
-			curr->number = min1->number + min2->number;
+			curr->char_occurrence = min1->char_occurrence + min2->char_occurrence;
 			curr->left = min1;
 			curr->right = min2;
 			min1->bit = "1";
@@ -217,7 +223,7 @@ public:
 				min1 = not_leaf;
 				not_leaf++;
 			} else {
-				if (is_leaf->number < not_leaf->number) {
+				if (is_leaf->char_occurrence < not_leaf->char_occurrence) {
 					min1 = is_leaf;
 					is_leaf++;
 				} else {
@@ -233,7 +239,7 @@ public:
 				min2 = is_leaf;
 				is_leaf++;
 			} else {
-				if (is_leaf->number < not_leaf->number) {
+				if (is_leaf->char_occurrence < not_leaf->char_occurrence) {
 					min2 = is_leaf;
 					is_leaf++;
 				} else {
@@ -251,11 +257,11 @@ public:
 	}
 
 	/// \brief Count usage frequency of bytes inside the file and store the information
-	/// in long integer massive (bytesFreq) and parallel
+	/// in long integer massive
 	///
-	/// \param path - string that represents the path to the file/folder
+	/// \param path - string that represents the path to the file
 	void count_file_bytes_freq(const std::string &path) {
-		m_total_bits += OsBytes;
+		m_total_bits += FileSizeBits;
 		const std::string buff = return_file_info(path);
 
 		for (const auto &item : buff)
@@ -264,9 +270,9 @@ public:
 
 	/// \brief This function counts usage frequency of bytes inside a folder
 	///
-	/// \param path - string that represents the path to the file/folder
+	/// \param path - string that represents the path to the folder
 	void count_folder_bytes_freq(std::string_view path) {
-		m_total_bits += Folder;
+		m_total_bits += FileCountBitsInsideCurrFolder;
 
 		for (const auto &entry : fs::recursive_directory_iterator(path)) {
 			std::string next_path = entry.path();
@@ -274,12 +280,12 @@ public:
 			if (curr_fdir_name[0] == '.')
 				continue;
 
-			m_total_bits += 9;
+			m_total_bits += FileBits;
 			for (const auto &item : curr_fdir_name)
 				m_occurrence_symbol[(uint8_t) item]++;
 
 			if (entry.is_directory())
-				m_total_bits += Folder;
+				m_total_bits += FileCountBitsInsideCurrFolder;
 			else
 				count_file_bytes_freq(next_path);
 		}
@@ -293,23 +299,23 @@ public:
 
 			write_from_ch(it->character);
 			write_from_ch(it->bit.size());
-			m_total_bits += it->bit.size() + 16;
+			m_total_bits += it->bit.size() + BitGroups_Second;
 
 			write_bytes(it->bit);
-			m_total_bits += it->bit.size() * (it->number);
+			m_total_bits += it->bit.size() * (it->char_occurrence);
 		}
 		if (m_total_bits % CHAR_BIT)
-			m_total_bits = (m_total_bits / CHAR_BIT + 1) * CHAR_BIT;
+			m_total_bits = m_total_bits / CHAR_BIT + 1;
 
 		Logger::the().log(spdlog::level::info,
 		                  R"(Compressor: The size of the sum of ORIGINAL m_files is: "{}" bytes)",
 		                  m_all_size);
 		Logger::the().log(spdlog::level::info,
 		                  R"(Compressor: The size of the COMPRESSED file will be: "{}" bytes)",
-		                  m_total_bits / CHAR_BIT);
+		                  m_total_bits);
 		Logger::the().
 			log(spdlog::level::info, "Compressor: Compressed file's size will be [%{}] of the original file",
-			    100 * ((float) m_total_bits / (float) CHAR_BIT / (float) m_all_size));
+			    100 * ((float) m_total_bits / (float) m_all_size));
 
 		if (m_total_bits / CHAR_BIT > m_all_size)
 			Logger::the().
@@ -505,11 +511,13 @@ private:
 	std::unique_ptr<pimpl> compressor_internal;
 
 public:
-	/// \brief Constructor of the compression class with which you can compress provided m_files
+	/// \brief Constructor of the compression class with which you
+	/// can compress provided m_files
 	///
-	/// \param argc - number of m_files for compress
-	/// \param argv - path's to m_files for compress
-	explicit Compressor(const std::vector<std::string> &args, std::string_view compressed_name = "") {
+	/// \param args - arguments that are provided to the program
+	/// \param compressed_name - name of the future compressed file
+	explicit Compressor(const std::vector<std::string> &args,
+	                    std::string_view compressed_name = "") {
 		std::string new_compressed_name;
 
 		if (args.empty())
@@ -524,7 +532,8 @@ public:
 		compressor_internal = std::make_unique<pimpl>(args, new_compressed_name);
 	}
 
-	/// \brief The main function of compression class that do all the magic with provided m_files.
+	/// \brief The main function of compression class that do all
+	/// the magic with provided m_files.
 	void operator()() {
 		(*compressor_internal)();
 	}

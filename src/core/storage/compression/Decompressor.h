@@ -6,7 +6,7 @@ static constexpr uint8_t Check = 0b10000000;
 static constexpr int Symbols = 256;
 
 /// Decompression algorithm is based on
-/// <a href="https://en.wikipedia.org/wiki/Huffman_coding#Basic_technique">huffman coding</a>
+/// <a href="http://www.huffmancoding.com/my-uncle/scientific-american">huffman coding</a>
 /// <br> <br>
 /// <ul>
 ///     <li>first (one byte) -> m_symbols</li>
