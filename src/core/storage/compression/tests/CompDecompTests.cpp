@@ -1,10 +1,14 @@
 #include <core/storage/compression/tests/Shared.h>
 
-void folder_test(std::map<std::string, std::string> &params, const int text_size) {
+void folder_test(std::map<std::string, std::string> &params,
+                 const int text_size,
+                 const std::string_view &text_in_file) {
 	for (const auto &item : params)
 		REQUIRE(!exists(item.second));
 
-	REQUIRE(create_testing_directory(params["test_dir_name"], text_size));
+	REQUIRE(create_testing_directory(params["test_dir_name"],
+	                                 text_size,
+	                                 text_in_file));
 	REQUIRE(exists(params["test_dir_name"]));
 
 	compression::Compressor compress{
@@ -33,6 +37,13 @@ TEST_CASE("CompDecomp comp_decomp", "[compressor_decompressor]") {
 	params["changed_to_initial_dir"] = "InitialDir";
 	params["compressed_name"] = "Test";
 
-	for (int i = 1; i < 5; ++i)
-		folder_test(params, (int) pow(10, i));
+	const std::string_view text_in_file = "this is some text in the new file\n";
+
+	const int number_of_test_run = 5;
+
+//	starts from 1 because if it starts from 0, the file size will be too small
+	for (int i = 1; i <= number_of_test_run; ++i)
+		folder_test(params,
+		            (int) pow(10, i),
+		            text_in_file);
 }

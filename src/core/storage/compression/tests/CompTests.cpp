@@ -8,9 +8,11 @@ TEST_CASE("Compressor specific_file_size_test", "[specific_file_size_test]") {
 	const std::string &file_name = "test.txt";
 	const std::string &compressed_file_name = "compressed";
 
+	const std::string_view text_in_file = "some text here.\n";
+
 	std::ofstream ofs(file_name);
 	for (int j = 0; j < file_size; ++j)
-		ofs << "some text here \n";
+		ofs << text_in_file;
 	ofs.close();
 
 	REQUIRE(exists(file_name));
