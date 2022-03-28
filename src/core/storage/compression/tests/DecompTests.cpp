@@ -6,9 +6,15 @@ TEST_CASE("CompressorDecompressor partial_decompress", "[partial_decompress]") {
 	params["changed_to_initial_dir"] = "InitialDir";
 	params["compressed_name"] = "Test";
 
+	const std::string_view partial_decompress_text = "this is some text in the new file\n";
+	const int partial_decompress_text_size = 100;
+
 	std::string_view partial_decompress_name = "1";
 
-	REQUIRE(create_testing_directory(params["test_dir_name"], 100));
+
+	REQUIRE(create_testing_directory(params["test_dir_name"],
+	                                 partial_decompress_text_size,
+									 partial_decompress_text));
 	REQUIRE(exists(params["test_dir_name"]));
 
 	compression::Compressor compress{

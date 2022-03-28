@@ -28,8 +28,8 @@ static void BM_Decompression(benchmark::State &st) {
 	}
 }
 
-//	67108864 for 1GB ".txt" file
-//  65536 for 1MB ".txt" file
+//	67108864 for 1GB ".txt" file -> ~71s
+//  65536 for 1MB ".txt" file -> ~110ms
 //  64 for 1KB ".txt" file
 BENCHMARK(BM_Decompression)
 	->Unit(benchmark::kMillisecond)

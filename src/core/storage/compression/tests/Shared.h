@@ -15,9 +15,10 @@ bool clean(const std::map<std::string, std::string> &files) {
 	                           });
 }
 
-bool create_testing_directory(const std::string &new_structure, const int text_size) {
+bool create_testing_directory(const std::string_view &new_structure, const int text_size,
+							  const std::string_view &text) {
 	for (int i = 0; i < 3; ++i) {
-		std::string filesystem_structure = new_structure;
+		std::string filesystem_structure = new_structure.begin();
 		if (i > 0)
 			filesystem_structure += "/" + std::to_string(i);
 
@@ -28,7 +29,7 @@ bool create_testing_directory(const std::string &new_structure, const int text_s
 
 		std::ofstream ofs(path);
 		for (int j = 0; j < text_size; ++j)
-			ofs << "this is some text in the new file\n";
+			ofs << text;
 		ofs.close();
 	}
 	return true;
