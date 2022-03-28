@@ -1,7 +1,9 @@
+#include <array>
 #include <filesystem>
 #include <map>
 #include <ranges>
 #include <string>
+#include <thread>
 #include <variant>
 #include <vector>
 
@@ -397,7 +399,7 @@ TEST_CASE("Btree utils") {
 		std::vector<Position> branch_links_right(BRANCH_NUM + 1);
 		std::generate(branch_links_right.begin(), branch_links_right.end(), [&] { return bpt.pager().alloc(); });
 
-		auto branch_node_left  = Nod{Metadata(Branch(n_random_items<int>(BRANCH_NUM), std::move(branch_links_left), std::vector<LinkStatus>(BRANCH_NUM + 1, LinkStatus::Valid))), {}, Nod::RootStatus::IsInternal};
+		auto branch_node_left = Nod{Metadata(Branch(n_random_items<int>(BRANCH_NUM), std::move(branch_links_left), std::vector<LinkStatus>(BRANCH_NUM + 1, LinkStatus::Valid))), {}, Nod::RootStatus::IsInternal};
 		auto branch_node_right = Nod{Metadata(Branch(n_random_items<int>(BRANCH_NUM), std::move(branch_links_right), std::vector<LinkStatus>(BRANCH_NUM + 1, LinkStatus::Valid))), {}, Nod::RootStatus::IsInternal};
 		branch_node_left.branch().link_status[17] = LinkStatus::Inval;
 		branch_node_left.branch().link_status[38] = LinkStatus::Inval;
@@ -466,5 +468,39 @@ TEST_CASE("Btree dyn entries") {
 		}
 
 		check_for_tree_backup_mismatch(bpt, backup);
+	}
+}
+
+TEST_CASE("Btree concurrency") {
+	fs::create_directories("/tmp/eugene-tests/btree-con");
+
+	SECTION("Insert and find") {
+		using Tree = Btree<IntToString>;
+		using namespace std::views;
+
+		Tree bpt{"/tmp/eugene-tests/btree-con/insert-and-find", ActionOnConstruction::Bare};
+		static constexpr auto num_threads = 10ul;
+		std::array<std::thread, num_threads> threads;
+
+		for (int id = 0; auto &t : threads) {
+			t = std::thread([&](int id) {
+				for (int i : iota(10 * id) | take(10)) {
+					bpt.insert(i, std::to_string(i));
+					REQUIRE(bpt.contains(i));
+				}
+			}, id++);
+		}
+
+		for (auto &t : threads)
+			t.join();
+
+		REQUIRE(bpt.size() == threads.size() * 10);
+		for (auto i = 0ul; i < num_threads * 10; ++i) {
+			auto geti = bpt.get(i);
+			REQUIRE(geti.value() == std::to_string(i));
+		}
+		REQUIRE_FALSE(bpt.contains(-42));
+		auto insert2 = bpt.insert(2, "2");
+		REQUIRE(std::holds_alternative<Tree::InsertedNothing>(insert2));
 	}
 }
