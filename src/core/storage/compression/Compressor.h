@@ -14,16 +14,6 @@ static constexpr size_t BitGroups_Second = 16;
 
 namespace fs = std::filesystem;
 
-namespace internal::compression {
-
-template<typename T>
-std::vector<uint8_t> compress(const T &);
-
-template<typename T>
-T decompress(std::vector<uint8_t> v);
-
-}// namespace internal::compression
-
 /// Compression algorithm is based on
 /// <a href="http://www.huffmancoding.com/my-uncle/scientific-american">huffman coding</a>
 /// and is separated in 2 parts:
@@ -42,9 +32,9 @@ T decompress(std::vector<uint8_t> v);
 ///     <li>first (one byte) -> m_symbols</li>
 ///     <li>second (bit groups)
 ///         <ul>
-///             <li>(8 bits) -> current unique byte</li>
+///             <li>(8 bits) -> current unique symbol</li>
 ///             <li>(8 bits) -> length of the transformation</li>
-///             <li>(bits) -> transformation code of that unique byte</li>
+///             <li>(bits) -> transformation code of that unique symbol</li>
 ///         </ul>
 ///     </li>
 ///     <li>third (2 bytes)**1** -> file_count (inside the current folder)
