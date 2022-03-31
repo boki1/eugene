@@ -2,6 +2,8 @@
 #include <memory>
 
 #include <handler/Handler.h>
+#include <tests/UserRepository.h>
+#include <tests/ExampleStorage.h>
 
 using namespace web;
 using namespace http;
@@ -14,7 +16,9 @@ void on_initialize(const string_t &address) {
 	uri_builder uri(address);
 
 	auto addr = uri.to_uri().to_string();
-	g_httpHandler = std::make_unique<Handler>(addr);
+	g_httpHandler = std::make_unique<Handler>(addr,
+	                                          UserRepository(),
+	                                          ExampleStorage());
 	g_httpHandler->open().wait();
 
 	ucout << utility::string_t(U("Listening for requests at: ")) << addr << std::endl;
