@@ -47,7 +47,7 @@ struct Config {
         using Key = K; \
         using Ref = K; \
         using RealVal = V; \
-		static inline constexpr bool DYN_ENTRIES = true; \
+        static constexpr bool DYN_ENTIRES = true; \
     };
 
 template<typename C>
