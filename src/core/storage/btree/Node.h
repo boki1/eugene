@@ -8,7 +8,6 @@
 #include <tuple>
 #include <utility>
 #include <vector>
-#include <shared_mutex>
 
 #include <nop/serializer.h>
 #include <nop/status.h>
@@ -336,8 +335,6 @@ private:
 
 	/// Keep a list of all leaf nodes in the tree
 	nop::Optional<Position> m_next_node_pos{};
-
-	std::shared_mutex m_latch;
 
 	NOP_STRUCTURE(Node, m_metadata, m_is_root, m_parent_pos, m_next_node_pos);
 };
