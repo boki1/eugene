@@ -272,77 +272,17 @@ private:
 		TreePath path;
 		std::size_t key_expected_pos;
 		bool key_is_present;
-		std::stack<Position> nodes_to_release;
 	};
 
-	/// Specify the state of the locking performed while traversing the tree in search_subtree().
-	/// ToInsert and ToRemove require exclusive access but define different safety guarantees,
-	/// whereas ToReadOnly acquires in shared state.
-	enum class SearchIntent {
-		ToInsert,
-		ToRemove,
-		ToReadOnly
-	};
-
-	inline static void acquire_by_intent(std::shared_mutex mtx, const SearchIntent intent) {
-		// clang-format off
-		switch (intent) {
-			break; case SearchIntent::ToInsert:
-				   case SearchIntent::ToRemove: mtx.lock_shared();
-			break; case SearchIntent::ToReadOnly: mtx.lock();
-		}
-		// clang-format on
-	}
-
-	inline static void release_by_intent(std::shared_mutex mtx, const SearchIntent intent) {
-		// clang-format off
-		switch (intent) {
-			break; case SearchIntent::ToInsert:
-				   case SearchIntent::ToRemove: mtx.unlock_shared();
-			break; case SearchIntent::ToReadOnly: mtx.unlock();
-		}
-		// clang-format on
-	}
-
-	/// Releases nodes in order after completed search (i.e acquiring them).
-	/// The ownership of `nodes` is transferred to this function.
-	void release_nodes(std::stack<Position> &&nodes, const SearchIntent intent) {
-		while (!nodes.empty()) {
-			const auto node_pos = consume_back<Position, std::stack<Position>>(nodes);
-			auto node = Nod::from_page(pager().get(node_pos));
-			release_by_intent(node.m_latch, intent);
-		}
-	}
-
-	inline static bool safe_by_intent(const Nod &nod, const SearchIntent intent) {
-		// clang-format off
-		switch (intent) {
-			break; case SearchIntent::ToInsert: return nod.is_node_insertion_safe();
-			break; case SearchIntent::ToRemove: return nod.is_node_remove_safe();
-			break; case SearchIntent::ToReadOnly: return true;
-		}
-		// clang-format on
-	}
-
-	[[nodiscard]] SearchResultMark search_subtree(const Key &target_key, const Nod &origin, const Position origin_pos, SearchIntent intent) {
+	[[nodiscard]] SearchResultMark search_subtree(const Key &target_key, const Nod &origin, const Position origin_pos) {
 		TreePath path;
-		std::optional<Nod> prev;
 		Nod curr = origin;
 		Position curr_pos = origin_pos;
 		std::optional<std::size_t> curr_idx_in_parent{};
 		bool key_is_present = false;
 		std::size_t key_expected_pos;
-		// Store node positions of those whose latches have to released after the operation has ended.
-		std::stack<Position> to_release;
 
 		while (true) {
-			acquire_by_intent(curr.m_latch, intent);
-			if (prev && safe_by_intent(prev, intent)) {
-				release_by_intent(prev->m_latch, intent);
-				to_release.pop();
-			}
-			to_release.push(curr_pos);
-
 			path.push(PosNod{
 			        .node_pos = curr_pos,
 			        .idx_in_parent = curr_idx_in_parent,
@@ -359,7 +299,6 @@ private:
 					throw BadTreeSearch(fmt::format("- invalid link w/ index={} pointing to pos={} in branch node\n", index, curr.branch().links[index]));
 				curr_idx_in_parent = index;
 				curr_pos = branch_node.links[index];
-				prev = curr;
 				curr = Nod::from_page(m_pager->get(curr_pos));
 			} else if (curr.is_leaf()) {
 				const auto &leaf_node = curr.leaf();
@@ -367,6 +306,7 @@ private:
 				key_is_present = key_expected_pos < leaf_node.keys.size() && leaf_node.keys[key_expected_pos] == target_key;
 				if (key_is_present)
 					path.top().idx_of_key = key_expected_pos;
+
 				break;
 			} else
 				throw BadTreeSearch(fmt::format("- node @{} is neither branch nor leaf", curr_pos));
@@ -379,12 +319,11 @@ private:
 		        .node = curr,
 		        .path = path,
 		        .key_expected_pos = key_expected_pos,
-		        .key_is_present = key_is_present,
-		        .nodes_to_release = to_release};
+		        .key_is_present = key_is_present};
 	}
 
-	[[nodiscard]] SearchResultMark search(const Key &target_key, SearchIntent intent) {
-		return search_subtree(target_key, root(), rootpos(), intent);
+	[[nodiscard]] SearchResultMark search(const Key &target_key) {
+		return search_subtree(target_key, root(), rootpos());
 	}
 
 	/// Get node element positioned at the "corner" of the subtree
@@ -742,7 +681,7 @@ private:
 
 	[[nodiscard]] InsertionReturnMark place_kv_entry(const Entry &entry, ActionOnKeyPresent action = ActionOnKeyPresent::AbandonChange, SplitBias split_bias = SplitBias::DistributeEvenly) {
 		/// Locate position
-		auto search_res = search(entry.key, SearchIntent::ToInsert);
+		auto search_res = search(entry.key);
 
 		if ((action == ActionOnKeyPresent::AbandonChange && search_res.key_is_present)
 		    || (action == ActionOnKeyPresent::SubmitChange && !search_res.key_is_present))
@@ -775,7 +714,7 @@ private:
 		std::vector<InsertionTree<Key>> insertion_trees;
 
 		for (auto simple_bulk_cbegin = rng::cbegin(bulk); simple_bulk_cbegin != rng::cend(bulk);) {
-			auto search_result = search(simple_bulk_cbegin->key, SearchIntent::ToInsert);
+			auto search_result = search(simple_bulk_cbegin->key);
 			PosNod path_to_leaf = consume_back<PosNod>(search_result.path);
 			std::optional<Position> parent_pos = search_result.path.empty() ? std::nullopt : std::make_optional(search_result.path.top().node_pos);
 
@@ -994,7 +933,7 @@ public:
 	using RemovalReturnMark = std::variant<RemovedVal, RemovedNothing>;
 
 	RemovalReturnMark remove(const Key &key) {
-		auto search_res = search(key, SearchIntent::ToRemove);
+		auto search_res = search(key);
 
 		if (!search_res.key_is_present)// key is not in the tree, nothing to remove
 			return RemovedNothing();
@@ -1052,7 +991,7 @@ public:
 	/// If an error occurs during the tree traversal 'BadTreeSea
 	/// rch' is thrown.
 	constexpr std::optional<RealVal> get(const Key &key) {
-		const auto search_result = search(key, SearchIntent::ToReadOnly);
+		const auto search_result = search(key);
 		if (!search_result.key_is_present)
 			return {};
 
@@ -1063,7 +1002,7 @@ public:
 	/// Check whether <key, val> entry described by the given key is present in the tree
 	/// If an error occurs during the tree traversal 'BadTreeSearch' is thrown.
 	constexpr bool contains(const Key &key) {
-		return search(key, SearchIntent::ToReadOnly).key_is_present;
+		return search(key).key_is_present;
 	}
 
 	/// Get the entry with the smallest key
