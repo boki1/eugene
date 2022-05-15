@@ -34,13 +34,14 @@
 #include <core/storage/IndirectionVector.h>
 #include <core/storage/Pager.h>
 #include <core/storage/btree/Node.h>
+#include <shared_mutex>
 #include <variant>
 
 /// Define configuration for a Btree of order m.
 /// Used primarily in unit tests as of now, but it may come in handy in other situtations too.
 /// Simple example usage:
 ///
-/// class MyConf : Conf {
+/// class MyConfig : Config {
 ///     BTREE_OF_ORDER(3);
 /// };
 #define BTREE_OF_ORDER(m)                                        \
@@ -50,7 +51,7 @@
 namespace internal::storage::btree {
 
 namespace util {
-template<EugeneConfig Conf = Config>
+template<EugeneConfig Config = Config>
 class BtreePrinter;
 }
 
@@ -80,39 +81,39 @@ enum class ActionOnConstruction : std::uint8_t {
 enum class ActionOnKeyPresent { SubmitChange,
 	                        AbandonChange };
 
-template<EugeneConfig Conf = Config>
+template<EugeneConfig Config = Config>
 class Btree {
-	using Key = typename Conf::Key;
-	using Val = typename Conf::Val;
-	using RealVal = typename Conf::RealVal;
+	using Key = typename Config::Key;
+	using Val = typename Config::Val;
+	using RealVal = typename Config::RealVal;
 
 	// If not using dyn entries, Val and RealVal are the same type.
-	// static_assert(std::same_as<Val, RealVal> == !Conf::DYN_ENTRIES);
+	static_assert(std::same_as<Val, RealVal> == !Config::DYN_ENTRIES);
 
-	using Ref = typename Conf::Ref;
-	using Nod = Node<Conf>;
+	using Ref = typename Config::Ref;
+	using Nod = Node<Config>;
 
-	using PagerAllocatorPolicy = typename Conf::PageAllocatorPolicy;
-	using PagerEvictionPolicy = typename Conf::PageEvictionPolicy;
-	using PagerType = typename Conf::PagerType;
+	using PagerAllocatorPolicy = typename Config::PageAllocatorPolicy;
+	using PagerEvictionPolicy = typename Config::PageEvictionPolicy;
+	using PagerType = typename Config::PagerType;
 
-	friend util::BtreePrinter<Conf>;
+	friend util::BtreePrinter<Config>;
 
-	static inline constexpr auto APPLY_COMPRESSION = Conf::APPLY_COMPRESSION;
-	static inline constexpr auto PAGE_CACHE_SIZE = Conf::PAGE_CACHE_SIZE;
-	static inline constexpr auto BRANCHING_FACTOR_LEAF = Conf::BRANCHING_FACTOR_LEAF;
-	static inline constexpr auto BRANCHING_FACTOR_BRANCH = Conf::BRANCHING_FACTOR_BRANCH;
+	static inline constexpr auto APPLY_COMPRESSION = Config::APPLY_COMPRESSION;
+	static inline constexpr auto PAGE_CACHE_SIZE = Config::PAGE_CACHE_SIZE;
+	static inline constexpr auto BRANCHING_FACTOR_LEAF = Config::BRANCHING_FACTOR_LEAF;
+	static inline constexpr auto BRANCHING_FACTOR_BRANCH = Config::BRANCHING_FACTOR_BRANCH;
 
 	static inline constexpr std::uint32_t HEADER_MAGIC = 0xB75EEA41;
 
 	/// Same configuration as the provided, but non-persistent
-	struct MemConf : Conf {
+	struct MemConfig : Config {
 		static inline constexpr bool PERSISTENT = false;
-		using PagerType = InMemoryPager<typename Conf::PageAllocatorPolicy>;
+		using PagerType = InMemoryPager<typename Config::PageAllocatorPolicy>;
 	};
 
-	using MemTree = Btree<MemConf>;
-	using MemNode = Node<MemConf>;
+	using MemTree = Btree<MemConfig>;
+	using MemNode = Node<MemConfig>;
 	friend MemTree;
 	friend MemNode;
 
@@ -168,7 +169,7 @@ public:
 	template<typename Key>
 	struct InsertionTree {
 		TreePath path;
-		Btree<Conf> tree;
+		Btree<Config> tree;
 		Key lofence;
 		Key hifence;
 		Position leaf_pos;
@@ -180,6 +181,7 @@ private:
 	///
 
 	/// 'Node safety' functions are used in order to make the tree thread-safe.
+	/// When these functions are called the node's latch is already acquired.
 	/// Node being safe means that any tree modifications created by the
 	/// rebalancing procedures will not propagate beyond the node at hand,
 	/// absorbing any changes.
@@ -196,29 +198,29 @@ private:
 	/// Checks whether a node is 'safe' during a removal operation.
 	[[nodiscard]] constexpr bool is_node_remove_safe(const Nod &node) {
 		if (node.is_branch())
-			return !node.empty();
+			return node.__size() != 0;
 		return false;
 	}
 
 	/// Wrapper for checking whether a node has too many elements
 	[[nodiscard]] constexpr bool is_node_over(const Nod &node) {
 		if (node.is_branch())
-			return node.is_over(max_num_records_branch());
-		return node.is_over(max_num_records_leaf());
+			return node.is_over(__max_num_records_branch());
+		return node.is_over(__max_num_records_leaf());
 	}
 
 	/// Wrapper for checking whether a node has too few elements
 	[[nodiscard]] constexpr bool is_node_under(const Nod &node) {
 		if (node.is_branch())
-			return node.is_under(min_num_records_branch());
-		return node.is_under(min_num_records_leaf());
+			return node.is_under(__min_num_records_branch());
+		return node.is_under(__min_num_records_leaf());
 	}
 
 	/// Wrapper for calling split API on a given node
 	[[nodiscard]] constexpr auto node_split(Nod &node, const SplitBias bias) {
 		if (node.is_branch())
-			return node.split(max_num_records_branch(), bias);
-		return node.split(max_num_records_leaf(), bias);
+			return node.split(__max_num_records_branch(), bias);
+		return node.split(__max_num_records_leaf(), bias);
 	}
 
 public:
@@ -372,12 +374,15 @@ private:
 		                    DuringBulkRebalancing };
 
 	Nod make_root(MakeRootAction action) {
+		/// Although this function is mainly associated with changes in the logical contents of the tree, for which btl is no associated,
+		/// there are also modifications to the tree instance, more specifically - the root position.
+		std::unique_lock<std::shared_mutex> _guard{m_lock.get()};
 		auto new_pos = m_pager->alloc();
 		auto new_metadata = [&] {
 			if (action == MakeRootAction::BareInit)
 				return Nod::template metadata_ctor<typename Nod::Leaf>();
 
-			auto old_root = root();
+			auto old_root = __root();
 			auto old_pos = m_rootpos;
 			old_root.set_parent(new_pos);
 			old_root.set_root_status(Nod::RootStatus::IsInternal);
@@ -639,12 +644,13 @@ private:
 	/// Construct a new empty tree
 	/// Initializes an empty root node leaf and calculates the appropriate value for 'm'
 	constexpr void bare() {
-		if constexpr (Conf::DYN_ENTRIES) {
-			if (!m_ind_vector.has_value())
-				m_ind_vector.emplace(fmt::format("{}-indvector", name()), IndirectionVector<Conf>::ActionOnConstruction::DoNotLoad);
-		}
-
 		[[maybe_unused]] auto new_root = make_root(MakeRootAction::BareInit);
+
+		std::unique_lock<std::shared_mutex> _guard{m_lock.get()};
+		if constexpr (Config::DYN_ENTRIES) {
+			if (!m_ind_vector.has_value())
+				m_ind_vector.emplace(fmt::format("{}-indvector", m_identifier), IndirectionVector<Config>::ActionOnConstruction::DoNotLoad);
+		}
 
 		/// Space evaluation done here.
 		/// Perform a binary search in the PAGE_SIZE range to calculate the maximum number of entries that could be stored.
@@ -675,7 +681,7 @@ private:
 	/// 'BadTreeInsert' may be thrown if an error occurs.
 	/// It gets called by both 'insert()' and 'update()'.
 
-	[[nodiscard]] InsertionReturnMark place_kv_entry(const Key &key, const RealVal &val, ActionOnKeyPresent action = ActionOnKeyPresent::AbandonChange, SplitBias split_bias = SplitBias::DistributeEvenly) {
+	[[nodiscard]] InsertionReturnMark place_kv_entry(const Key &key, const Val &val, ActionOnKeyPresent action = ActionOnKeyPresent::AbandonChange, SplitBias split_bias = SplitBias::DistributeEvenly) {
 		return place_kv_entry(Entry{.key = key, .val = val}, action, split_bias);
 	}
 
@@ -797,6 +803,26 @@ private:
 		return std::make_pair(std::move(insertion_marks), std::move(insertion_trees));
 	}
 
+private:
+	long __min_num_records_leaf() const noexcept { return (m_num_records_leaf + 1) / 2; }
+	long __max_num_records_leaf() const noexcept { return m_num_records_leaf; }
+	long __min_num_records_branch() const noexcept { return (m_num_records_branch + 1) / 2; }
+	long __max_num_records_branch() const noexcept { return m_num_records_branch; }
+
+	Nod __root() { return Nod::from_page(m_pager->get(m_rootpos)); }
+
+	std::string __header_name() { return fmt::format("{}-header", m_identifier); }
+
+	Header __header() noexcept {
+		return Header{
+		        .magic = HEADER_MAGIC,
+		        .tree_rootpos = m_rootpos,
+		        .tree_size = m_size,
+		        .tree_depth = m_depth,
+		        .tree_num_leaf_records = __min_num_records_leaf(),
+		        .tree_num_branch_records = __min_num_records_branch()};
+	}
+
 public:
 	///
 	/// Properties access API
@@ -804,57 +830,93 @@ public:
 
 	/// Get root node of tree
 	/// Somewhat expensive operation if cache is not hot, since a disk read has to be made.
-	[[nodiscard]] Nod root() { return Nod::from_page(m_pager->get(rootpos())); }
+	[[nodiscard]] Nod root() {
+		std::shared_lock<std::shared_mutex> _guard{m_lock.get()};
+		return __root();
+	}
 
 	/// Get position of root node
-	[[nodiscard]] const auto &rootpos() const noexcept { return m_rootpos; }
+	[[nodiscard]] const auto &rootpos() const noexcept {
+		std::shared_lock<std::shared_mutex> _guard{m_lock.get()};
+		return m_rootpos;
+	}
 
 	/// Get header of tree
 	[[nodiscard]] Header header() noexcept {
-		return Header{
-		        .magic = HEADER_MAGIC,
-		        .tree_rootpos = rootpos(),
-		        .tree_size = size(),
-		        .tree_depth = depth(),
-		        .tree_num_leaf_records = min_num_records_leaf(),
-		        .tree_num_branch_records = min_num_records_branch()};
+		std::shared_lock<std::shared_mutex> _guard{m_lock.get()};
+		return __header();
 	}
 
 	/// Get header name of tree
-	[[nodiscard]] std::string_view header_name() const {
-		static std::string hn = fmt::format("{}-header", m_identifier);
-		return hn;
+	[[nodiscard]] std::string header_name() const {
+		std::shared_lock<std::shared_mutex> _guard{m_lock.get()};
+		return __header_name();
 	}
 
 	/// Get tree name
-	[[nodiscard]] std::string_view name() const { return m_identifier; }
+	[[nodiscard]] std::string_view name() const {
+		std::shared_lock<std::shared_mutex> _guard{m_lock.get()};
+		return m_identifier;
+	}
 
 	/// Get tree size (# of items present)
-	[[nodiscard]] std::size_t size() noexcept { return m_size; }
+	[[nodiscard]] std::size_t size() noexcept {
+		std::shared_lock<std::shared_mutex> _guard{m_lock.get()};
+		return m_size;
+	}
 
 	/// Check if the tree is empty
-	[[nodiscard]] bool empty() noexcept { return size() == 0; }
+	[[nodiscard]] bool empty() noexcept {
+		std::shared_lock<std::shared_mutex> _guard{m_lock.get()};
+		return m_size == 0;
+	}
 
 	/// Get tree depth (max level of the tree)
-	[[nodiscard]] std::size_t depth() { return m_depth; }
+	[[nodiscard]] std::size_t depth() {
+		std::shared_lock<std::shared_mutex> _guard{m_lock.get()};
+		return m_depth;
+	}
 
 	/// Get limits of the size of leaf nodes (leaves contain [min; max] entries)
-	[[nodiscard]] long min_num_records_leaf() const noexcept { return (m_num_records_leaf + 1) / 2; }
-	[[nodiscard]] long max_num_records_leaf() const noexcept { return m_num_records_leaf; }
+	[[nodiscard]] long min_num_records_leaf() const noexcept {
+		std::shared_lock<std::shared_mutex> _guard{m_lock.get()};
+		return __min_num_records_leaf();
+	}
+	[[nodiscard]] long max_num_records_leaf() const noexcept {
+		std::shared_lock<std::shared_mutex> _guard{m_lock.get()};
+		return m_num_records_leaf;
+	}
 
 	/// Get limits of the size of branch nodes (branch contain [min; max] entries)
-	[[nodiscard]] long min_num_records_branch() const noexcept { return (m_num_records_branch + 1) / 2; }
-	[[nodiscard]] long max_num_records_branch() const noexcept { return m_num_records_branch; }
+	[[nodiscard]] long min_num_records_branch() const noexcept {
+		std::shared_lock<std::shared_mutex> _guard{m_lock.get()};
+		return __min_num_records_branch();
+	}
+	[[nodiscard]] long max_num_records_branch() const noexcept {
+		std::shared_lock<std::shared_mutex> _guard{m_lock.get()};
+		return m_num_records_branch;
+	}
 
 	/// Get the internal pager
-	[[nodiscard]] PagerType &pager() noexcept { return *m_pager.get(); }
+	[[nodiscard]] PagerType &pager() noexcept {
+		std::shared_lock<std::shared_mutex> _guard{m_lock.get()};
+		return *m_pager.get();
+	}
 
-	[[nodiscard]] auto &ind_vector() {
+private:
+	auto &__ind_vector() {
 		using namespace ::internal::storage;
-		if constexpr (!Conf::DYN_ENTRIES)
+		if constexpr (!Config::DYN_ENTRIES)
 			throw BadIndVector(" - Not using DYN_ENTRIES option");
 		assert(m_ind_vector.has_value());
 		return *m_ind_vector;
+	}
+
+public:
+
+	[[nodiscard]] auto &ind_vector() {
+		std::shared_lock<std::shared_mutex> _guard{m_lock.get()};
+		return __ind_vector();
 	}
 
 	///
@@ -862,7 +924,7 @@ public:
 	///
 
 	[[nodiscard]] RealVal get_value(Val val_or_slot) {
-		if constexpr (Conf::DYN_ENTRIES) {
+		if constexpr (Config::DYN_ENTRIES) {
 			return ind_vector().get_from_slot(val_or_slot);
 		} else {
 			static_assert(std::same_as<Val, RealVal>);
@@ -871,7 +933,7 @@ public:
 	}
 
 	[[nodiscard]] Val set_value(RealVal val) {
-		if constexpr (Conf::DYN_ENTRIES) {
+		if constexpr (Config::DYN_ENTRIES) {
 			return ind_vector().set_to_slot(val);
 		} else {
 			static_assert(std::same_as<Val, RealVal>);
@@ -945,7 +1007,7 @@ public:
 
 		/// Erase element
 		node_leaf.keys.erase(node_leaf.keys.cbegin() + search_res.key_expected_pos);
-		if constexpr (Conf::DYN_ENTRIES) {
+		if constexpr (Config::DYN_ENTRIES) {
 			auto slot_id_it = node_leaf.vals.cbegin() + search_res.key_expected_pos;
 			ind_vector().remove_slot(*slot_id_it);
 		}
@@ -957,7 +1019,7 @@ public:
 		--m_size;
 
 		/// Performs any rebalance operations if needed.
-		if constexpr (Conf::BTREE_RELAXED_REMOVES)
+		if constexpr (Config::BTREE_RELAXED_REMOVES)
 			rebalance_after_remove_relaxed(search_res.path);
 
 		return RemovedVal{.val = removed};
@@ -978,7 +1040,7 @@ public:
 	/// If no such entry with the given key is found, 'InsertedNothing' is returned, else-
 	/// 'InsertedEntry'. An exception 'BadTreeInsert' may be thrown if an unexpected error
 	/// occurs. It contains an appropriate message describing the failure.
-	constexpr InsertionReturnMark update(const Key &key, const RealVal &val) {
+	constexpr InsertionReturnMark update(const Key &key, const Val &val) {
 		return place_kv_entry(key, val, ActionOnKeyPresent::SubmitChange);
 	}
 
@@ -1076,11 +1138,13 @@ public:
 	/// Load tree metadata from storage
 	/// Reads from 'identifier' and 'identifier'-header and initializes the tree's metadata.
 	void load() {
+		std::unique_lock<std::shared_mutex> _guard{m_lock.get()};
+
 		if constexpr (requires { m_pager->load(); }) {
-			fmt::print("[btree] loading '{}'\n", header_name());
+			fmt::print("[btree] loading '{}'\n", __header_name());
 			Header header_;
 
-			nop::Deserializer<nop::StreamReader<std::ifstream>> deserializer{header_name().data()};
+			nop::Deserializer<nop::StreamReader<std::ifstream>> deserializer{__header_name()};
 			if (!deserializer.Read(&header_))
 				throw BadRead("failed deseralizing btree header");
 
@@ -1094,28 +1158,30 @@ public:
 			m_pager->load();
 		}
 
-		if constexpr (Conf::DYN_ENTRIES) {
+		if constexpr (Config::DYN_ENTRIES) {
 			if (!m_ind_vector.has_value())
-				m_ind_vector.emplace(fmt::format("{}-indvector", name()), IndirectionVector<Conf>::ActionOnConstruction::Load);
+				m_ind_vector.emplace(fmt::format("{}-indvector", m_identifier), IndirectionVector<Config>::ActionOnConstruction::Load);
 			else
-				ind_vector().load();
+				__ind_vector().load();
 		}
 	}
 
 	/// Store tree metadata to storage
 	/// Stores tree's metadata inside files 'identifier' and 'identifier'-header.
 	void save() {
-		fmt::print("[btree] saving '{}'\n", header_name());
+		std::unique_lock<std::shared_mutex> _guard{m_lock.get()};
+
+		fmt::print("[btree] saving '{}'\n", __header_name());
 		if constexpr (requires { m_pager->save(); }) {
-			nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{header_name().data(), std::ios::trunc};
-			if (!serializer.Write(header()))
+			nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{__header_name(), std::ios::trunc};
+			if (!serializer.Write(__header()))
 				throw BadWrite("failed serializing btree header");
 
 			m_pager->save();
 		}
 
-		if constexpr (Conf::DYN_ENTRIES) {
-			ind_vector().save();
+		if constexpr (Config::DYN_ENTRIES) {
+			__ind_vector().save();
 		}
 	}
 
@@ -1156,25 +1222,24 @@ public:
 		return copy;
 	}
 
-	void repoint(const std::string_view sv, ActionOnConstruction action_on_construction = ActionOnConstruction::Bare) {
-		std::string str{sv};
-		m_identifier = str;
-		m_pager = std::make_shared<PagerType>(m_identifier);
-
-		using enum ActionOnConstruction;
-		switch (action_on_construction) {
-		  break; case Load: load();
-		  break; case Bare: bare();
-		  break; case InMemoryOnly: bare();
-		}
-	}
-
 	Btree &operator=(const Btree &) = default;
 	Btree &operator=(Btree &&) noexcept = default;
 
 	virtual ~Btree() noexcept = default;
 
 	auto operator<=>(const Btree &) const noexcept = default;
+
+private:
+	/// Wrapper for "copyable" mutex
+	struct TreeLock {
+		mutable std::shared_mutex m_mtx;
+
+		TreeLock() = default;
+		TreeLock(const TreeLock &) {}
+		TreeLock(TreeLock &&) {}
+
+		std::shared_mutex &get() noexcept { return m_mtx; }
+	};
 
 private:
 	/// Shared among insertion trees and other copies of the tree
@@ -1193,6 +1258,10 @@ private:
 	std::size_t m_num_links_branch{0};
 
 	// Contains value only if the option DYN ENTRIES is used
-	std::optional<IndirectionVector<Conf>> m_ind_vector;
+	std::optional<IndirectionVector<Config>> m_ind_vector;
+
+	// Big tree lock - protects only the properties of the tree on not its logical contents.
+	mutable TreeLock m_lock;
+
 };
 }// namespace internal::storage::btree
