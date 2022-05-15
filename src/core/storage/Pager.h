@@ -324,7 +324,7 @@ private:
 /// If it has been modified, store it first.
 struct LRUCache {
 	[[nodiscard]] static CacheEvictionResult evict(PageCache<LRUCache> &cache) {
-		std::scoped_lock<std::mutex> _guard{cache.m_mutex};
+		// NB: Always assume that the before calling evict() the cache's mutex has been acquired.
 		CacheEvictionResult res;
 		const Position pos = cache.m_tracker.front();
 		const auto &cached = cache.m_index.at(pos);
