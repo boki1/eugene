@@ -200,15 +200,6 @@ TEST_CASE("Pager concurrency") {
 
 	PagerType pr("/tmp/eu-pager-con");
 	auto oper = [&] {
-		Page p;
-		std::fill(p.begin(), p.end(), 42);
-		pr.place(0, Page(p));
-		REQUIRE(p == pr.get(0));
-		Page q;
-		std::fill(q.begin(), q.end(), 13);
-		pr.place(PAGE_SIZE, Page(q));
-		REQUIRE(q == pr.get(PAGE_SIZE));
-
 		[[maybe_unused]] auto pos10 = pr.alloc_inner(10);
 		std::vector<uint8_t> expected10(10, 10);
 		pr.place_inner(pos10, expected10);
