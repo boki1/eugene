@@ -630,7 +630,7 @@ public:
 		std::scoped_lock<std::mutex> _guard{this->m_mutex};
 		std::size_t chunks = 0;
 		for (Position page_pos : this->m_allocator.next_allocated_page())
-			for (const auto &[_, bitval] : chunkbit_iter(get(page_pos)))
+			for (const auto &[_, bitval] : chunkbit_iter(__get(page_pos)))
 				chunks += static_cast<std::size_t>(bitval);
 		return chunks * PAGE_ALLOC_SCALE;
 	}
