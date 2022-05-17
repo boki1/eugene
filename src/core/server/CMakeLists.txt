@@ -21,6 +21,7 @@ set(LibEugeneServer_External
 
 set(LibEugeneServer_SRC
         handler/Handler.cpp handler/Handler.h
+        detail/Credentials.h
         detail/CredentialsStorage.h
         detail/CredentialsDecoder.h
         detail/Storage.h

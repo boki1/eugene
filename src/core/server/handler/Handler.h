@@ -22,8 +22,8 @@
 #define TRACE(msg)            ucout << msg
 #define CHECK_ENDPOINT(path, string) \
     if (path == string &&                          \
-	this.m_credentials_decoder.is_valid(request.headers()) && \
-	this.m_user_credentials.authenticate(m_credentials_decoder.decode(request.headers())))
+	m_credentials_decoder->is_valid(request.headers()) && \
+	m_user_credentials.authenticate(m_credentials_decoder->decode(request.headers())))
 
 
 using namespace web;
@@ -31,9 +31,10 @@ using namespace http;
 using namespace utility;
 using namespace http::experimental::listener;
 
+template <typename Key, typename Value>
 class Handler {
 public:
-	explicit Handler(const utility::string_t &, CredentialsStorage &, Storage &);
+	explicit Handler(const utility::string_t &, CredentialsStorage &, Storage<Key, Value> &);
 	virtual ~Handler() noexcept = default;
 
 	pplx::task<void> open() { return m_listener.open(); }
@@ -51,7 +52,7 @@ private:
 	using pimpl_credentials = CredentialsDecoder;
 	std::unique_ptr<pimpl_credentials> m_credentials_decoder;
 
-	Storage m_storage;
+	Storage<Key, Value> m_storage;
 
 
 	[[maybe_unused]] void handle_error(const pplx::task<void> &);

@@ -2,43 +2,40 @@
 
 #include <iostream>
 
-#include <cpprest/http_listener.h>
-#include <cpprest/http_headers.h>
-#include <cpprest/json.h>
-#include <cpprest/uri.h>
 #include <cpprest/asyncrt_utils.h>
-#include <cpprest/json.h>
-#include <cpprest/filestream.h>
 #include <cpprest/containerstream.h>
+#include <cpprest/filestream.h>
+#include <cpprest/http_headers.h>
+#include <cpprest/http_listener.h>
+#include <cpprest/json.h>
 #include <cpprest/producerconsumerstream.h>
+#include <cpprest/uri.h>
+
+#include <detail/Credentials.h>
 
 using namespace web;
 using namespace http;
 using namespace utility;
 using namespace http::experimental::listener;
 
-struct credentials {
-	const std::string username;
-	const std::string password;
-};
-
 class CredentialsDecoder {
 public:
 	CredentialsDecoder() = default;
 	CredentialsDecoder(const http_headers &credentials) : m_headers(credentials) {}
 
-	static credentials decode(const http_headers &headers) {
+	static Credentials decode(const http_headers &headers) {
 		auto auth_header = headers.find(U("authorization"));
-		std::vector<unsigned char> credentials = utility::conversions::from_base64
-			(auth_header->second.substr(6, auth_header->second.size()));
+		std::vector<unsigned char> creds = utility::conversions
+		        ::from_base64(auth_header->second
+		                              .substr(6, auth_header->second.size()));
 
-		//	The credentials are in the form of username:password
+		//	The creds are in the form of username:password
 		//	stored in vector like "u" "s" "e" "r" "n" "a" "m" "e" ":" "p" "a" "s" "s" "w" "o" "r" "d"
-		const std::string username{credentials.begin(), std::find(credentials.begin(), credentials.end(), ':')};
-		const std::string password{std::find(credentials.begin(), credentials.end(), ':') + 1, credentials.end()};
+		const std::string username{creds.begin(), std::find(creds.begin(), creds.end(), ':')};
+		const std::string password{std::find(creds.begin(), creds.end(), ':') + 1, creds.end()};
 
 		std::size_t pass_hash = std::hash<std::string>{}(password);
-		return creds{username, std::to_string(pass_hash)};
+		return Credentials{username, std::to_string(pass_hash)};
 	}
 
 	static bool is_valid(const http_headers &headers) {
@@ -54,9 +51,8 @@ public:
 
 		return true;
 	}
+	~CredentialsDecoder() = default;
 
 private:
 	const http_headers &m_headers;
-
-	~CredentialsDecoder() = default;
 };
