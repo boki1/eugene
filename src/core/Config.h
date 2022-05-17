@@ -36,6 +36,22 @@ struct Config {
 	using BasicAuthConfig = std::tuple<std::string, std::string>;
 };
 
+#define EU_CONFIG(T, K, V) \
+    struct T##Config : internal::Config { \
+        using Key = K; \
+        using Ref = K; \
+        using Val = V; \
+        using RealVal = V; \
+    };
+
+#define EU_CONFIG_DYN(C, K, V) \
+    struct C##Config : internal::Config { \
+        using Key = K; \
+        using Ref = K; \
+        using RealVal = V; \
+		static inline constexpr bool DYN_ENTRIES = true; \
+    };
+
 template<typename C>
 concept EugeneConfig = std::is_base_of_v<Config, C>;
 

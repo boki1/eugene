@@ -36,7 +36,8 @@ config: dep-setup
 		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON\
 		-DCMAKE_BUILD_TYPE=${EU_BUILD_TYPE}\
 		-DEU_BUILD_TESTS=${EU_BUILD_TESTS}\
-		-DEU_BUILD_BENCHMARKS=${EU_BUILD_BENCHMARKS}
+		-DEU_BUILD_BENCHMARKS=${EU_BUILD_BENCHMARKS}\
+		-DEU_BUILD_EXAMPLES=${EU_BUILD_EXAMPLES}
 	ln -sf ${EU_BUILD_DIR}/compile_commands.json compile_commands.json
 
 config-test:
@@ -45,10 +46,15 @@ config-test:
 config-bench:
 	$(eval EU_BUILD_BENCHMARKS=yes)
 
+config-example:
+	$(eval EU_BUILD_EXAMPLES=yes)
+
 build: config
 	ninja -C${EU_BUILD_DIR} -j${EU_THREADS}
 
 test: config-test config build exec-test
+
+example: config-example config build exec-example
 
 exec-test:
 	ctest --no-tests=error --rerun-failed --output-on-failure --test-dir ${EU_BUILD_DIR}
@@ -58,6 +64,10 @@ exec-bench:
 	for bench in `ls ${EU_BUILD_DIR}/bin/*Bench*`; do $$bench; done
 	$(eval EU_BUILD_BENCHMARKS=no)
 
+exec-example:
+	for example in `ls ${EU_BUILD_DIR}/bin/Example*`; do $$example; done
+	$(eval EU_BUILD_EXAMPLES=no)
+
 bench: config-bench config build exec-bench
 
 clean-test: clean test
@@ -66,8 +76,10 @@ clean-bench: clean bench
 
 clean-build: clean build
 
+clean-example: clean example
+
 clean-all: clean all
 
 clean-exec-all: clean-all exec-all
 
-.PHONY: all clean clean-test clean-bench clean-build clean-all clean-exec-all test bench
+.PHONY: all clean clean-test clean-bench clean-build clean-example clean-all clean-exec-all test bench

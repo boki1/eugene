@@ -7,6 +7,7 @@
 #include <type_traits>
 #include <typeinfo>
 #include <sstream>
+#include <cassert>
 
 #ifndef _MSC_VER
 	#include <cxxabi.h>
