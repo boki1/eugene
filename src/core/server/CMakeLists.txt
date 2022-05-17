@@ -16,6 +16,7 @@ set (LibEugeneServer_Example
 
 set(LibEugeneServer_External
         ../Logger.h
+        ../Config.h
         ../storage/btree/Btree.h
         ../storage/btree/Btree.cpp)
 
