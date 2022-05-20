@@ -145,7 +145,6 @@ private:
 		             request_type, path);
 		});
 
-
 		request.reply(status_codes::NotFound);
 	}
 
@@ -153,20 +152,24 @@ private:
 		TRACE("\nhandle GET\n");
 
 		//	json send something like
-		//	{
-		//		<key for indexing>",
-		//		<key for indexing>",
-		//		...
-		//	}
+		//	[obj1, obj2]
 		auto path = request.relative_uri().path();
 		handle_request(
 			"/eugene",
 			request,
-			[this](json::value const &jvalue, json::value &answer) {
+			[this, request](json::value const &jvalue, json::value &answer) {
 			  for (auto const &key : jvalue.as_array()) {
-				  if (key.is_string()) {
+				  try {
 					  answer[key.as_string()] = json::value::string(
 						  this->m_storage->get(key.as_string()));
+				  } catch (std::invalid_argument const &e) {
+					  Logger::the([request_type = request.method(), key = key.as_string()](spdlog::logger logger) {
+						logger.log(spdlog::level::info,
+						           fmt::runtime(R"(Backend "{0}" failure "{1}" can't get value)"),
+						           request_type, key);
+					  });
+					  request.reply(status_codes::NoContent);
+					  return;
 				  }
 			  }
 			});
@@ -178,12 +181,23 @@ private:
 		handle_request(
 			"/eugene",
 			request,
-			[this](json::value const &jvalue, json::value &) {
+			[this, request](json::value const &jvalue, json::value &) {
 			  for (auto const &pair : jvalue.as_object()) {
 				  auto key = pair.first;
 				  auto value = pair.second;
 
-				  this->m_storage->set(key, value.as_string());
+				  try {
+					  this->m_storage->set(key, value.as_string());
+				  }
+				  catch (std::invalid_argument const &e) {
+					  Logger::the([request_type = request.method(), key](spdlog::logger logger) {
+						logger.log(spdlog::level::info,
+						           fmt::runtime(R"(Backend "{0}" failure "{1}" already exists)"),
+						           request_type, key);
+					  });
+					  request.reply(status_codes::NoContent);
+					  return;
+				  }
 			  }
 			});
 	}
@@ -232,9 +246,19 @@ private:
 		handle_request(
 			"/eugene",
 			request,
-			[this](json::value const &jvalue, json::value &) {
+			[this, request](json::value const &jvalue, json::value &) {
 			  for (auto const &key : jvalue.as_array()) {
-				  this->m_storage->remove(key.as_string());
+				  try {
+					  this->m_storage->remove(key.as_string());
+				  } catch (std::invalid_argument const &e) {
+					  Logger::the([request_type = request.method(), key = key.as_string()](spdlog::logger logger) {
+					    logger.log(spdlog::level::info,
+					               fmt::runtime(R"(Backend "{0}" failure "{1}" can't delete value)"),
+					               request_type, key);
+					  });
+					  request.reply(status_codes::Conflict);
+					  return;
+				  }
 			  }
 			});
 	}

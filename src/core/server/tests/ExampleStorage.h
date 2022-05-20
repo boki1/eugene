@@ -28,7 +28,7 @@ public:
 	void set(std::string key, std::string value) override {
 		if (auto res = m_storage.insert(key, value);
 			std::holds_alternative<typename BtreeType::InsertedNothing>(res)) {
-			throw std::invalid_argument("User already exists");
+			throw std::invalid_argument("Information already exists");
 		}
 	}
 
