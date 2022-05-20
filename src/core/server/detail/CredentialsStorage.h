@@ -3,8 +3,8 @@
 #include <string_view>
 #include <variant>
 
-#include <detail/Credentials.h>
-#include <../storage/btree/Btree.h>
+#include <core/server/detail/Credentials.h>
+#include <core/storage/btree/Btree.h>
 
 class CredentialsStorage {
 public:

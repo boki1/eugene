@@ -10,24 +10,32 @@ if (UNIX)
 endif (UNIX)
 option(DBMS "Dbms" OFF)
 
-set (LibEugeneServer_Example
+set(LibEugeneServer_Example
         tests/UserRepository.h
-        tests/ExampleUsage.cpp)
+        tests/ExampleStorage.h
+        ../../examples/ExampleUsageServer.cpp)
 
 set(LibEugeneServer_External
         ../Logger.h
         ../Config.h
+        ../Util.h
+        ../storage/Pager.h
+        ../storage/IndirectionVector.h
+        ../storage/compression/Compressor.h
+        ../storage/compression/Decompressor.h
         ../storage/btree/Btree.h
-        ../storage/btree/Btree.cpp)
+        ../storage/btree/Node.h
+        ../storage/btree/BtreePrinter.h)
 
 set(LibEugeneServer_SRC
-        handler/Handler.cpp handler/Handler.h
+        handler/Handler.cpp
+        handler/Handler.h
         detail/Credentials.h
         detail/CredentialsStorage.h
         detail/CredentialsDecoder.h
         detail/Storage.h
         ${LibEugeneServer_Example}
-        ${LibEugeneServer_External} tests/ExampleStorage.h)
+        ${LibEugeneServer_External})
 
 add_library(LibEugeneServer "${LibEugeneServer_SRC}")
 set_target_properties(LibEugeneServer PROPERTIES LINKER_LANGUAGE CXX)
@@ -44,7 +52,7 @@ target_link_libraries(LibEugeneServer
         CONAN_PKG::cppitertools)
 
 add_executable(restserver
-        tests/ExampleUsage.cpp
+        ../../examples/ExampleUsageServer.cpp
         handler/Handler.cpp)
 
-target_link_libraries(restserver PRIVATE LibEugeneServer)
+target_link_libraries(restserver PRIVATE LibEugeneCore_SRC)

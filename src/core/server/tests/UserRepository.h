@@ -1,16 +1,17 @@
 #pragma once
 
+#include <core/Config.h>
+#include <core/server/detail/CredentialsStorage.h>
 #include <string_view>
 #include <variant>
 
-#include <detail/CredentialsStorage.h>
-
 class UserRepository : CredentialsStorage {
-	struct AuthenticationAgentConfig : DefaultConfig {
-		using Key = char[256];
-		using Val = char[256];
-		using RealVal = char[256];
-		using Ref = char[256];
+	struct AuthenticationAgentConfig : internal::Config {
+		using Key = std::string;
+		using Val = std::string;
+		using RealVal = std::string;
+		using Ref = std::string;
+		static inline constexpr bool DYN_ENTRIES = true;
 	};
 
 	~UserRepository() {
@@ -18,22 +19,22 @@ class UserRepository : CredentialsStorage {
 	};
 
 protected:
-	Btree <AuthenticationAgentConfig> m_storage;
+	Btree<AuthenticationAgentConfig> m_storage;
 	using BtreeType = Btree<AuthenticationAgentConfig>;
 
 public:
 	UserRepository() = default;
 
-	bool authenticate(std::string username, std::string password) override {
-		if (auto pass = m_storage.get(username.begin()); pass) {
-			return *pass == password;
+	bool authenticate(Credentials creds) override {
+		if (auto pass = m_storage.get(creds.username.begin()); pass) {
+			return *pass == creds.password;
 		}
 		return false;
 	}
 
-	void load(std::string_view username, std::string_view password) override {
-		if (auto res = m_storage.insert(username.begin(), password.begin());
-			std::holds_alternative<BtreeType::InsertionReturnMark::InsertedNothing>(res)) {
+	void load(Credentials creds) override {
+		if (auto res = m_storage.insert(creds.username.begin(), creds.password.begin());
+			std::holds_alternative<typename BtreeType::InsertionReturnMark::InsertedNothing>(res)) {
 			throw std::invalid_argument("User already exists");
 		}
 	}

@@ -1,8 +1,6 @@
 cmake_minimum_required(VERSION 3.19)
 project(eugene)
 
-add_subdirectory(src/core/server)
-
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/build")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -25,13 +23,26 @@ add_compile_definitions(NDEBUG="true")
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup(TARGETS)
 
-set(LibEugeneBtree_SRC storage/btree/Btree.h storage/btree/Btree.cpp
-                       storage/btree/Node.h storage/btree/BtreePrinter.h)
+set(LibEugeneBtree_SRC storage/btree/Btree.h
+        storage/btree/Btree.cpp
+        storage/btree/Node.h
+        storage/btree/BtreePrinter.h)
 
-set(LibEugenePager_SRC storage/Pager.h storage/Pager.cpp)
+set(LibEugenePager_SRC storage/Pager.h
+        storage/Pager.cpp)
 
 set(LibEugeneCompression_SRC storage/compression/Compressor.h
-                             storage/compression/Decompressor.h)
+        storage/compression/Decompressor.h)
+
+set(LibEugeneServer_Example
+    server/handler/Handler.cpp
+    server/handler/Handler.h
+    server/detail/Credentials.h
+    server/detail/CredentialsStorage.h
+    server/detail/CredentialsDecoder.h
+    server/detail/Storage.h
+    server/tests/UserRepository.h
+    server/tests/ExampleStorage.h)
 
 set(LibEugeneCore_SRC
     Config.h
@@ -40,7 +51,9 @@ set(LibEugeneCore_SRC
     Logger.h
     ${LibEugeneBtree_SRC}
     ${LibEugenePager_SRC}
-    ${LibEugeneCompression_SRC})
+    ${LibEugeneCompression_SRC}
+    ${LibEugeneServer_Example})
+
 list(TRANSFORM LibEugeneCore_SRC PREPEND "src/core/")
 
 add_library(LibEugeneCore "${LibEugeneCore_SRC}")
@@ -133,6 +146,7 @@ if(DEFINED EU_BUILD_EXAMPLES)
       message(STATUS "\tExample '${example}' added")
     endmacro()
 
-	eugene_example(person_kv)
-  endif()
-endif()
+        eugene_example(person_kv)
+        eugene_example(ExampleUsageServer)
+    endif ()
+endif ()

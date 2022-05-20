@@ -1,4 +1,4 @@
-#include <handler/Handler.h>
+#include <core/server/handler/Handler.h>
 
 template<typename Key, typename Value>
 Handler<Key, Value>::Handler(const utility::string_t &url,
@@ -34,7 +34,7 @@ template<typename Key, typename Value>
 		task.get();
 	} catch (std::exception &e) {
 		Logger::the().log(spdlog::level::err,
-		                  R"(Backend failure of with error "{0}")", e.what());
+		                  fmt::runtime(R"(Backend failure of with error "{0}")"), e.what());
 	}
 }
 
@@ -56,7 +56,7 @@ void Handler<Key, Value>::handle_request(std::string_view endpoint,
 			        } catch (http_exception const &e) {
 				        ucout << e.what() << std::endl;
 				        Logger::the().log(spdlog::level::info,
-				                          R"(Backend failure of "{0}" with exception "{1}")",
+				                          fmt::runtime(R"(Backend failure of "{0}" with exception "{1}")"),
 				                          request.relative_uri().path(), e.what());
 				        request.reply(status_codes::InternalError,
 				                      json::value::string(e.what()));
@@ -72,14 +72,14 @@ void Handler<Key, Value>::handle_request(std::string_view endpoint,
 		m_credentials_decoder->decode(request.headers());
 		if (!m_credentials_decoder->is_valid(request.headers())) {
 			Logger::the().log(spdlog::level::err,
-			                  R"(Backend failure of "{0}", user unauthorized)",
+			                  fmt::runtime(R"(Backend failure of "{0}", user unauthorized)"),
 			                  request.relative_uri().path());
 			request.reply(status_codes::Unauthorized);
 			return;
 		}
 	} catch (std::exception &e) {
 		Logger::the().log(spdlog::level::err,
-		                  R"(Backend failure of "{0}", user unauthorized)",
+		                  fmt::runtime(R"(Backend failure of "{0}", user unauthorized)"),
 		                  request.relative_uri().path());
 		request.reply(status_codes::Unauthorized);
 		return;

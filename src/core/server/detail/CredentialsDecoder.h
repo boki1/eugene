@@ -11,7 +11,7 @@
 #include <cpprest/producerconsumerstream.h>
 #include <cpprest/uri.h>
 
-#include <detail/Credentials.h>
+#include <core/server/detail/Credentials.h>
 
 using namespace web;
 using namespace http;
@@ -21,13 +21,12 @@ using namespace http::experimental::listener;
 class CredentialsDecoder {
 public:
 	CredentialsDecoder() = default;
-	CredentialsDecoder(const http_headers &credentials) : m_headers(credentials) {}
 
 	static Credentials decode(const http_headers &headers) {
 		auto auth_header = headers.find(U("authorization"));
 		std::vector<unsigned char> creds = utility::conversions
-		        ::from_base64(auth_header->second
-		                              .substr(6, auth_header->second.size()));
+		::from_base64(auth_header->second
+			              .substr(6, auth_header->second.size()));
 
 		//	The creds are in the form of username:password
 		//	stored in vector like "u" "s" "e" "r" "n" "a" "m" "e" ":" "p" "a" "s" "s" "w" "o" "r" "d"
@@ -52,7 +51,4 @@ public:
 		return true;
 	}
 	~CredentialsDecoder() = default;
-
-private:
-	const http_headers &m_headers;
 };
