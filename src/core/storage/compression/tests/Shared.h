@@ -16,7 +16,7 @@ bool clean(const std::map<std::string, std::string> &files) {
 }
 
 bool create_testing_directory(const std::string_view &new_structure, const int text_size,
-							  const std::string_view &text) {
+                              const std::string_view &text) {
 	for (int i = 0; i < 3; ++i) {
 		std::string filesystem_structure = new_structure.begin();
 		if (i > 0)
@@ -74,4 +74,13 @@ void check_initial_compressed_size(const std::string &initial_file_folder, const
 
 	std::cout << "#############################################################"
 	          << std::endl << std::endl;
+}
+
+static std::string generate_random_string_sequence(unsigned int range) {
+	std::string sequence;
+	for (unsigned int j = 0; j < range; ++j) {
+		char c = static_cast<char>(random() % 30);
+		sequence += c;
+	}
+	return sequence;
 }

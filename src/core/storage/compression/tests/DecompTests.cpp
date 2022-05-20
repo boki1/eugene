@@ -6,7 +6,7 @@ TEST_CASE("CompressorDecompressor partial_decompress", "[partial_decompress]") {
 	params["changed_to_initial_dir"] = "InitialDir";
 	params["compressed_name"] = "Test";
 
-	const std::string_view partial_decompress_text = "this is some text in the new file\n";
+	const std::string partial_decompress_text = generate_random_string_sequence(34);
 	const int partial_decompress_text_size = 100;
 
 	std::string_view partial_decompress_name = "1";

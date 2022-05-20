@@ -90,9 +90,11 @@ public:
 			m_all_size += get_file_folder_size(file);
 		}
 
-		Logger::the().log(spdlog::level::info,
-		                  R"(Compressor: started for "{0}" file/files/folder/folders with size: "{1}" bytes)",
-		                  m_files.begin()->c_str(), m_all_size);
+		Logger::the([this](spdlog::logger logger){
+		  logger.log(spdlog::level::info,
+		       R"(Compressor: started for "{0}" file/files/folder/folders with size: "{1}" bytes)",
+		       m_files.begin()->c_str(), m_all_size);
+		});
 
 		m_total_bits = FileCountBitsInsideCurrFolder + FileBits * m_files.size();
 		for (const auto &item : m_files) {
@@ -113,9 +115,11 @@ public:
 		m_trie.resize(m_symbols * 2 - 1);
 		initialize_trie();
 
-		Logger::the().log(spdlog::level::info,
-		                  R"(Compressor: initialized the trie with "{0}" symbols and "{1}" nodes)",
-		                  m_symbols, m_trie.size());
+		Logger::the([symbols = m_symbols, size = m_trie.size()](spdlog::logger logger){
+			logger.log(spdlog::level::info,
+			            R"(Compressor: initialized the trie with "{0}" symbols and "{1}" nodes)",
+			            symbols, size);
+		});
 
 		m_compressed_fp = fopen(m_compressed_name.c_str(), "wb");
 		fwrite(&m_symbols, 1, 1, m_compressed_fp);
@@ -126,11 +130,15 @@ public:
 		all_file_write();
 		fclose(m_compressed_fp);
 
-		Logger::the().log(spdlog::level::info,
-		                  R"(Compressor: created compressed file: "{0}")",
-		                  m_compressed_name);
-		Logger::the().log(spdlog::level::info,
-		                  "Compressor: compression is completed\n");
+		Logger::the([comp_name = m_compressed_name](spdlog::logger logger){
+		  logger.log(spdlog::level::info,
+		       R"(Compressor: created compressed file: "{0}")",
+		       comp_name);
+		});
+		Logger::the([](spdlog::logger logger){
+		  logger.log(spdlog::level::info,
+		       "Compressor: compression is completed\n");
+		});
 	}
 
 	/// \brief This structure will be used to create the trie
@@ -297,20 +305,28 @@ public:
 		if (m_total_bits % CHAR_BIT)
 			m_total_bits = m_total_bits / CHAR_BIT + 1;
 
-		Logger::the().log(spdlog::level::info,
-		                  R"(Compressor: The size of the sum of ORIGINAL m_files is: "{}" bytes)",
-		                  m_all_size);
-		Logger::the().log(spdlog::level::info,
-		                  R"(Compressor: The size of the COMPRESSED file will be: "{}" bytes)",
-		                  m_total_bits);
-		Logger::the().
-			log(spdlog::level::info, "Compressor: Compressed file's size will be [%{}] of the original file",
-			    100 * ((float) m_total_bits / (float) m_all_size));
+		Logger::the([size_all = m_all_size](spdlog::logger logger){
+		  logger.log(spdlog::level::info,
+		       R"(Compressor: The size of the sum of ORIGINAL m_files is: "{}" bytes)",
+		       size_all);
+		});
+		Logger::the([total_bits = m_total_bits](spdlog::logger logger){
+		  logger.log(spdlog::level::info,
+		       R"(Compressor: The size of the COMPRESSED file will be: "{}" bytes)",
+		       total_bits);
+		});
+		Logger::the([size = 100 * ((float) m_total_bits / (float) m_all_size)](spdlog::logger logger){
+			logger.
+				log(spdlog::level::info, "Compressor: Compressed file's size will be [%{}] of the original file",
+				    size);
+		});
 
 		if (m_total_bits / CHAR_BIT > m_all_size)
-			Logger::the().
-				log(spdlog::level::warn,
-				    "Compressor: COMPRESSED FILES SIZE WILL BE HIGHER THAN THE SUM OF ORIGINALS");
+			Logger::the([](spdlog::logger logger){
+				logger.
+					log(spdlog::level::warn,
+					    "Compressor: COMPRESSED FILES SIZE WILL BE HIGHER THAN THE SUM OF ORIGINALS");
+			});
 	}
 
 	/// \brief Writes all information in compressed order.
@@ -441,8 +457,10 @@ public:
 				break;
 
 			default:
-				Logger::the().log(spdlog::level::err,
-				                  "Compressor: Function write_bytes incorrect configuration!");
+				Logger::the([](spdlog::logger logger){
+					logger.log(spdlog::level::err,
+					           "Compressor: Function write_bytes incorrect configuration!");
+				});
 			}
 		}
 	}
@@ -511,7 +529,9 @@ public:
 		std::string new_compressed_name;
 
 		if (args.empty())
-			Logger::the().log(spdlog::level::err, "Compressor: No files provided!");
+			Logger::the([](spdlog::logger logger){
+			  logger.log(spdlog::level::err, "Compressor: No files provided!");
+			});
 		if (!compressed_name.empty())
 			new_compressed_name = compressed_name;
 		else if (args.size() == 1)

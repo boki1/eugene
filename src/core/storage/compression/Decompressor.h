@@ -52,18 +52,24 @@ public:
 			trie_initialization(m_trie_root);
 
 		if (for_decompress.empty()) {
-			Logger::the().log(spdlog::level::info, "Decompressor: Decompressing all files...");
-			translation("", false);
+			Logger::the([this](spdlog::logger logger){
+			  logger.log(spdlog::level::info, "Decompressor: Decompressing all files...");
+			  translation("", false);
+			});
 		} else {
-			Logger::the().log(spdlog::level::info,
-			                  R"(Decompressor: Decompressing files in file/folder: "{}")",
-			                  for_decompress);
+			Logger::the([for_decompress](spdlog::logger logger){
+			  logger.log(spdlog::level::info,
+			       R"(Decompressor: Decompressing files in file/folder: "{}")",
+			       for_decompress);
+			});
 			translation_search("", for_decompress, false);
 		}
 
 		fclose(m_compressed);
 		deallocate_trie(m_trie_root);
-		Logger::the().log(spdlog::level::info, "Decompressor: Decompression is completed\n");
+		Logger::the([](spdlog::logger logger){
+			logger.log(spdlog::level::info, "Decompressor: Decompression is completed\n");
+		});
 	}
 
 	/// \brief This structure will be used to represent the trie
@@ -247,8 +253,10 @@ public:
 
 			if (file) {
 				if (size == 0) {
-					Logger::the().log(spdlog::level::err, "Size cannot be "
-					                                      "fetched from compressed file");
+					Logger::the([](spdlog::logger logger){
+					  logger.log(spdlog::level::err, "Size cannot be "
+					                           "fetched from compressed file");
+					});
 					return;
 				}
 				translate_file(new_path, size);
@@ -283,8 +291,10 @@ public:
 			if (file) {
 				if (curr_file == for_decompress) {
 					if (size == 0) {
-						Logger::the().log(spdlog::level::err, "Size cannot be "
-						                                      "fetched from compressed file");
+						Logger::the([](spdlog::logger logger){
+						  logger.log(spdlog::level::err, "Size cannot be "
+						                           "fetched from compressed file");
+						});
 						return;
 					}
 					translate_file(new_path, size);
@@ -303,7 +313,9 @@ public:
 				translation_search(new_path, for_decompress, true);
 			}
 		}
-		Logger::the().log(spdlog::level::debug, R"(Decompressor: File "{}" skipped)", path);
+		Logger::the([path](spdlog::logger logger){
+		  logger.log(spdlog::level::debug, R"(Decompressor: File "{}" skipped)", path);
+		});
 	}
 
 private:
@@ -333,7 +345,9 @@ public:
 		FILE *path_to_compressed;
 		path_to_compressed = fopen(path.begin(), "rb");
 		if (!path_to_compressed) {
-			Logger::the().log(spdlog::level::err, R"(Decompressor: File not found: "{}")", path);
+			Logger::the([path](spdlog::logger logger){
+				logger.log(spdlog::level::err, R"(Decompressor: File not found: "{}")", path);
+			});
 			return;
 		}
 		decompressor_impl = std::make_unique<pimpl>(path_to_compressed);

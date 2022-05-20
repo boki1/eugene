@@ -37,7 +37,7 @@ TEST_CASE("CompDecomp comp_decomp", "[compressor_decompressor]") {
 	params["changed_to_initial_dir"] = "InitialDir";
 	params["compressed_name"] = "Test";
 
-	const std::string_view text_in_file = "this is some text in the new file\n";
+	const std::string text_in_file = generate_random_string_sequence(34);
 
 	const int number_of_test_run = 5;
 

@@ -9,10 +9,12 @@ class Logger {
 public:
 	/// @brief Singleton instance
 	/// @return Logger instance
-	static spdlog::logger &the() {
+	static void the(const std::function<void(spdlog::logger)>& action) {
 		static Logger instance;
-		return *instance._logger;
+		action(*instance._logger);
+		instance._logger->flush();
 	}
+
 private:
 	long max_size = 1048576 * 5; //!< 5MB max size of the log file
 	long max_files = 1; //!< 2 files to keep in rotation
