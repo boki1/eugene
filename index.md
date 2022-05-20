@@ -1,37 +1,39 @@
-## Welcome to GitHub Pages
+<p align="center">
+  <img src="https://user-images.githubusercontent.com/36764968/169560274-bafcc010-04af-4cc4-af92-c8a103d9062b.png" />
+</p>
 
-You can use the [editor on GitHub](https://github.com/boki1/eugene/edit/gh-pages/index.md) to maintain and preview the content for your website in Markdown files.
+<h2>
+System for Data Storing and Retrieving Based on Large Graph Processing
+</h2>
 
-Whenever you commit to this repository, GitHub Pages will run [Jekyll](https://jekyllrb.com/) to rebuild the pages in your site, from the content in your Markdown files.
+<h4>Goals</h4>
 
-### Markdown
+<p>
+  This system is developed as a thesis project in TUES.
+</p>
 
-Markdown is a lightweight and easy-to-use syntax for styling your writing. It includes conventions for
+### Features
 
-```markdown
-Syntax highlighted code block
+- Client/server communication
+- Storage system based on B-trees
+- Support for bulk operations, concurrent access and dynamic entries on the data
+- Compression capabilities
 
-# Header 1
-## Header 2
-### Header 3
+## Building
 
-- Bulleted
-- List
+- Clone the repo
+`gh repo clone boki1/eugene.git`
 
-1. Numbered
-2. List
+- Build with tests
+`make clean-test`
 
-**Bold** and _Italic_ and `Code` text
+- Build examples
+`make clean-example`
 
-[Link](url) and ![Image](src)
-```
+## Contributing
+The current maintainers of the project are [Kristiyan Stoimenov](https://www.linkedin.com/in/kristiyan-stoimenov/) and [Stoyan Tinchev](https://www.linkedin.com/in/stoyan-tinchev-524949208/).
 
-For more details see [Basic writing and formatting syntax](https://docs.github.com/en/github/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax).
-
-### Jekyll Themes
-
-Your Pages site will use the layout and styles from the Jekyll theme you have selected in your [repository settings](https://github.com/boki1/eugene/settings/pages). The name of this theme is saved in the Jekyll `_config.yml` configuration file.
-
-### Support or Contact
-
-Having trouble with Pages? Check out our [documentation](https://docs.github.com/categories/github-pages-basics/) or [contact support](https://support.github.com/contact) and we’ll help you sort it out.
+## License
+MIT License
+  
+</center>
