@@ -1,8 +1,11 @@
+[![Actions Status](https://github.com/boki1/eugene/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/boki1/eugene/actions/workflows/build-and-test.yml)
+[![MIT License](https://img.shields.io/apm/l/atomic-design-ui.svg?)](https://github.com/tterb/atomic-design-ui/blob/master/LICENSEs)
+
 <p align="center">
   <img src="https://user-images.githubusercontent.com/36764968/169560274-bafcc010-04af-4cc4-af92-c8a103d9062b.png" />
 </p>
 
-<a href="boki1.github.io/eugene" />
+<a href="boki1.github.io/eugene">Home page</a>
 
 <h2>
 System for Data Storing and Retrieving Based on Large Graph Processing
