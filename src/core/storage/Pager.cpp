@@ -1,8 +1,9 @@
+#include <algorithm>
 #include <array>
+#include <filesystem>
 #include <fstream>
 #include <vector>
-#include <algorithm>
-#include <filesystem>
+#include <thread>
 
 #include <catch2/catch.hpp>
 
@@ -15,6 +16,7 @@ TEST_CASE("Prepare storage files") {
 	std::ofstream{"/tmp/eu-pager", std::ios::trunc};
 	std::ofstream{"/tmp/eu-persistent-pager-stackallocater", std::ios::trunc};
 	std::ofstream{"/tmp/eu-pager-persistent-pager-freelistalloc", std::ios::trunc};
+	std::ofstream{"/tmp/eu-pager-con", std::ios::trunc};
 }
 
 TEST_CASE("Page", "[pager]") {
@@ -190,4 +192,31 @@ TEST_CASE("Pager inner operations") {
 		auto actual2222 = pt.get_inner(pos5000, 2222);
 		REQUIRE(std::equal(expected2222.cbegin(), expected2222.cend(), actual2222.cbegin()));
 	}
+}
+
+TEST_CASE("Pager concurrency") {
+	std::array<std::thread, 10> threads;
+	using PagerType = Pager<FreeListAllocator, LRUCache>;
+
+	PagerType pr("/tmp/eu-pager-con");
+	auto oper = [&] {
+		[[maybe_unused]] auto pos10 = pr.alloc_inner(10);
+		std::vector<uint8_t> expected10(10, 10);
+		pr.place_inner(pos10, expected10);
+		auto actual10 = pr.get_inner(pos10, 10);
+		REQUIRE(std::equal(expected10.cbegin(), expected10.cend(), actual10.cbegin()));
+
+		auto pos20 = pr.alloc_inner(20);
+		std::vector<uint8_t> expected20(20, 20);
+		pr.place_inner(pos20, expected20);
+		auto actual20 = pr.get_inner(pos20, 20);
+		REQUIRE(std::equal(expected20.cbegin(), expected20.cend(), actual20.cbegin()));
+		fmt::print("thread end\n");
+	};
+
+	for (auto &t : threads)
+		t = std::thread(oper);
+
+	for (auto &t : threads)
+		t.join();
 }

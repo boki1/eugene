@@ -9,11 +9,13 @@
 #include <filesystem>
 #include <fstream>
 #include <list>
+#include <mutex>
 #include <optional>
 #include <string_view>
 #include <unordered_map>
 namespace fs = std::filesystem;
 
+#include <cppcoro/async_mutex.hpp>
 #include <cppcoro/generator.hpp>
 
 #include <nop/base/vector.h>
@@ -113,6 +115,7 @@ struct BadWrite : std::runtime_error {
 class StackSpaceAllocator {
 	Position m_cursor = 0;
 	const std::size_t m_limit_num_pages;
+	mutable std::mutex m_mutex;
 	NOP_STRUCTURE(StackSpaceAllocator, m_cursor);
 
 public:
@@ -121,6 +124,7 @@ public:
 	StackSpaceAllocator &operator=(const StackSpaceAllocator &);
 
 	[[nodiscard]] Position alloc() {
+		std::scoped_lock<std::mutex> _guard{m_mutex};
 		auto tmp = m_cursor;
 		m_cursor += PAGE_SIZE;
 		fmt::print("[pager] stack alloc page @{}\n", tmp);
@@ -135,16 +139,25 @@ public:
 	/// If the page is below the cursor, it is considered as allocated since there is no "official" way of freeing
 	/// pages using this allocator.
 	/// Note: The implementation does track whether the pos is actually identifing a valid page.
-	[[nodiscard]] constexpr bool has_allocated(const Position pos) const noexcept {
+	[[nodiscard]] bool has_allocated(const Position pos) const noexcept {
+		std::scoped_lock<std::mutex> _guard{m_mutex};
 		return pos < m_cursor;
 	}
 
 	[[nodiscard]] cppcoro::generator<Position> next_allocated_page() const noexcept {
-		for (auto i = 0ul; i < m_cursor; i += PAGE_SIZE)
+		auto cursor = [&] {
+			std::scoped_lock<std::mutex> _guard{m_mutex};
+			return m_cursor;
+		}();
+
+		for (auto i = 0ul; i < cursor; i += PAGE_SIZE)
 			co_yield i;
 	}
 
-	[[nodiscard]] constexpr Position cursor() const noexcept { return m_cursor; }
+	[[nodiscard]] Position cursor() const noexcept {
+		std::scoped_lock<std::mutex> _guard{m_mutex};
+		return m_cursor;
+	}
 };
 
 /// Free list allocator
@@ -158,6 +171,8 @@ class FreeListAllocator {
 	std::vector<Position> m_freelist;
 	std::size_t m_next_page{0};
 	std::size_t m_limit_num_pages;
+	mutable std::mutex m_mutex;
+
 	NOP_STRUCTURE(FreeListAllocator, m_freelist, m_next_page, m_limit_num_pages);
 
 public:
@@ -170,6 +185,7 @@ public:
 	/// Tries to release the first accessible page, using the freelist.
 	/// If it is empty increments cursor allocator until the end is reached.
 	[[nodiscard]] Position alloc() {
+		std::scoped_lock<std::mutex> _guard{m_mutex};
 		if (!m_freelist.empty()) {
 			const Position pos = m_freelist.back();
 			m_freelist.pop_back();
@@ -185,6 +201,7 @@ public:
 	}
 
 	void free(const Position pos) {
+		std::scoped_lock<std::mutex> _guard{m_mutex};
 		if (pos % PAGE_SIZE != 0)
 			throw BadPosition(pos);
 
@@ -202,7 +219,8 @@ public:
 		fmt::print("[pager] freelist dealloc page @{}\n", pos);
 	}
 
-	[[nodiscard]] constexpr bool has_allocated(const Position pos) const {
+private:
+	[[nodiscard]] bool __has_allocated(const Position pos) const {
 		if (collection_contains(m_freelist, pos))
 			return false;
 		if (pos >= m_next_page * PAGE_SIZE)
@@ -210,17 +228,33 @@ public:
 		return true;
 	}
 
+public:
+	[[nodiscard]] bool has_allocated(const Position pos) const {
+		std::scoped_lock<std::mutex> _guard{m_mutex};
+		return __has_allocated(pos);
+	}
+
 	[[nodiscard]] cppcoro::generator<Position> next_allocated_page() const noexcept {
+		std::scoped_lock<std::mutex> _guard{m_mutex};
 		for (Position i = 0; i < m_next_page * PAGE_SIZE; i += PAGE_SIZE) {
-			if (has_allocated(i)) {
+			if (__has_allocated(i)) {
 				co_yield i;
 			}
 		}
 	}
 
-	[[nodiscard]] const auto &freelist() const noexcept { return m_freelist; }
-	[[nodiscard]] const auto next() const noexcept { return m_next_page; }
-	[[nodiscard]] const auto limit() const noexcept { return m_limit_num_pages; }
+	[[nodiscard]] const auto &freelist() const noexcept {
+		std::scoped_lock<std::mutex> _guard{m_mutex};
+		return m_freelist;
+	}
+	[[nodiscard]] const auto next() const noexcept {
+		std::scoped_lock<std::mutex> _guard{m_mutex};
+		return m_next_page;
+	}
+	[[nodiscard]] const auto limit() const noexcept {
+		std::scoped_lock<std::mutex> _guard{m_mutex};
+		return m_limit_num_pages;
+	}
 };
 
 using CacheEvictionResult = std::optional<PagePos>;
@@ -242,6 +276,7 @@ public:
 	    : m_limit{limit > 0 ? limit : std::numeric_limits<decltype(m_limit)>::max()} {}
 
 	[[nodiscard]] optional_ref<Page> get(Position pos) {
+		std::scoped_lock<std::mutex> _guard{m_mutex};
 		if (!m_index.contains(pos))
 			return {};
 
@@ -251,10 +286,9 @@ public:
 	}
 
 	[[nodiscard]] constexpr CacheEvictionResult place(Position pos, Page &&page) {
-		// assert(m_index.size() <= m_limit);
-
 		CacheEvictionResult evict_res;
 
+		std::scoped_lock<std::mutex> _guard{m_mutex};
 		const auto it = m_index.find(pos);
 		if (it == m_index.cend()) {
 			if (m_tracker.size() >= m_limit)
@@ -274,6 +308,7 @@ public:
 	}
 
 	[[nodiscard]] cppcoro::generator<CacheEvictionResult> flush() {
+		std::scoped_lock<std::mutex> _guard{m_mutex};
 		while (!m_tracker.empty())
 			co_yield evict();
 	}
@@ -282,12 +317,14 @@ private:
 	const std::size_t m_limit;
 	std::unordered_map<Position, CacheEntry> m_index;
 	std::list<Position> m_tracker;
+	mutable std::mutex m_mutex;
 };
 
 /// Evict the least-recently used page from cache
 /// If it has been modified, store it first.
 struct LRUCache {
 	[[nodiscard]] static CacheEvictionResult evict(PageCache<LRUCache> &cache) {
+		// NB: Always assume that the before calling evict() the cache's mutex has been acquired.
 		CacheEvictionResult res;
 		const Position pos = cache.m_tracker.front();
 		const auto &cached = cache.m_index.at(pos);
@@ -316,8 +353,11 @@ class GenericPager {
 
 public:
 	template<typename... AllocatorArgs>
-	constexpr explicit GenericPager(std::size_t limit_num_pages = PAGECACHE_SIZE / PAGE_SIZE, AllocatorArgs &&...allocator_args) : m_allocator{limit_num_pages, std::forward<AllocatorArgs>(allocator_args)...},
-	                                                                                                                               m_cache{limit_num_pages} {}
+	constexpr explicit GenericPager(std::size_t limit_num_pages = PAGECACHE_SIZE / PAGE_SIZE,
+	                                AllocatorArgs &&...allocator_args)
+	    : m_allocator{limit_num_pages, std::forward<AllocatorArgs>(allocator_args)...},
+	      m_cache{limit_num_pages} {}
+
 	GenericPager(const GenericPager &) = default;
 
 	GenericPager &operator=(const GenericPager &) = default;
@@ -346,13 +386,20 @@ public:
 	/// Properties
 	///
 
-	[[nodiscard]] virtual constexpr const AllocatorPolicy &allocator() const noexcept { return m_allocator; }
+	[[nodiscard]] virtual const AllocatorPolicy &allocator() const noexcept {
+		std::scoped_lock<std::mutex> _guard{m_mutex};
+		return m_allocator;
+	}
 
-	[[nodiscard]] virtual constexpr const PageCache<CacheEvictionPolicy> &cache() const noexcept { return m_cache; }
+	[[nodiscard]] virtual const PageCache<CacheEvictionPolicy> &cache() const noexcept {
+		std::scoped_lock<std::mutex> _guard{m_mutex};
+		return m_cache;
+	}
 
 protected:
 	AllocatorPolicy m_allocator;
 	PageCache<CacheEvictionPolicy> m_cache;
+	mutable std::mutex m_mutex;
 };
 
 ///
@@ -394,12 +441,19 @@ class Pager : public GenericPager<AllocatorPolicy, CacheEvictionPolicy>,
 	[[nodiscard]] static constexpr bool at_page_boundary(const Position pos) { return pos % PAGE_SIZE == 0; }
 
 public:
-	/// The Pager class conforms to the Rule of Three
+	///
+	/// Special member functions
+	/// Rule of III
+	///
 
 	template<typename... Args>
-	explicit Pager(std::string identifier, const ActionOnConstruction action = ActionOnConstruction::DoNotLoad, std::size_t limit_page_cache_size = PAGECACHE_SIZE / PAGE_SIZE, Args &&...args)
-	    : Super{limit_page_cache_size, std::forward<Args>(args)...}, m_identifier{identifier} {
-			fmt::print("[pager] instantiating '{}'\n", m_identifier);
+	explicit Pager(std::string identifier,
+	               const ActionOnConstruction action = ActionOnConstruction::DoNotLoad,
+	               std::size_t limit_page_cache_size = PAGECACHE_SIZE / PAGE_SIZE,
+	               Args &&...args)
+	    : Super{limit_page_cache_size, std::forward<Args>(args)...},
+	      m_identifier{identifier} {
+		fmt::print("[pager] instantiating '{}'\n", m_identifier);
 		if (action == ActionOnConstruction::Load)
 			load();
 		else if (!fs::exists(m_identifier))
@@ -415,10 +469,12 @@ public:
 	}
 
 	Pager(const Pager &p) : Super(p) {}
+
 	Pager &operator=(const Pager &) = default;
 
 	auto operator<=>(const Pager &) const noexcept = default;
 
+public:
 	///
 	/// Allocation API
 	///
@@ -437,10 +493,7 @@ public:
 		return this->m_allocator.free(pos);
 	}
 
-	///
-	/// Page operations
-	///
-
+private:
 	/// Read a page off a given position
 	/// Position is expected to be 1) associated with a page and, 2) the page which is allocated.
 	/// If that is not adhered to, BadRead is thrown.
@@ -474,9 +527,7 @@ public:
 		return write(page, alloc());
 	}
 
-	/// Acquire the page, placed at a given position.
-	/// May fail if either `read` or `write` throw an error.
-	[[nodiscard]] Page get(Position pos) override {
+	Page __get(Position pos) {
 		if (auto p = this->m_cache.get(pos); p)
 			return p->get();
 		Page p = read(pos);
@@ -485,11 +536,28 @@ public:
 		return p;
 	}
 
+	void __place(Position pos, Page &&page) {
+		if (auto evict_res = this->m_cache.place(pos, Page(page)); evict_res)
+			write(evict_res->page, evict_res->pos);
+	}
+
+public:
+	///
+	/// Operations on whole pages
+	///
+
+	/// Acquire the page, placed at a given position.
+	/// May fail if either `read` or `write` throw an error.
+	[[nodiscard]] Page get(const Position pos) override {
+		std::scoped_lock<std::mutex> _guard{this->m_mutex};
+		return __get(pos);
+	}
+
 	/// Placed a page at a given position.
 	/// May fail if `write` throws an error.
 	void place(Position pos, Page &&page) override {
-		if (auto evict_res = this->m_cache.place(pos, Page(page)); evict_res)
-			write(evict_res->page, evict_res->pos);
+		std::scoped_lock<std::mutex> _guard{this->m_mutex};
+		return __place(pos, std::move(page));
 	}
 
 	///
@@ -497,6 +565,7 @@ public:
 	///
 
 	void save() override {
+		std::scoped_lock<std::mutex> _guard{this->m_mutex};
 		// Store allocator state
 		const std::string pager_allocator_name = fmt::format("{}-alloc", m_identifier);
 		fmt::print("[pager] saving pager allocator '{}'\n", pager_allocator_name);
@@ -511,6 +580,7 @@ public:
 	}
 
 	void load() override {
+		std::scoped_lock<std::mutex> _guard{this->m_mutex};
 		// Load allocator state
 		const std::string pager_allocator_name = fmt::format("{}-alloc", m_identifier);
 		fmt::print("[pager] loading pager allocator '{}'\n", pager_allocator_name);
@@ -518,10 +588,6 @@ public:
 		if (!deserializer.Read(&this->m_allocator))
 			throw BadRead("deserializer failed reading pager allocator");
 	}
-
-	///
-	/// Inner operations
-	///
 
 private:
 	[[nodiscard]] constexpr Position chunk_to_position(Position page_pos, unsigned chunk_num) {
@@ -555,31 +621,17 @@ private:
 	}
 
 public:
-	std::size_t max_bytes_inner_used() noexcept override {
-		fmt::print("TOTAL_CHUNKS = {}\n", TOTAL_CHUNKS);
-		fmt::print("TOTAL_CHUNK_MAP = {}\n", TOTAL_CHUNK_MAP);
-		fmt::print("PAGE_HEADER_SIZE = {}\n", PAGE_HEADER_SIZE);
-		fmt::print("CHUNKS = {}\n", CHUNKS);
-		fmt::print("SPACE = {}\n", CHUNKS * PAGE_ALLOC_SCALE);
-		fmt::print("UNUSED_CHUNKS = {}\n", TOTAL_CHUNKS - CHUNKS);
-		fmt::print("UNUSED_SPACE = {}\n", (TOTAL_CHUNKS - CHUNKS) * PAGE_ALLOC_SCALE);
-		fmt::print("TOTAL_SPACE = {}\n", (TOTAL_CHUNKS - CHUNKS) * PAGE_ALLOC_SCALE + (CHUNKS * PAGE_ALLOC_SCALE));
-		fmt::print("CHUNK_MAP_SIZE = {}\n", CHUNK_MAP_SIZE);
-		fmt::print("TOTAL_CHUNK_MAP = {}\n", TOTAL_CHUNK_MAP);
+	///
+	/// Implementation of inner operations
+	/// ISupportingInnerOperations functions
+	///
 
+	std::size_t max_bytes_inner_used() noexcept override {
+		std::scoped_lock<std::mutex> _guard{this->m_mutex};
 		std::size_t chunks = 0;
-		std::size_t in_last_page = 0;
-		std::size_t a = 0;
-		for (Position page_pos : this->m_allocator.next_allocated_page()) {
-			for (const auto &[_, bitval] : chunkbit_iter(get(page_pos))) {
+		for (Position page_pos : this->m_allocator.next_allocated_page())
+			for (const auto &[_, bitval] : chunkbit_iter(__get(page_pos)))
 				chunks += static_cast<std::size_t>(bitval);
-				in_last_page += static_cast<std::size_t>(bitval);
-				++a;
-			}
-			fmt::print("      max bytes from page @{} are {} (total = {})\n", page_pos, in_last_page * PAGE_ALLOC_SCALE, a * PAGE_ALLOC_SCALE);
-			a = 0;
-			in_last_page = 0;
-		}
 		return chunks * PAGE_ALLOC_SCALE;
 	}
 
@@ -588,6 +640,9 @@ public:
 	/// Utilizes linear probing during search.
 	/// If a valid sz value is passed, then the allocation always succeeds.
 	Position alloc_inner(std::size_t sz) override {
+		fmt::print("trying to lock\n");
+		std::scoped_lock<std::mutex> _guard{this->m_mutex};
+
 		if (sz == 0)
 			throw BadAlloc("cannot alloc_inner with size 0");
 
@@ -618,9 +673,11 @@ public:
 				marked_pages.emplace(page_pos, std::move(page));
 		};
 
+		fmt::print("locked\n");
+
 		/// Try to fill in a page that has already been started but is not yet full.
 		for (Position page_pos : this->m_allocator.next_allocated_page()) {
-			auto page = get(page_pos);
+			auto page = __get(page_pos);
 			if (page.front() != static_cast<uint8_t>(PageType::Slots)) {
 				reset();
 				continue;
@@ -639,6 +696,7 @@ public:
 			auto new_page_pos = this->m_allocator.alloc();
 			fmt::print("[Additional] inner alloc allocates page @{}\n", new_page_pos);
 			alloc_in_page(new_page, new_page_pos);
+			__place(new_page_pos, std::move(new_page));
 		}
 
 		/// We should be fine now, just assure that.
@@ -652,19 +710,23 @@ public:
 				if (chpos >= start_pos && chpos < start_pos + sz)
 					chunkbit(mp, chunk_num, true);
 			}
-			place(mppos, std::move(mp));
+			fmt::print("before place()\n");
+			__place(mppos, std::move(mp));
+			fmt::print("after place()\n");
 		}
 
+		fmt::print("getting out...\n");
 		return start_pos;
 	}
 
 	void free_inner(Position pos, std::size_t sz) override {
+		std::scoped_lock<std::mutex> _guard{this->m_mutex};
 		// The position of the page whose metadata we are currently modifying
 		auto pgpos = page_pos_of(pos);
 		auto target_chunks = round_upwards(sz, PAGE_ALLOC_SCALE);
 
 		while (target_chunks > 0) {
-			auto pg = get(pgpos);
+			auto pg = __get(pgpos);
 			for (auto [chunk_num, _] : chunkbit_iter(pg)) {
 				auto chpos = chunk_to_position(pgpos, chunk_num);
 				if (chpos < pos)
@@ -674,21 +736,22 @@ public:
 				if (--target_chunks <= 0)
 					break;
 			}
-			place(pgpos, std::move(pg));
+			__place(pgpos, std::move(pg));
 			pgpos += PAGE_SIZE;// Go to next page
 		}
 	}
 
 	std::vector<uint8_t> get_inner(Position pos, std::size_t sz) override {
+		std::scoped_lock<std::mutex> _guard{this->m_mutex};
 		std::vector<uint8_t> data;
 		data.reserve(sz);
 		auto start_pos = pos % PAGE_SIZE;
 		auto pgpos = page_pos_of(pos);
 		assert(start_pos >= PAGE_HEADER_SIZE);
 		while (sz > 0) {
-			auto page = get(pgpos);
-			if (page.front() != static_cast<uint8_t>(PageType::Slots))
-				throw BadRead(fmt::format("cannot inner read from page (@{}) without support for inner operations", pgpos));
+			auto page = __get(pgpos);
+			if (page.front() != static_cast<uint8_t>(PageType::Slots)) {}
+				// throw BadRead(fmt::format("cannot inner read from page (@{}) without support for inner operations", pgpos));
 			auto limit = std::min(sz, PAGE_SIZE - start_pos);
 			fmt::print("[pager-inner] retrieving from page @{}\n", pgpos);
 			std::copy_n(page.cbegin() + start_pos, limit, std::back_inserter(data));
@@ -701,29 +764,35 @@ public:
 	}
 
 	void place_inner(Position pos, const std::vector<uint8_t> &data) override {
+		std::scoped_lock<std::mutex> _guard{this->m_mutex};
 		auto start_pos = pos % PAGE_SIZE;
 		auto pgpos = page_pos_of(pos);
 		assert(start_pos >= PAGE_HEADER_SIZE);
 		auto cursor = 0ul;
 		while (cursor < data.size()) {
-			auto page = get(pgpos);
+			auto page = __get(pgpos);
 			if (page.front() != static_cast<uint8_t>(PageType::Slots))
 				throw BadWrite(fmt::format("cannot inner write to page (@{}) without support for inner operations", pgpos));
 			auto limit = std::min(data.size() - cursor, PAGE_SIZE - start_pos);
 			fmt::print("[pager-inner] emplacing at page @{}\n", pgpos);
 			std::copy_n(data.cbegin() + cursor, limit, page.begin() + start_pos);
-			place(pgpos, std::move(page));
+			__place(pgpos, std::move(page));
 			cursor += limit;
 			start_pos = PAGE_HEADER_SIZE;
 			pgpos += PAGE_SIZE;
 		}
 	}
 
+	///
+	/// Properties
+	///
+
 	[[nodiscard]] std::string_view identifier() const noexcept { return m_identifier; }
 
 private:
 	std::string m_identifier;
 	std::fstream m_disk;
+	mutable std::mutex m_inner_opers_mutex;
 };
 
 template<typename AllocatorPolicy = FreeListAllocator>
@@ -763,6 +832,7 @@ public:
 	/// Acquire the page, placed at a given position.
 	/// May fail if either `read` or `write` throw an error.
 	[[nodiscard]] Page get(Position pos) override {
+		std::scoped_lock<std::mutex> _guard{this->m_mutex};
 		auto p = this->m_cache.get(pos);
 
 		// InMemoryPager stores all pages in the cache.
@@ -773,6 +843,7 @@ public:
 	/// Placed a page at a given position.
 	/// May fail if `write` throws an error.
 	void place(Position pos, Page &&page) override {
+		std::scoped_lock<std::mutex> _guard{this->m_mutex};
 		if (auto evict_res = this->m_cache.place(pos, page); evict_res)
 			UNREACHABLE
 	}
