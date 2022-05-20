@@ -1,7 +1,3 @@
-<h2>
-System for Data Storing and Retrieving Based on Large Graph Processing
-</h2>
-
 <h4>Goals</h4>
 
 <p>
