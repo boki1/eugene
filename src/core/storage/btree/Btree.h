@@ -34,7 +34,6 @@
 #include <core/storage/IndirectionVector.h>
 #include <core/storage/Pager.h>
 #include <core/storage/btree/Node.h>
-#include <shared_mutex>
 #include <variant>
 
 /// Define configuration for a Btree of order m.
@@ -181,7 +180,6 @@ private:
 	///
 
 	/// 'Node safety' functions are used in order to make the tree thread-safe.
-	/// When these functions are called the node's latch is already acquired.
 	/// Node being safe means that any tree modifications created by the
 	/// rebalancing procedures will not propagate beyond the node at hand,
 	/// absorbing any changes.
@@ -374,9 +372,6 @@ private:
 		                    DuringBulkRebalancing };
 
 	Nod make_root(MakeRootAction action) {
-		/// Although this function is mainly associated with changes in the logical contents of the tree, for which btl is no associated,
-		/// there are also modifications to the tree instance, more specifically - the root position.
-		std::unique_lock<std::shared_mutex> _guard{m_btl};
 		auto new_pos = m_pager->alloc();
 		auto new_metadata = [&] {
 			if (action == MakeRootAction::BareInit)
@@ -644,7 +639,6 @@ private:
 	/// Construct a new empty tree
 	/// Initializes an empty root node leaf and calculates the appropriate value for 'm'
 	constexpr void bare() {
-		std::unique_lock<std::shared_mutex> _guard{m_btl};
 		if constexpr (Config::DYN_ENTRIES) {
 			if (!m_ind_vector.has_value())
 				m_ind_vector.emplace(fmt::format("{}-indvector", name()), IndirectionVector<Config>::ActionOnConstruction::DoNotLoad);
@@ -810,20 +804,13 @@ public:
 
 	/// Get root node of tree
 	/// Somewhat expensive operation if cache is not hot, since a disk read has to be made.
-	[[nodiscard]] Nod root() {
-		std::shared_lock<std::shared_mutex> _guard{m_btl};
-		return Nod::from_page(m_pager->get(rootpos()));
-	}
+	[[nodiscard]] Nod root() { return Nod::from_page(m_pager->get(rootpos())); }
 
 	/// Get position of root node
-	[[nodiscard]] const auto &rootpos() const noexcept {
-		std::shared_lock<std::shared_mutex> _guard{m_btl};
-		return m_rootpos;
-	}
+	[[nodiscard]] const auto &rootpos() const noexcept { return m_rootpos; }
 
 	/// Get header of tree
 	[[nodiscard]] Header header() noexcept {
-		std::shared_lock<std::shared_mutex> _guard{m_btl};
 		return Header{
 		        .magic = HEADER_MAGIC,
 		        .tree_rootpos = rootpos(),
@@ -840,57 +827,29 @@ public:
 	}
 
 	/// Get tree name
-	[[nodiscard]] std::string_view name() const {
-		std::shared_lock<std::shared_mutex> _guard{m_btl};
-		return m_identifier;
-	}
+	[[nodiscard]] std::string_view name() const { return m_identifier; }
 
 	/// Get tree size (# of items present)
-	[[nodiscard]] std::size_t size() noexcept {
-		std::shared_lock<std::shared_mutex> _guard{m_btl};
-		return m_size;
-	}
+	[[nodiscard]] std::size_t size() noexcept { return m_size; }
 
 	/// Check if the tree is empty
-	[[nodiscard]] bool empty() noexcept {
-		std::shared_lock<std::shared_mutex> _guard{m_btl};
-		return size() == 0;
-	}
+	[[nodiscard]] bool empty() noexcept { return size() == 0; }
 
 	/// Get tree depth (max level of the tree)
-	[[nodiscard]] std::size_t depth() {
-		std::shared_lock<std::shared_mutex> _guard{m_btl};
-		return m_depth;
-	}
+	[[nodiscard]] std::size_t depth() { return m_depth; }
 
 	/// Get limits of the size of leaf nodes (leaves contain [min; max] entries)
-	[[nodiscard]] long min_num_records_leaf() const noexcept {
-		std::shared_lock<std::shared_mutex> _guard{m_btl};
-		return (m_num_records_leaf + 1) / 2;
-	}
-	[[nodiscard]] long max_num_records_leaf() const noexcept {
-		std::shared_lock<std::shared_mutex> _guard{m_btl};
-		return m_num_records_leaf;
-	}
+	[[nodiscard]] long min_num_records_leaf() const noexcept { return (m_num_records_leaf + 1) / 2; }
+	[[nodiscard]] long max_num_records_leaf() const noexcept { return m_num_records_leaf; }
 
 	/// Get limits of the size of branch nodes (branch contain [min; max] entries)
-	[[nodiscard]] long min_num_records_branch() const noexcept {
-		std::shared_lock<std::shared_mutex> _guard{m_btl};
-		return (m_num_records_branch + 1) / 2;
-	}
-	[[nodiscard]] long max_num_records_branch() const noexcept {
-		std::shared_lock<std::shared_mutex> _guard{m_btl};
-		return m_num_records_branch;
-	}
+	[[nodiscard]] long min_num_records_branch() const noexcept { return (m_num_records_branch + 1) / 2; }
+	[[nodiscard]] long max_num_records_branch() const noexcept { return m_num_records_branch; }
 
 	/// Get the internal pager
-	[[nodiscard]] PagerType &pager() noexcept {
-		std::shared_lock<std::shared_mutex> _guard{m_btl};
-		return *m_pager.get();
-	}
+	[[nodiscard]] PagerType &pager() noexcept { return *m_pager.get(); }
 
 	[[nodiscard]] auto &ind_vector() {
-		std::shared_lock<std::shared_mutex> _guard{m_btl};
 		using namespace ::internal::storage;
 		if constexpr (!Config::DYN_ENTRIES)
 			throw BadIndVector(" - Not using DYN_ENTRIES option");
@@ -1117,8 +1076,6 @@ public:
 	/// Load tree metadata from storage
 	/// Reads from 'identifier' and 'identifier'-header and initializes the tree's metadata.
 	void load() {
-		std::unique_lock<std::shared_mutex> _guard{m_btl};
-
 		if constexpr (requires { m_pager->load(); }) {
 			fmt::print("[btree] loading '{}'\n", header_name());
 			Header header_;
@@ -1148,8 +1105,6 @@ public:
 	/// Store tree metadata to storage
 	/// Stores tree's metadata inside files 'identifier' and 'identifier'-header.
 	void save() {
-		std::unique_lock<std::shared_mutex> _guard{m_btl};
-
 		fmt::print("[btree] saving '{}'\n", header_name());
 		if constexpr (requires { m_pager->save(); }) {
 			nop::Serializer<nop::StreamWriter<std::ofstream>> serializer{header_name().data(), std::ios::trunc};
@@ -1195,7 +1150,6 @@ public:
 
 	/// Copy-constructor which zeroes-out statistics
 	Btree clone_only_blueprint() const noexcept {
-		std::shared_lock<std::shared_mutex> _guard{m_btl};
 		auto copy = Btree(*this);
 		copy.m_size = copy.m_depth = 0;
 		copy.bare();
@@ -1227,9 +1181,5 @@ private:
 
 	// Contains value only if the option DYN ENTRIES is used
 	std::optional<IndirectionVector<Config>> m_ind_vector;
-
-	// Big tree lock - protects only the properties of the tree on not its logical contents.
-	mutable std::shared_mutex m_btl;
-
 };
 }// namespace internal::storage::btree
