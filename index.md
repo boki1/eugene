@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="https://user-images.githubusercontent.com/36764968/169560274-bafcc010-04af-4cc4-af92-c8a103d9062b.png" />
-</p>
-
 <h2>
 System for Data Storing and Retrieving Based on Large Graph Processing
 </h2>
