@@ -13,7 +13,7 @@ option(DBMS "Dbms" OFF)
 set(LibEugeneServer_Example
         tests/UserRepository.h
         tests/ExampleStorage.h
-        ../../examples/ExampleUsageServer.cpp)
+    ../../examples/UsageServer.cpp)
 
 set(LibEugeneServer_External
         ../Logger.h
@@ -28,8 +28,7 @@ set(LibEugeneServer_External
         ../storage/btree/BtreePrinter.h)
 
 set(LibEugeneServer_SRC
-        handler/Handler.cpp
-        handler/Handler.h
+    handler/Handler.h
         detail/Credentials.h
         detail/CredentialsStorage.h
         detail/CredentialsDecoder.h
@@ -52,7 +51,7 @@ target_link_libraries(LibEugeneServer
         CONAN_PKG::cppitertools)
 
 add_executable(restserver
-        ../../examples/ExampleUsageServer.cpp
-        handler/Handler.cpp)
+    ../../examples/UsageServer.cpp
+    )
 
 target_link_libraries(restserver PRIVATE LibEugeneCore_SRC)

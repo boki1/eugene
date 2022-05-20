@@ -16,6 +16,8 @@ void on_initialize(const string_t &address) {
 	uri_builder uri(address);
 
 	auto addr = uri.to_uri().to_string();
+	auto userRepository = UserRepository();
+	auto storage = ExampleStorage();
 	g_httpHandler = std::make_unique<Handler<std::string, std::string>>(addr,
 	                                                                    UserRepository(),
 	                                                                    ExampleStorage());

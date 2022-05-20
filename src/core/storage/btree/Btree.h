@@ -40,7 +40,7 @@
 /// Used primarily in unit tests as of now, but it may come in handy in other situtations too.
 /// Simple example usage:
 ///
-/// class MyConf : Conf {
+/// class MyConfig : Config {
 ///     BTREE_OF_ORDER(3);
 /// };
 #define BTREE_OF_ORDER(m)                                        \
@@ -50,7 +50,7 @@
 namespace internal::storage::btree {
 
 namespace util {
-template<EugeneConfig Conf = Config>
+template<EugeneConfig Config = Config>
 class BtreePrinter;
 }
 
@@ -80,39 +80,39 @@ enum class ActionOnConstruction : std::uint8_t {
 enum class ActionOnKeyPresent { SubmitChange,
 	                        AbandonChange };
 
-template<EugeneConfig Conf = Config>
+template<EugeneConfig Config = Config>
 class Btree {
-	using Key = typename Conf::Key;
-	using Val = typename Conf::Val;
-	using RealVal = typename Conf::RealVal;
+	using Key = typename Config::Key;
+	using Val = typename Config::Val;
+	using RealVal = typename Config::RealVal;
 
 	// If not using dyn entries, Val and RealVal are the same type.
-	// static_assert(std::same_as<Val, RealVal> == !Conf::DYN_ENTRIES);
+//	static_assert(std::same_as<Val, RealVal> == !Config::DYN_ENTRIES);
 
-	using Ref = typename Conf::Ref;
-	using Nod = Node<Conf>;
+	using Ref = typename Config::Ref;
+	using Nod = Node<Config>;
 
-	using PagerAllocatorPolicy = typename Conf::PageAllocatorPolicy;
-	using PagerEvictionPolicy = typename Conf::PageEvictionPolicy;
-	using PagerType = typename Conf::PagerType;
+	using PagerAllocatorPolicy = typename Config::PageAllocatorPolicy;
+	using PagerEvictionPolicy = typename Config::PageEvictionPolicy;
+	using PagerType = typename Config::PagerType;
 
-	friend util::BtreePrinter<Conf>;
+	friend util::BtreePrinter<Config>;
 
-	static inline constexpr auto APPLY_COMPRESSION = Conf::APPLY_COMPRESSION;
-	static inline constexpr auto PAGE_CACHE_SIZE = Conf::PAGE_CACHE_SIZE;
-	static inline constexpr auto BRANCHING_FACTOR_LEAF = Conf::BRANCHING_FACTOR_LEAF;
-	static inline constexpr auto BRANCHING_FACTOR_BRANCH = Conf::BRANCHING_FACTOR_BRANCH;
+	static inline constexpr auto APPLY_COMPRESSION = Config::APPLY_COMPRESSION;
+	static inline constexpr auto PAGE_CACHE_SIZE = Config::PAGE_CACHE_SIZE;
+	static inline constexpr auto BRANCHING_FACTOR_LEAF = Config::BRANCHING_FACTOR_LEAF;
+	static inline constexpr auto BRANCHING_FACTOR_BRANCH = Config::BRANCHING_FACTOR_BRANCH;
 
 	static inline constexpr std::uint32_t HEADER_MAGIC = 0xB75EEA41;
 
 	/// Same configuration as the provided, but non-persistent
-	struct MemConf : Conf {
+	struct MemConfig : Config {
 		static inline constexpr bool PERSISTENT = false;
-		using PagerType = InMemoryPager<typename Conf::PageAllocatorPolicy>;
+		using PagerType = InMemoryPager<typename Config::PageAllocatorPolicy>;
 	};
 
-	using MemTree = Btree<MemConf>;
-	using MemNode = Node<MemConf>;
+	using MemTree = Btree<MemConfig>;
+	using MemNode = Node<MemConfig>;
 	friend MemTree;
 	friend MemNode;
 
@@ -168,7 +168,7 @@ public:
 	template<typename Key>
 	struct InsertionTree {
 		TreePath path;
-		Btree<Conf> tree;
+		Btree<Config> tree;
 		Key lofence;
 		Key hifence;
 		Position leaf_pos;
@@ -639,9 +639,9 @@ private:
 	/// Construct a new empty tree
 	/// Initializes an empty root node leaf and calculates the appropriate value for 'm'
 	constexpr void bare() {
-		if constexpr (Conf::DYN_ENTRIES) {
+		if constexpr (Config::DYN_ENTRIES) {
 			if (!m_ind_vector.has_value())
-				m_ind_vector.emplace(fmt::format("{}-indvector", name()), IndirectionVector<Conf>::ActionOnConstruction::DoNotLoad);
+				m_ind_vector.emplace(fmt::format("{}-indvector", name()), IndirectionVector<Config>::ActionOnConstruction::DoNotLoad);
 		}
 
 		[[maybe_unused]] auto new_root = make_root(MakeRootAction::BareInit);
@@ -675,7 +675,7 @@ private:
 	/// 'BadTreeInsert' may be thrown if an error occurs.
 	/// It gets called by both 'insert()' and 'update()'.
 
-	[[nodiscard]] InsertionReturnMark place_kv_entry(const Key &key, const RealVal &val, ActionOnKeyPresent action = ActionOnKeyPresent::AbandonChange, SplitBias split_bias = SplitBias::DistributeEvenly) {
+	[[nodiscard]] InsertionReturnMark place_kv_entry(const Key &key, const Val &val, ActionOnKeyPresent action = ActionOnKeyPresent::AbandonChange, SplitBias split_bias = SplitBias::DistributeEvenly) {
 		return place_kv_entry(Entry{.key = key, .val = val}, action, split_bias);
 	}
 
@@ -851,7 +851,7 @@ public:
 
 	[[nodiscard]] auto &ind_vector() {
 		using namespace ::internal::storage;
-		if constexpr (!Conf::DYN_ENTRIES)
+		if constexpr (!Config::DYN_ENTRIES)
 			throw BadIndVector(" - Not using DYN_ENTRIES option");
 		assert(m_ind_vector.has_value());
 		return *m_ind_vector;
@@ -862,7 +862,7 @@ public:
 	///
 
 	[[nodiscard]] RealVal get_value(Val val_or_slot) {
-		if constexpr (Conf::DYN_ENTRIES) {
+		if constexpr (Config::DYN_ENTRIES) {
 			return ind_vector().get_from_slot(val_or_slot);
 		} else {
 			static_assert(std::same_as<Val, RealVal>);
@@ -871,7 +871,7 @@ public:
 	}
 
 	[[nodiscard]] Val set_value(RealVal val) {
-		if constexpr (Conf::DYN_ENTRIES) {
+		if constexpr (Config::DYN_ENTRIES) {
 			return ind_vector().set_to_slot(val);
 		} else {
 			static_assert(std::same_as<Val, RealVal>);
@@ -945,7 +945,7 @@ public:
 
 		/// Erase element
 		node_leaf.keys.erase(node_leaf.keys.cbegin() + search_res.key_expected_pos);
-		if constexpr (Conf::DYN_ENTRIES) {
+		if constexpr (Config::DYN_ENTRIES) {
 			auto slot_id_it = node_leaf.vals.cbegin() + search_res.key_expected_pos;
 			ind_vector().remove_slot(*slot_id_it);
 		}
@@ -957,7 +957,7 @@ public:
 		--m_size;
 
 		/// Performs any rebalance operations if needed.
-		if constexpr (Conf::BTREE_RELAXED_REMOVES)
+		if constexpr (Config::BTREE_RELAXED_REMOVES)
 			rebalance_after_remove_relaxed(search_res.path);
 
 		return RemovedVal{.val = removed};
@@ -978,7 +978,7 @@ public:
 	/// If no such entry with the given key is found, 'InsertedNothing' is returned, else-
 	/// 'InsertedEntry'. An exception 'BadTreeInsert' may be thrown if an unexpected error
 	/// occurs. It contains an appropriate message describing the failure.
-	constexpr InsertionReturnMark update(const Key &key, const RealVal &val) {
+	constexpr InsertionReturnMark update(const Key &key, const Val &val) {
 		return place_kv_entry(key, val, ActionOnKeyPresent::SubmitChange);
 	}
 
@@ -1094,9 +1094,9 @@ public:
 			m_pager->load();
 		}
 
-		if constexpr (Conf::DYN_ENTRIES) {
+		if constexpr (Config::DYN_ENTRIES) {
 			if (!m_ind_vector.has_value())
-				m_ind_vector.emplace(fmt::format("{}-indvector", name()), IndirectionVector<Conf>::ActionOnConstruction::Load);
+				m_ind_vector.emplace(fmt::format("{}-indvector", name()), IndirectionVector<Config>::ActionOnConstruction::Load);
 			else
 				ind_vector().load();
 		}
@@ -1114,7 +1114,7 @@ public:
 			m_pager->save();
 		}
 
-		if constexpr (Conf::DYN_ENTRIES) {
+		if constexpr (Config::DYN_ENTRIES) {
 			ind_vector().save();
 		}
 	}
@@ -1156,19 +1156,6 @@ public:
 		return copy;
 	}
 
-	void repoint(const std::string_view sv, ActionOnConstruction action_on_construction = ActionOnConstruction::Bare) {
-		std::string str{sv};
-		m_identifier = str;
-		m_pager = std::make_shared<PagerType>(m_identifier);
-
-		using enum ActionOnConstruction;
-		switch (action_on_construction) {
-		  break; case Load: load();
-		  break; case Bare: bare();
-		  break; case InMemoryOnly: bare();
-		}
-	}
-
 	Btree &operator=(const Btree &) = default;
 	Btree &operator=(Btree &&) noexcept = default;
 
@@ -1193,6 +1180,6 @@ private:
 	std::size_t m_num_links_branch{0};
 
 	// Contains value only if the option DYN ENTRIES is used
-	std::optional<IndirectionVector<Conf>> m_ind_vector;
+	std::optional<IndirectionVector<Config>> m_ind_vector;
 };
 }// namespace internal::storage::btree

@@ -8,6 +8,8 @@
 
 class CredentialsStorage {
 public:
-	virtual bool authenticate(Credentials creds) = 0;
+	[[nodiscard]] virtual bool authenticate(Credentials creds) = 0;
 	virtual void load(Credentials creds) = 0;
+
+	virtual ~CredentialsStorage() = default;
 };

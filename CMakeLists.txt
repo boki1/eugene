@@ -35,7 +35,6 @@ set(LibEugeneCompression_SRC storage/compression/Compressor.h
         storage/compression/Decompressor.h)
 
 set(LibEugeneServer_Example
-    server/handler/Handler.cpp
     server/handler/Handler.h
     server/detail/Credentials.h
     server/detail/CredentialsStorage.h
@@ -147,6 +146,6 @@ if(DEFINED EU_BUILD_EXAMPLES)
     endmacro()
 
         eugene_example(person_kv)
-        eugene_example(ExampleUsageServer)
+        eugene_example(UsageServer)
     endif ()
 endif ()
