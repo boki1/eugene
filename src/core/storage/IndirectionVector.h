@@ -98,7 +98,7 @@ public:
 		const auto str = serializer.writer().stream().str();
 		std::vector<uint8_t> val_data{str.cbegin(), str.cend()};
 		const auto sz = val_data.size();
-#if 0
+#if 1
 		nop::Deserializer<nop::StreamReader<std::stringstream>> deserializer{str};
 		RealVal deserialized;
 		deserializer.Read(&deserialized);
@@ -111,7 +111,7 @@ public:
 		const auto pos = m_slot_pager->alloc_inner(sz);
 		fmt::print("[ind-vector] setting realval = '{}' (sz = {}, pos = {})\n", val, sz, pos);
 		m_slot_pager->place_inner(pos, val_data);
-#if 0
+#if 1
 		auto retrieved_val = m_slot_pager->get_inner(pos, val_data.size());
 		if (retrieved_val == val_data)
 			fmt::print("[ind-vector] inner retrieved matches emplaced\n");

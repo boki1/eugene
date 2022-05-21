@@ -33,37 +33,43 @@ static constexpr int Symbols = 256;
 ///    start writing the files(and folders) inside the current folder from third to seventh
 namespace decompression {
 namespace storage::detail {
-class DecompressorImpl {
+class DecompressorInternal {
 public:
-	DecompressorImpl() = default;
+	DecompressorInternal() = default;
 
-	explicit DecompressorImpl(FILE *compressed) : m_compressed(compressed) {}
+	explicit DecompressorInternal(FILE *compressed) : m_compressed(compressed) {}
 
 	/// \brief The main function of decompression class that do all the magic with provided m_files.
 	///
-	/// \param folder_name name of the folder to decompress (by default it is set to decompress all the files)
-	void operator()(std::string_view folder_name = "") {
+	/// \param for_decompress name of the folder to decompress (by default it is set to decompress all the files)
+	void operator()(std::string_view for_decompress = "") {
 		fread(&m_symbols, 1, 1, m_compressed);
 		if (m_symbols == 0)
 			m_symbols = Symbols;
 
 		m_trie_root = new huff_trie;
 		for (unsigned long i = 0; i < m_symbols; i++)
-			process_n_bits_to_string(m_trie_root);
+			trie_initialization(m_trie_root);
 
-		if (folder_name.empty()) {
-			Logger::the().log(spdlog::level::info, "Decompressor: Decompressing all files...");
-			translation("", false);
+		if (for_decompress.empty()) {
+			Logger::the([this](spdlog::logger logger){
+			  logger.log(spdlog::level::info, "Decompressor: Decompressing all files...");
+			  translation("", false);
+			});
 		} else {
-			Logger::the().log(spdlog::level::info,
-			                  R"(Decompressor: Decompressing files in file/folder: "{}")",
-			                  folder_name);
-			translation_search("", folder_name, false);
+			Logger::the([for_decompress](spdlog::logger logger){
+			  logger.log(spdlog::level::info,
+			       R"(Decompressor: Decompressing files in file/folder: "{}")",
+			       for_decompress);
+			});
+			translation_search("", for_decompress, false);
 		}
 
 		fclose(m_compressed);
 		deallocate_trie(m_trie_root);
-		Logger::the().log(spdlog::level::info, "Decompressor: Decompression is completed\n");
+		Logger::the([](spdlog::logger logger){
+			logger.log(spdlog::level::info, "Decompressor: Decompression is completed\n");
+		});
 	}
 
 	/// \brief This structure will be used to represent the trie
@@ -122,12 +128,12 @@ public:
 		return val;
 	}
 
-	/// \brief process_n_bits_to_string function reads n successive bits from the compressed file
+	/// \brief trie_initialization function reads n successive bits from the compressed file
 	/// and stores it in a leaf of the translation trie,
 	/// after creating that leaf and sometimes after creating nodes that are binding that leaf to the trie.
 	///
 	/// \param node - pointer to the trie node that is going to be created
-	void process_n_bits_to_string(huff_trie *node) {
+	void trie_initialization(huff_trie *node) {
 		char curr_char = (char) process_byte_number();
 		long len = process_byte_number();
 		if (len == 0)
@@ -247,8 +253,10 @@ public:
 
 			if (file) {
 				if (size == 0) {
-					Logger::the().log(spdlog::level::err, "Size cannot be "
-					                                      "fetched from compressed file");
+					Logger::the([](spdlog::logger logger){
+					  logger.log(spdlog::level::err, "Size cannot be "
+					                           "fetched from compressed file");
+					});
 					return;
 				}
 				translate_file(new_path, size);
@@ -283,8 +291,10 @@ public:
 			if (file) {
 				if (curr_file == for_decompress) {
 					if (size == 0) {
-						Logger::the().log(spdlog::level::err, "Size cannot be "
-						                                      "fetched from compressed file");
+						Logger::the([](spdlog::logger logger){
+						  logger.log(spdlog::level::err, "Size cannot be "
+						                           "fetched from compressed file");
+						});
 						return;
 					}
 					translate_file(new_path, size);
@@ -303,7 +313,9 @@ public:
 				translation_search(new_path, for_decompress, true);
 			}
 		}
-		Logger::the().log(spdlog::level::debug, R"(Decompressor: File "{}" skipped)", path);
+		Logger::the([path](spdlog::logger logger){
+		  logger.log(spdlog::level::debug, R"(Decompressor: File "{}" skipped)", path);
+		});
 	}
 
 private:
@@ -322,7 +334,7 @@ private:
 
 class Decompressor {
 private:
-	using pimpl = storage::detail::DecompressorImpl;
+	using pimpl = storage::detail::DecompressorInternal;
 	std::unique_ptr<pimpl> decompressor_impl;
 
 public:
@@ -333,15 +345,20 @@ public:
 		FILE *path_to_compressed;
 		path_to_compressed = fopen(path.begin(), "rb");
 		if (!path_to_compressed) {
-			Logger::the().log(spdlog::level::err, R"(Decompressor: File not found: "{}")", path);
+			Logger::the([path](spdlog::logger logger){
+				logger.log(spdlog::level::err, R"(Decompressor: File not found: "{}")", path);
+			});
 			return;
 		}
 		decompressor_impl = std::make_unique<pimpl>(path_to_compressed);
 	}
 
 	/// \brief The main function of decompression class that do all the magic with provided m_files.
-	void operator()(std::string_view folder_name = "") {
-		(*decompressor_impl)(folder_name);
+	///
+	/// \param for_decompress - if folder name is different from empty string - then partial
+	/// decompression is enabled at only the folder with name "for_decompress" will be decompressed
+	void operator()(std::string_view for_decompress = "") {
+		(*decompressor_impl)(for_decompress);
 	}
 };
 }// namespace decompression

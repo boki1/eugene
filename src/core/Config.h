@@ -32,6 +32,8 @@ struct Config {
 
 	static inline constexpr bool DYN_ENTRIES = false;
 	using RealVal = Val;
+
+	using BasicAuthConfig = std::tuple<std::string, std::string>;
 };
 
 #define EU_CONFIG(T, K, V) \

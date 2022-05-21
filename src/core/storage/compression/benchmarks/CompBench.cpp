@@ -8,8 +8,9 @@ static void BM_Compression(benchmark::State &st) {
 	for (auto _ : st) {
 		st.PauseTiming();
 		std::ofstream ofs(file_name.begin());
-		for (int j = 0; j < st.range(0); ++j)
-			ofs << "some text here \n";
+
+		ofs << generate_random_string_sequence(st.range(0));
+
 		ofs.close();
 		st.ResumeTiming();
 
@@ -24,12 +25,12 @@ static void BM_Compression(benchmark::State &st) {
 	}
 }
 
-//	67108864 for 1GB ".txt" file -> ~105 seconds
-//  65536 for 1MB ".txt" file -> ~110ms
+//	1*1024*1024*1024 for 1GB ".txt" file -> ~105 seconds
+//  1*1024*1024 for 1MB ".txt" file -> ~110ms
 //  64 for 1KB ".txt" file
 BENCHMARK(BM_Compression)
 	->Unit(benchmark::kMillisecond)
 	->Iterations(10)
-	->Arg(65536);
+	->Arg(1 * 1024 * 1024);
 
 BENCHMARK_MAIN();
