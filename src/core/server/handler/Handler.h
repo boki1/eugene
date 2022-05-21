@@ -9,8 +9,6 @@
 #include <core/server/detail/CredentialsDecoder.h>
 #include <core/server/detail/Storage.h>
 #include <core/Logger.h>
-#include <core/server/tests/UserRepository.h>
-#include <core/server/tests/ExampleStorage.h>
 
 #define TRACE(msg)            ucout << msg
 #define CHECK_ENDPOINT(path, string) \
@@ -27,10 +25,10 @@ template<typename Key, typename Value>
 class Handler {
 public:
 	explicit Handler(const utility::string_t &url,
-	                 UserRepository &&user_credentials,
-	                 ExampleStorage &&storage) : m_listener(url),
-	                                             m_user_credentials(std::make_unique<UserRepository>(user_credentials)),
-	                                             m_storage(std::make_unique<ExampleStorage>(storage)) {
+	                 CredentialsStorage &&user_credentials,
+	                 Storage<Key, Value> &&storage) : m_listener(url),
+	                                             m_user_credentials(std::make_unique<CredentialsStorage>(user_credentials)),
+	                                             m_storage(std::make_unique<Storage<Key, Value>>(storage)) {
 		m_listener.support(
 			methods::GET,
 			[this](auto &&initial_param) {
@@ -61,9 +59,9 @@ protected:
 
 private:
 	http_listener m_listener;
-	std::unique_ptr<UserRepository> m_user_credentials;
+	std::unique_ptr<CredentialsStorage> m_user_credentials;
 
-	std::unique_ptr<ExampleStorage> m_storage;
+	std::unique_ptr<Storage<Key, Value>> m_storage;
 
 	using pimpl_credentials = CredentialsDecoder;
 	std::unique_ptr<pimpl_credentials> m_credentials_decoder;

@@ -11,8 +11,6 @@ endif (UNIX)
 option(DBMS "Dbms" OFF)
 
 set(LibEugeneServer_Example
-        tests/UserRepository.h
-        tests/ExampleStorage.h
     ../../examples/UsageServer.cpp)
 
 set(LibEugeneServer_External
