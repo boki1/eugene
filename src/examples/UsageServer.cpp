@@ -2,8 +2,8 @@
 #include <memory>
 
 #include <core/server/handler/Handler.h>
-#include <core/server/tests/ExampleStorage.h>
-#include <core/server/tests/UserRepository.h>
+#include <core/server/detail/Storage.h>
+#include <core/server/detail/CredentialsStorage.h>
 
 using namespace web;
 using namespace http;
@@ -16,11 +16,9 @@ void on_initialize(const string_t &address) {
 	uri_builder uri(address);
 
 	auto addr = uri.to_uri().to_string();
-	auto userRepository = UserRepository();
-	auto storage = ExampleStorage();
 	g_httpHandler = std::make_unique<Handler<std::string, std::string>>(addr,
-	                                                                    UserRepository(),
-	                                                                    ExampleStorage());
+	                                                                    CredentialsStorage(),
+	                                                                    Storage<std::string, std::string>());
 	g_httpHandler->open().wait();
 
 	ucout << utility::string_t(U("Listening for requests at: ")) << addr << std::endl;

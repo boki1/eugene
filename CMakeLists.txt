@@ -6,14 +6,13 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/build")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_compile_options(
-  -Wall
-  -Wno-comment
-  -Wextra
-  -Werror
-  -pedantic
-  -ggdb3
-  -Wfatal-errors
-  -fdiagnostics-color)
+    -Wall
+    -Wno-comment
+    -Wextra
+    -pedantic
+    -ggdb3
+    -Wfatal-errors
+    -fdiagnostics-color)
 
 enable_testing()
 include(FetchContent)
@@ -24,24 +23,22 @@ include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup(TARGETS)
 
 set(LibEugeneBtree_SRC storage/btree/Btree.h
-        storage/btree/Btree.cpp
-        storage/btree/Node.h
-        storage/btree/BtreePrinter.h)
+    storage/btree/Btree.cpp
+    storage/btree/Node.h
+    storage/btree/BtreePrinter.h)
 
 set(LibEugenePager_SRC storage/Pager.h
-        storage/Pager.cpp)
+    storage/Pager.cpp)
 
 set(LibEugeneCompression_SRC storage/compression/Compressor.h
-        storage/compression/Decompressor.h)
+    storage/compression/Decompressor.h)
 
 set(LibEugeneServer_Example
     server/handler/Handler.h
     server/detail/Credentials.h
     server/detail/CredentialsStorage.h
     server/detail/CredentialsDecoder.h
-    server/detail/Storage.h
-    server/tests/UserRepository.h
-    server/tests/ExampleStorage.h)
+    server/detail/Storage.h)
 
 set(LibEugeneCore_SRC
     Config.h
@@ -58,18 +55,18 @@ list(TRANSFORM LibEugeneCore_SRC PREPEND "src/core/")
 add_library(LibEugeneCore "${LibEugeneCore_SRC}")
 set_target_properties(LibEugeneCore PROPERTIES LINKER_LANGUAGE CXX)
 target_include_directories(LibEugeneCore
-                           PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(
-  LibEugeneCore
-  CONAN_PKG::fmt
-  CONAN_PKG::ms-gsl
-  CONAN_PKG::catch2
-  CONAN_PKG::spdlog
-  CONAN_PKG::libnop
-  CONAN_PKG::andreasbuhr-cppcoro
-  CONAN_PKG::benchmark
-  CONAN_PKG::cpprestsdk
-  CONAN_PKG::cppitertools)
+    LibEugeneCore
+    CONAN_PKG::fmt
+    CONAN_PKG::ms-gsl
+    CONAN_PKG::catch2
+    CONAN_PKG::spdlog
+    CONAN_PKG::libnop
+    CONAN_PKG::andreasbuhr-cppcoro
+    CONAN_PKG::benchmark
+    CONAN_PKG::cpprestsdk
+    CONAN_PKG::cppitertools)
 
 if(DEFINED EU_BUILD_TESTS)
   message(STATUS "EU_BUILD_TESTS = " ${EU_BUILD_TESTS})
@@ -79,7 +76,7 @@ if(DEFINED EU_BUILD_TESTS)
       target_link_libraries(Test${component} TestMain LibEugeneCore)
       add_test(NAME Test${component} COMMAND Test${component})
       message(
-        STATUS
+          STATUS
           "\tTest about '${component}' component added from \"${path_prefix}/${component}.cpp\""
       )
     endmacro()
@@ -97,8 +94,8 @@ if(DEFINED EU_BUILD_TESTS)
     add_library(LibTestsShared src/core/storage/compression/tests/Shared.h)
     set_target_properties(LibTestsShared PROPERTIES LINKER_LANGUAGE CXX)
     target_include_directories(
-      LibTestsShared
-      PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/core/storage/compression/tests")
+        LibTestsShared
+        PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/core/storage/compression/tests")
 
     eugene_test(CompDecompTests src/core/storage/compression/tests)
     eugene_test(CompTests src/core/storage/compression/tests)
@@ -114,7 +111,7 @@ if(DEFINED EU_BUILD_BENCHMARKS)
       add_executable(${bench_name} ${path_prefix}/${bench_name}.cpp)
       target_link_libraries(${bench_name} LibEugeneCore CONAN_PKG::benchmark)
       message(
-        STATUS
+          STATUS
           "\tBenchmark about '${component}' component added from \"${path_prefix}/${bench_name}.cpp\""
       )
     endmacro()
@@ -126,8 +123,8 @@ if(DEFINED EU_BUILD_BENCHMARKS)
     add_library(LibCompShared src/core/storage/compression/benchmarks/Shared.h)
     set_target_properties(LibCompShared PROPERTIES LINKER_LANGUAGE CXX)
     target_include_directories(
-      LibCompShared
-      PUBLIC
+        LibCompShared
+        PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/src/core/storage/compression/benchmarks")
 
     eugene_bench(CompBench src/core/storage/compression/benchmarks)
@@ -139,12 +136,12 @@ if(DEFINED EU_BUILD_EXAMPLES)
   message(STATUS "EU_BUILD_EXAMPLES = " ${EU_BUILD_EXAMPLES})
   if("${EU_BUILD_EXAMPLES}" STREQUAL "yes")
     macro(eugene_example example)
-	  add_executable(${example} ${CMAKE_CURRENT_SOURCE_DIR}/src/examples/${example}.cpp)
+      add_executable(${example} ${CMAKE_CURRENT_SOURCE_DIR}/src/examples/${example}.cpp)
       target_link_libraries(${example} LibEugeneCore)
       message(STATUS "\tExample '${component}' added from \"${path_prefix}/${bench_name}.cpp\"")
     endmacro()
 
-        eugene_example(person_kv)
-        eugene_example(UsageServer)
-    endif ()
+    eugene_example(person_kv)
+    eugene_example(UsageServer)
+  endif ()
 endif ()
