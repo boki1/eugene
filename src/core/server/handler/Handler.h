@@ -95,7 +95,26 @@ private:
 					  if (!jvalue.is_null()) {
 						  action(jvalue, answer);
 					  }
-				  } catch (http_exception const &e) {
+
+					  Logger::the([request_type = request.method(), path = request.relative_uri().path()]
+						              (spdlog::logger logger) {
+						logger.log(spdlog::level::info,
+						           fmt::runtime(R"(Backend "{0}" success of "{1}")"),
+						           request_type, path);
+					  });
+					  request.reply(status_codes::OK, answer);
+					  return;
+				  }
+				  catch (std::invalid_argument const &e) {
+					  Logger::the([request_type = request.method(), ex = e.what()](spdlog::logger logger) {
+						logger.log(spdlog::level::info,
+						           fmt::runtime(R"(Backend "{0}" failure: "{1}")"),
+						           request_type, ex);
+					  });
+					  request.reply(status_codes::NoContent);
+					  return;
+				  }
+				  catch (http_exception const &e) {
 					  ucout << e.what() << std::endl;
 					  Logger::the([request_type = request.method(), path = request.relative_uri().path(), ex = e.what()]
 						              (spdlog::logger logger) {
@@ -109,13 +128,6 @@ private:
 				  }
 				})
 				.wait();
-
-			Logger::the([request_type = request.method(), path](spdlog::logger logger) {
-			  logger.log(spdlog::level::info,
-			             fmt::runtime(R"(Backend "{0}" success of "{1}")"),
-			             request_type, path);
-			});
-			request.reply(status_codes::OK, answer);
 			return;
 		}
 		try {
@@ -152,25 +164,19 @@ private:
 		TRACE("\nhandle GET\n");
 
 		//	json send something like
-		//	[obj1, obj2]
+		//	{
+		//		<key for indexing>",
+		//		<key for indexing>",
+		//		...
+		//	}
 		auto path = request.relative_uri().path();
 		handle_request(
 			"/eugene",
 			request,
 			[this, request](json::value const &jvalue, json::value &answer) {
 			  for (auto const &key : jvalue.as_array()) {
-				  try {
-					  answer[key.as_string()] = json::value::string(
-						  this->m_storage->get(key.as_string()));
-				  } catch (std::invalid_argument const &e) {
-					  Logger::the([request_type = request.method(), key = key.as_string()](spdlog::logger logger) {
-						logger.log(spdlog::level::info,
-						           fmt::runtime(R"(Backend "{0}" failure "{1}" can't get value)"),
-						           request_type, key);
-					  });
-					  request.reply(status_codes::NoContent);
-					  return;
-				  }
+				  answer[key.as_string()] = json::value::string(
+					  this->m_storage->get(key.as_string()));
 			  }
 			});
 	}
@@ -181,23 +187,12 @@ private:
 		handle_request(
 			"/eugene",
 			request,
-			[this, request](json::value const &jvalue, json::value &) {
+			[this](json::value const &jvalue, json::value &) {
 			  for (auto const &pair : jvalue.as_object()) {
 				  auto key = pair.first;
 				  auto value = pair.second;
 
-				  try {
-					  this->m_storage->set(key, value.as_string());
-				  }
-				  catch (std::invalid_argument const &e) {
-					  Logger::the([request_type = request.method(), key](spdlog::logger logger) {
-						logger.log(spdlog::level::info,
-						           fmt::runtime(R"(Backend "{0}" failure "{1}" already exists)"),
-						           request_type, key);
-					  });
-					  request.reply(status_codes::NoContent);
-					  return;
-				  }
+				  this->m_storage->set(key, value.as_string());
 			  }
 			});
 	}
@@ -246,19 +241,9 @@ private:
 		handle_request(
 			"/eugene",
 			request,
-			[this, request](json::value const &jvalue, json::value &) {
+			[this](json::value const &jvalue, json::value &) {
 			  for (auto const &key : jvalue.as_array()) {
-				  try {
-					  this->m_storage->remove(key.as_string());
-				  } catch (std::invalid_argument const &e) {
-					  Logger::the([request_type = request.method(), key = key.as_string()](spdlog::logger logger) {
-					    logger.log(spdlog::level::info,
-					               fmt::runtime(R"(Backend "{0}" failure "{1}" can't delete value)"),
-					               request_type, key);
-					  });
-					  request.reply(status_codes::Conflict);
-					  return;
-				  }
+				  this->m_storage->remove(key.as_string());
 			  }
 			});
 	}

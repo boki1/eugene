@@ -38,7 +38,7 @@ public:
 		throw std::invalid_argument("Can't find such key");
 	}
 
-	void remove(std::string key) override {
+	void remove(std::string) override {
 //		if (auto res = m_storage.remove(key);
 //			std::holds_alternative<typename BtreeType::RemovedNothing>(res)) {
 //			throw std::invalid_argument("Can't find such key");
