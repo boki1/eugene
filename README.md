@@ -5,7 +5,7 @@
   <img src="https://user-images.githubusercontent.com/36764968/169560274-bafcc010-04af-4cc4-af92-c8a103d9062b.png" />
 </p>
 
-<a href="boki1.github.io/eugene">Home page</a>
+[Home](https://boki1.github.io/eugene/)
 
 <h2>
 System for Data Storing and Retrieving Based on Large Graph Processing
