@@ -15,6 +15,7 @@ System for Data Storing and Retrieving Based on Large Graph Processing
 
 <p>
   This system is developed as a thesis project in TUES.
+  Thesis defense presentation may be found in <a href="https://github.com/boki1/eugene-slides">another repo</a>.
 </p>
 
 ### Features
