@@ -27,7 +27,7 @@ System for Data Storing and Retrieving Based on Large Graph Processing
 
 ## Docs
 
-- About storage engine: [link](https://drive.google.com/file/d/1zT56mOAl3wQGoWHtyldhNyxYcsKTWsuJ/view?usp=sharing)
+- About storage engine: [link](https://drive.google.com/file/d/15jPd7-dYasdh8ZKRDnrNcJCpE7agZUw9/view?usp=sharing)
 - About server and compression: [link](https://drive.google.com/file/d/1Yq7Ax58-CievKgJf__unERXR0vCGH8Ps/view?usp=sharing)
 
 
