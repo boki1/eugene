@@ -21,7 +21,7 @@ jobs:
             echo "EU_CONAN_PROFILE=.github/eu_conan_profile.toml" >> $GITHUB_ENV
             sudo apt update
             sudo apt install gcc-11 g++-11 ninja-build
-            pip3 install conan --upgrade
+			pip3 install --force-reinstall -v "conan==1.60.1"
             CXX=g++-11 CC=gcc-11 make dep-setup
       - name: Configure
         shell: bash
